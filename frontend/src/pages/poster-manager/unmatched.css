@@ -1,0 +1,1782 @@
+/* Unmatched Assets tab: summaries, grid, list modals, TMDB candidates, ignore list, match report, claims.
+   The poster-manager sheets load in a fixed order (see App.tsx). */
+
+.stat-value.success {
+  color: var(--color-success-soft);
+}
+
+.stat-value.warning {
+  color: var(--color-warning-strong);
+}
+
+.library-badge.badge-movie {
+  background: var(--color-slate-deep);
+  color: var(--color-accent);
+  border-color: var(--color-button-primary);
+}
+
+.library-badge.badge-series {
+  background: rgba(var(--rgb-success), 0.15);
+  color: var(--color-success-soft);
+  border-color: var(--color-success);
+}
+
+.unmatched-item.drive-usage-item {
+  flex-direction: row;
+  /* Center the text against the thumb so single-line cards read tight, not top-heavy. */
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-6) var(--sp-8);
+}
+
+/* Logos | Backdrops | Square Art selector — sits inline in the Unmatched Artwork toolbar */
+
+.artwork-type-selector {
+  display: flex;
+  gap: var(--sp-8);
+  margin: 0 0 0 var(--sp-8);
+  flex-wrap: wrap;
+}
+
+/* Asset-type switches on their own row under the Unmatched toolbar, left-justified. */
+
+.unmatched-type-row {
+  display: flex;
+  justify-content: flex-start;
+  margin: 0 0 var(--card-gap);
+}
+
+.unmatched-type-row .artwork-type-selector {
+  margin: 0;
+}
+
+/* Appearance comes from the shared subtab style (Subtabs.css); keep only the
+   uniform per-group width so the asset-type switches read as one set. */
+
+.artwork-type-selector button,
+.priority-scope-toggle button,
+.plex-upload-scope-toggle button {
+  padding: var(--sp-6) var(--sp-16);
+  min-width: 120px;
+  text-align: center;
+}
+
+/* Detection Settings sits at the end of the row: its own button, sized to its label
+   and set slightly apart since it's a different kind of destination. */
+
+.artwork-type-selector button.type-selector-settings {
+  min-width: 0;
+  margin-left: var(--sp-12);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.empty-message {
+  text-align: center;
+  color: var(--color-text-disabled);
+}
+
+.empty-message p {
+  margin-top: var(--sp-8);
+  font-size: var(--text-base);
+}
+
+.unmatched-stats-section .last-run {
+  color: var(--color-text-dim);
+  font-size: var(--text-md);
+  margin: 0;
+}
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-16);
+}
+
+.coverage-bar {
+  height: 8px;
+  background-color: var(--color-slate-deep);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: var(--sp-12);
+}
+
+.coverage-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent-deep) 0%, var(--color-accent-deep-hover) 100%);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+
+/* Library breakdown styling */
+
+.library-breakdown {
+  margin-top: var(--sp-12);
+  padding-top: var(--sp-12);
+  border-top: 1px solid var(--color-slate);
+}
+
+/* Unmatched / Poster Style list modals: fixed height so the modal doesn't
+   shrink when fewer items are listed; the list scrolls while the search bar
+   and sort controls stay pinned at the top. */
+
+.modal-content.list-items-modal {
+  height: 80vh;
+}
+
+.list-items-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.list-items-modal .unmatched-list {
+  flex: 1;
+  /* Floor so the modal body scrolls instead of crushing the list on short windows. */
+  min-height: 12rem;
+  overflow-y: auto;
+  padding-right: var(--sp-8);
+}
+
+/* Keep rows at their natural height and scroll instead of letting the flex
+   column squash them down to their borders. */
+
+.list-items-modal .unmatched-list > * {
+  flex-shrink: 0;
+}
+
+/* Let footer buttons wrap on narrow screens instead of overflowing and pushing
+   the Close button off-screen. */
+
+.list-items-modal .modal-footer,
+.create-list-modal .modal-footer {
+  flex-wrap: wrap;
+}
+
+.unmatched-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.list-count {
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+  margin-bottom: var(--sp-8);
+  padding-bottom: var(--sp-12);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* --- Unmatched modal: search bar --- */
+
+.unmatched-search-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-16);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-8) var(--sp-12);
+}
+
+.unmatched-search-bar:focus-within {
+  border-color: var(--color-accent);
+}
+
+.search-bar-icon {
+  color: var(--color-text-faint);
+  flex-shrink: 0;
+}
+
+.unmatched-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-size: var(--text-md);
+}
+
+.unmatched-search-bar input:not([type='checkbox']) {
+  width: auto;
+  flex: 1;
+  padding: var(--sp-2) 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+/* --- Modal sort/group controls --- */
+
+.sort-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  margin-bottom: var(--sp-16);
+}
+
+.sort-group-pills {
+  display: inline-flex;
+  gap: var(--sp-4);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-4);
+}
+
+.sort-pill {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  padding: var(--sp-4) var(--sp-12);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.sort-pill:hover {
+  color: var(--color-text);
+}
+
+.sort-pill.active {
+  background-color: var(--color-button-primary);
+  color: var(--color-text);
+}
+
+.sort-field-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.sort-label {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
+
+/* Scoped with .sort-controls to outrank the generic `.modal-body select` rule
+   (which forces width:100% and padding:0.75rem and would otherwise win). */
+
+.sort-controls .sort-select {
+  font-size: var(--text-md);
+  /* Custom rendering so the box can be shorter without the native min-height
+     clipping the selected value; chevron is drawn as a background image. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: auto;
+  /* Vertical padding sizes the box to ~match the sort buttons and keeps the
+     selected value vertically centered (a fixed height on a native select
+     leaves the value sitting low/clipped). */
+  padding: var(--sp-4) var(--sp-24) var(--sp-4) var(--sp-8);
+  line-height: 1.2;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23cccccc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 0.7rem;
+}
+
+.sort-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.sort-dir-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  padding: var(--sp-6);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.sort-dir-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+/* --- Unmatched item with TMDB expansion --- */
+
+.unmatched-item-with-tmdb {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+}
+
+.unmatched-item-with-tmdb .unmatched-item {
+  border: none;
+  border-radius: 0;
+  justify-content: space-between;
+}
+
+.unmatched-item-with-tmdb.expanded .unmatched-item {
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.unmatched-item-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: 1;
+  /* Keep a real minimum so the title stays readable; when the row can't fit
+     this plus the action buttons, the buttons wrap to the next line instead
+     of the title getting squeezed to nothing. */
+  min-width: 11rem;
+  overflow: hidden;
+}
+
+.unmatched-item-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.unmatched-item-meta .item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unmatched-item-meta .item-sort-date {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.unmatched-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-12);
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  transition: all 0.2s;
+}
+
+.unmatched-item-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  justify-content: space-between;
+  /* Let the action buttons drop below the title on narrow rows. */
+  flex-wrap: wrap;
+}
+
+.unmatched-seasons-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4) var(--sp-6);
+}
+
+.unmatched-item:hover {
+  background-color: var(--color-border);
+  border-color: var(--color-accent);
+}
+
+.unmatched-item-group {
+  padding: var(--sp-12);
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+}
+
+.item-title {
+  color: var(--color-text-body);
+  font-weight: 500;
+}
+
+.item-year {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+}
+
+.missing-seasons {
+  color: var(--color-danger-soft);
+  font-size: var(--text-md);
+  padding: var(--sp-8);
+  background-color: rgba(var(--rgb-danger), 0.1);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-danger-soft);
+}
+
+.item-seasons-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-12) var(--sp-8);
+}
+
+/* --- TMDB search button on unmatched items --- */
+
+.tmdb-search-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tmdb-search-btn.active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-slate-deep);
+}
+
+/* --- Maker Tools navigation button (opens item search in Maker Tools page) ---
+   Also worn by the Google/TPDB item-bar links — new-tab actions share this look. */
+
+.maker-nav-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* --- TMDB candidates panel --- */
+
+.tmdb-candidates-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-sunken);
+  padding: var(--sp-12);
+  gap: var(--sp-8);
+}
+
+.tmdb-candidates-loading,
+.tmdb-candidates-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+  padding: var(--sp-8) 0;
+}
+
+.tmdb-candidates-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  color: var(--color-warning-strong);
+  font-size: var(--text-md);
+  padding: var(--sp-8) var(--sp-12);
+  background-color: rgba(var(--rgb-warning-strong), 0.08);
+  border: 1px solid rgba(var(--rgb-warning-strong), 0.4);
+  border-radius: var(--radius-md);
+}
+
+.tmdb-candidate-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-12);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-12);
+  min-height: 72px;
+}
+
+.tmdb-candidate-item:hover {
+  border-color: var(--color-button-primary);
+}
+
+.tmdb-candidate-poster-btn {
+  display: block;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+  flex-shrink: 0;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tmdb-candidate-poster-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+.tmdb-candidate-poster {
+  width: 44px;
+  height: 66px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  background: var(--color-surface-raised);
+  display: block;
+}
+
+.tmdb-candidate-poster--empty {
+  background: var(--color-surface-raised);
+  border: 1px dashed var(--color-border-strong);
+}
+
+.tmdb-poster-preview-overlay {
+  z-index: var(--z-modal-2);
+}
+
+.tmdb-poster-preview-modal {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  width: auto;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  padding: 0;
+}
+
+.tmdb-poster-preview-image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-page-bg);
+}
+
+.tmdb-candidate-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  justify-content: center;
+}
+
+.tmdb-candidate-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+
+.candidate-title {
+  color: var(--color-text-body);
+  font-weight: 500;
+  font-size: var(--text-md);
+}
+
+.candidate-year {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+}
+
+.tmdb-type-badge {
+  font-size: var(--text-2xs);
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tmdb-type-badge--movie {
+  background: rgba(var(--rgb-accent), 0.15);
+  color: var(--color-accent);
+  border: 1px solid rgba(var(--rgb-accent), 0.3);
+}
+
+.tmdb-type-badge--show {
+  background: rgba(var(--rgb-success), 0.15);
+  color: var(--color-success-soft);
+  border: 1px solid rgba(var(--rgb-success), 0.3);
+}
+
+.tmdb-type-badge--collection {
+  background: rgba(var(--rgb-warning), 0.15);
+  color: var(--color-warning);
+  border: 1px solid rgba(var(--rgb-warning), 0.3);
+}
+
+.tmdb-type-badge--season {
+  background: rgba(var(--rgb-warning), 0.15);
+  color: var(--color-warning);
+  border: 1px solid rgba(var(--rgb-warning), 0.3);
+}
+
+/* Candidate resolved directly from a carried *arr id (exact match) */
+
+.tmdb-candidate-item--matched {
+  border-color: var(--color-success);
+  background: rgba(var(--rgb-success), 0.08);
+}
+
+.tmdb-candidate-item--matched:hover {
+  border-color: var(--color-success);
+}
+
+.tmdb-matched-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--text-2xs);
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: rgba(var(--rgb-success), 0.18);
+  color: var(--color-success-soft);
+  border: 1px solid rgba(var(--rgb-success), 0.4);
+}
+
+.tmdb-candidate-link-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 550px) {
+  .tmdb-candidate-link-row {
+    flex-wrap: wrap;
+  }
+
+  .tmdb-candidate-link-row .tmdb-link-text {
+    width: 100%;
+    flex: none;
+  }
+}
+
+.unmatched-cat-badge {
+  font-size: var(--text-3xs);
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.unmatched-cat-badge--movie {
+  background: rgba(var(--rgb-accent), 0.15);
+  color: var(--color-accent);
+  border: 1px solid rgba(var(--rgb-accent), 0.3);
+}
+
+.unmatched-cat-badge--series {
+  background: rgba(var(--rgb-success), 0.15);
+  color: var(--color-success-soft);
+  border: 1px solid rgba(var(--rgb-success), 0.3);
+}
+
+.unmatched-cat-badge--season {
+  background: rgba(var(--rgb-purple), 0.15);
+  color: var(--color-purple);
+  border: 1px solid rgba(var(--rgb-purple), 0.3);
+}
+
+.unmatched-cat-badge--attention {
+  background: rgba(var(--rgb-warning), 0.15);
+  color: var(--color-warning);
+  border: 1px solid rgba(var(--rgb-warning), 0.35);
+  cursor: help;
+}
+
+/* Purple, matching the collection color on Community Requests. */
+
+.unmatched-cat-badge--collection {
+  background: rgba(var(--rgb-purple), 0.15);
+  color: var(--color-purple);
+  border: 1px solid rgba(var(--rgb-purple), 0.3);
+}
+
+/* Artwork slot badges (logo/background/square) — the artwork amber used app-wide. */
+
+.unmatched-cat-badge--artwork {
+  background: rgba(var(--rgb-warning), 0.15);
+  color: var(--color-warning);
+  border: 1px solid rgba(var(--rgb-warning), 0.35);
+}
+
+.tmdb-link-text {
+  color: var(--color-accent-hover);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.tmdb-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-8);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+
+.tmdb-icon-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.unmatched-summary-compact .last-run {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+  margin: 0;
+}
+
+.unmatched-summary-compact .stat-value {
+  font-size: var(--text-4xl);
+  font-weight: 600;
+  color: var(--color-text-body);
+}
+
+.unmatched-summary-compact .stat-label {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+  margin-top: var(--sp-4);
+}
+
+/* Unmatched Tab Content */
+
+.unmatched-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-32);
+}
+
+.unmatched-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-32);
+  margin-bottom: var(--sp-16);
+}
+
+.unmatched-header h2 {
+  margin: 0 0 var(--sp-8) 0;
+  color: var(--color-title);
+}
+
+.unmatched-header p {
+  margin: var(--sp-4) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+}
+
+.unmatched-header .last-run {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+}
+
+.unmatched-summary-box .divider {
+  color: var(--color-text-disabled);
+}
+
+.unmatched-summary-box .missing {
+  color: var(--color-danger-soft);
+  font-weight: 600;
+}
+
+.unmatched-summary-box .complete {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+/* Unmatched Grid */
+
+.unmatched-grid {
+  display: grid;
+  /* auto-fit (not auto-fill) collapses unused tracks, so however many cards a type has
+     — 4 for posters, 3 for artwork (no seasons) — they stretch to fill the row instead
+     of leaving a hole on the right. The 260px floor keeps columns equal and stops a long
+     title from widening its own track; below 1300px the breakpoints take over. */
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--card-gap);
+}
+
+.unmatched-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.unmatched-card .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-8);
+  /* Reserve room for a two-line title (e.g. "Series (Main Posters)") so every
+     card's header is the same height and the rows below stay aligned as the
+     columns shrink. */
+  min-height: 3rem;
+  padding-bottom: var(--sp-8);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.unmatched-card .card-header h3 {
+  margin: 0;
+  color: var(--color-title);
+  font-size: var(--text-base);
+}
+
+.unmatched-card .badge {
+  letter-spacing: 0.02em;
+  /* Keep the count pill on one line and let the title wrap instead. */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.unmatched-card .badge-warning {
+  background-color: rgba(var(--rgb-danger), 0.1);
+  color: var(--color-text-body);
+  border: 1px solid rgba(var(--rgb-danger), 0.28);
+}
+
+.unmatched-card .badge-success {
+  background-color: rgba(var(--rgb-success), 0.14);
+  color: var(--color-text-body);
+  border: 1px solid rgba(var(--rgb-success), 0.32);
+}
+
+.unmatched-card .card-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.unmatched-card .stat-row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+}
+
+.unmatched-card .stat-row span:last-child {
+  color: var(--color-text-body);
+  font-weight: 500;
+}
+
+.unmatched-card .progress-bar {
+  height: 6px;
+  background-color: var(--color-slate-deep);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-top: var(--sp-4);
+}
+
+.unmatched-card .progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent-deep), var(--color-success));
+  transition: width 0.3s ease;
+}
+
+.unmatched-card .progress-label {
+  text-align: center;
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+  margin-top: var(--sp-4);
+}
+
+.unmatched-card .card-list {
+  margin-top: var(--sp-4);
+  flex: 1;
+  /* Fits the 5-item preview cap + the "+N more" line + sticky header without a
+     scrollbar; taller content (e.g. multi-line season rows) still scrolls. */
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: var(--sp-8);
+}
+
+.unmatched-card .list-header {
+  font-size: var(--text-md);
+  color: var(--color-text-faint);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  /* Stay pinned at the top of the scrolling list instead of scrolling away. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--color-surface);
+  padding-bottom: var(--sp-8);
+}
+
+.unmatched-card .list-item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-6) var(--sp-8);
+  padding: var(--sp-8);
+  background-color: var(--color-slate-deep);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--sp-8);
+  font-size: var(--text-md);
+}
+
+.unmatched-card .list-item-main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.unmatched-card .list-item-main > span:first-child {
+  color: var(--color-text-body);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.unmatched-card .item-year {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+
+.unmatched-card .item-instance {
+  color: var(--color-accent-deep);
+  font-size: var(--text-xs);
+  padding: var(--sp-2) var(--sp-8);
+  background-color: rgba(var(--rgb-accent-deep), 0.15);
+  border-radius: var(--radius-md);
+  min-width: 2.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Badge cluster (M, claim, instance) */
+
+.unmatched-card .list-item-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.unmatched-card .list-item-badges > :not(.item-instance) {
+  flex-shrink: 0;
+}
+
+.unmatched-card .list-item-group {
+  padding: var(--sp-6);
+  background-color: var(--color-slate-deep);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--sp-4);
+}
+
+.unmatched-card .list-item-title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-4);
+}
+
+.unmatched-card .list-item-title-main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.unmatched-card .list-item-title-main > span:first-child {
+  color: var(--color-text-body);
+  font-weight: 500;
+  font-size: var(--text-md);
+  min-width: 0;
+}
+
+.unmatched-card .missing-seasons-list {
+  color: var(--color-danger-soft);
+  font-size: var(--text-xs);
+  padding: var(--sp-2) var(--sp-6);
+  line-height: 1.1;
+  background-color: rgba(var(--rgb-danger), 0.1);
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--color-danger-soft);
+  margin-bottom: 0;
+  display: inline-block;
+}
+
+.unmatched-card .list-more {
+  text-align: center;
+  padding: var(--sp-8);
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+  font-style: italic;
+}
+
+.card-view-all-btn {
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+/* Empty state */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-64) var(--sp-32);
+  color: var(--color-text-faint);
+  text-align: center;
+}
+
+.empty-state svg {
+  margin-bottom: var(--sp-16);
+  color: var(--color-text-disabled);
+}
+
+.empty-state h3 {
+  color: var(--color-text-muted);
+  margin-bottom: var(--sp-8);
+}
+
+.empty-state p {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+}
+
+/* Responsive breakpoints for unmatched grid */
+
+@media (max-width: 1400px) {
+  .unmatched-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .unmatched-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .unmatched-header {
+    flex-direction: column;
+    gap: var(--sp-16);
+  }
+
+  .unmatched-summary-box {
+    width: 100%;
+  }
+}
+
+.unmatched-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-12);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+}
+
+.unmatched-summary .divider {
+  color: var(--color-text-disabled);
+}
+
+.unmatched-summary .missing {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.unmatched-summary .complete {
+  color: var(--color-success-soft);
+  font-weight: 600;
+}
+
+/* Library Selection within Settings Section - matches Settings tab dark style */
+
+.empty-config {
+  margin-top: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  max-width: 480px;
+  color: var(--color-warning);
+  background: rgba(var(--rgb-warning), 0.08);
+  border: 1px solid rgba(var(--rgb-warning), 0.35);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+}
+
+.empty-config p {
+  margin: 0;
+}
+
+.library-badge {
+  color: var(--color-text-body);
+  text-transform: capitalize;
+  background: var(--tint);
+  border: 1px solid var(--hairline);
+  margin-left: auto;
+}
+
+.empty-state {
+  background: var(--color-surface-sunken);
+  padding: var(--sp-16);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  text-align: center;
+}
+
+/* ── Community Request button (item row) ──────────────────────────────── */
+
+/* Request from the community: orange, the same color as the request card's Request action. */
+.community-request-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(var(--rgb-warning), 0.4);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-warning);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+.community-request-btn:hover {
+  border-color: var(--color-warning);
+  background: rgba(var(--rgb-warning), 0.1);
+  color: var(--color-warning-soft);
+}
+
+/* ── Match report (file-question) button (unmatched item row) ─────────── */
+
+.match-report-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4) var(--sp-6);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.match-report-btn:hover {
+  border-color: var(--color-accent);
+  background: rgba(var(--rgb-accent), 0.1);
+  color: var(--color-accent);
+}
+
+/* ── Match report popup ───────────────────────────────────────────────── */
+
+.match-report-overlay {
+  z-index: var(--z-modal-2); /* sits above the unmatched items modal */
+}
+
+.match-report-modal {
+  max-width: 640px;
+}
+
+.match-report-loading,
+.match-report-error {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-20) var(--sp-4);
+  color: var(--color-text-muted);
+}
+
+.match-report-error {
+  color: var(--color-danger-text);
+}
+
+.match-report-section {
+  margin-bottom: var(--sp-16);
+}
+
+.match-report-section h4 {
+  margin: 0 0 var(--sp-6);
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.match-report-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-6);
+  font-size: var(--text-md);
+  line-height: 1.35;
+}
+
+.match-report-verdict svg {
+  flex-shrink: 0;
+  margin-top: var(--sp-2);
+}
+
+.match-report-verdict--problem { color: var(--color-danger-text); }
+
+.match-report-verdict--ok { color: var(--color-success-text); }
+
+.match-report-verdict--info { color: var(--color-text-muted); }
+
+.match-report-mono {
+  font-family: monospace;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.match-report-file {
+  padding-left: var(--sp-20);
+}
+
+.match-report-muted {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
+
+.match-report-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.match-report-table td {
+  padding: var(--sp-2) var(--sp-8) var(--sp-2) 0;
+  vertical-align: top;
+  font-size: var(--text-sm);
+}
+
+.match-report-table td:first-child {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* Source labels can be long merged instance names ("plex (Movies) &
+   jellyfin (Movies)") — cap and wrap them so the value column keeps room */
+
+.match-report-table .mr-source-label {
+  display: block;
+  max-width: 13rem;
+  white-space: normal;
+}
+
+.match-report-candidate {
+  margin-bottom: var(--sp-8);
+}
+
+.match-report-candidate-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.match-report-candidate-title {
+  font-size: var(--text-md);
+  color: var(--color-text-body);
+}
+
+.match-report-drive-badge {
+  font-size: var(--text-2xs);
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--rgb-accent), 0.12);
+  color: var(--color-accent);
+}
+
+.mr-ok { color: var(--color-success-text); flex-shrink: 0; }
+
+.mr-problem { color: var(--color-danger-text); flex-shrink: 0; }
+
+/* Id tags color-coded by kind, so agreeing/disagreeing ids align visually across rows. */
+
+.mr-id { margin-right: var(--sp-8); }
+
+.mr-id--tmdb { color: var(--color-teal); }
+
+/* teal */
+
+.mr-id--tvdb { color: var(--color-purple); }
+
+/* violet */
+
+.mr-id--imdb { color: var(--color-warning-soft); }
+
+/* gold */
+
+.match-report-footnote {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--sp-8);
+}
+
+.match-report-footnote--top {
+  border-top: none;
+  border-bottom: 1px solid var(--hairline);
+  padding-top: 0;
+  padding-bottom: var(--sp-8);
+  margin-bottom: var(--sp-12);
+}
+
+/* ── Ignore (eye-off) button (unmatched item row) ─────────────────────── */
+
+.ignore-item-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4) var(--sp-6);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.ignore-item-btn:hover:not(:disabled) {
+  border-color: var(--color-danger-text);
+  background: rgba(var(--rgb-danger), 0.1);
+  color: var(--color-danger-text);
+}
+
+.ignore-item-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── Ignored Items list (Unmatched → Detection Settings) ──────────────── */
+
+.unmatched-ignore-list {
+  margin-top: var(--sp-16);
+}
+
+.unmatched-ignore-list > label {
+  color: var(--color-text);
+}
+
+.unmatched-ignore-list > small {
+  display: block;
+  margin-top: var(--sp-4);
+  color: var(--color-text-faint);
+}
+
+.unmatched-ignore-empty {
+  margin-top: var(--sp-8);
+  font-size: var(--text-md);
+  color: var(--color-text-faint);
+}
+
+.unmatched-ignore-rows {
+  margin-top: var(--sp-8);
+  /* Two-wide grid: items fill left-to-right then down, and reflow back up/left
+     on removal. minmax(0, …) lets long titles ellipsis instead of widening cells. */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  /* 5 fixed-height rows + their gaps, then the list scrolls */
+  max-height: calc(5 * 2rem + 4 * 0.3rem);
+  overflow-y: auto;
+}
+
+.unmatched-ignore-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  height: 2rem;
+  padding: 0 var(--sp-8);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+  color: var(--color-text-body);
+}
+
+.unmatched-ignore-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unmatched-ignore-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: var(--sp-4) var(--sp-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.unmatched-ignore-remove:hover:not(:disabled) {
+  background: rgba(var(--rgb-danger), 0.12);
+  color: var(--color-danger-text);
+}
+
+/* Manual entry row below the ignore list (type + title + optional year + Add).
+   The shared .field-group rules set inputs/selects to width:100%; pin each control
+   back to its flex size here or the row overflows the card. */
+
+.unmatched-ignore-add {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-top: var(--sp-8);
+  min-width: 0;
+}
+
+.unmatched-ignore-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-12);
+  border: 1px solid rgba(var(--rgb-accent), 0.4);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.unmatched-ignore-add-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: rgba(var(--rgb-accent), 0.1);
+}
+
+.unmatched-ignore-add-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.unmatched-ignore-list > small:last-child {
+  display: block;
+  margin-top: var(--sp-6);
+  color: var(--color-text-faint);
+}
+
+/* Cross-asset-type warning under the Ignored Items heading */
+
+.unmatched-ignore-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-6);
+  margin-top: var(--sp-6);
+  font-size: var(--text-sm);
+  color: var(--color-warning);
+}
+
+.unmatched-ignore-warning svg {
+  flex-shrink: 0;
+  margin-top: var(--sp-2);
+}
+
+.tmdb-type-badge--person {
+  background: rgba(var(--rgb-purple), 0.15);
+  color: var(--color-purple);
+  border: 1px solid rgba(var(--rgb-purple), 0.3);
+}
+
+/* Community claim/fulfillment checks on unmatched + poster-style items — one
+   per poster style. Color carries the meaning (tooltip spells it out):
+   blue = made in CL2K, green = made in MM2K, gray = made in unknown style,
+   amber = claimed/being worked on. 16px squares matching the M badge. */
+
+.community-claim-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  cursor: help;
+}
+
+.community-claim-in-progress {
+  background: rgba(var(--rgb-warning), 0.14);
+  color: var(--color-warning);
+}
+
+/* Claimed stays amber for both styles; the border says which one (border-box,
+   so the 16px square doesn't grow). Unknown-style claims stay borderless. */
+
+.community-claim-in-progress.community-claim-cl2k {
+  border: 1px solid rgba(var(--rgb-accent), 0.55);
+}
+
+.community-claim-in-progress.community-claim-mm2k {
+  border: 1px solid rgba(var(--rgb-success), 0.55);
+}
+
+.community-claim-fulfilled {
+  background: rgba(var(--rgb-success), 0.14);
+  color: var(--color-success-soft);
+}
+
+/* Done in CL2K = blue, matching the drive/style badges (MM2K keeps the green). */
+
+.community-claim-fulfilled.community-claim-cl2k {
+  background: rgba(var(--rgb-accent), 0.16);
+  color: var(--color-accent);
+}
+
+/* Style-unknown legacy fulfillments: neutral gray so green stays "MM2K done". */
+
+.community-claim-fulfilled.community-claim-unknown {
+  background: var(--tint-strong);
+  color: var(--color-text-muted);
+}
+
+/* "Missing in Arr" — red M badge (tracked in *arr but not downloaded). */
+
+.arr-missing-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--rgb-danger), 0.18);
+  color: var(--color-danger-soft);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+/* ── Create List picker modal (mirrors the request modal's candidate rows) ───── */
+
+.create-list-modal {
+  max-width: 560px;
+  width: 100%;
+  /* Fixed height so the picker doesn't shrink when only a few items are listed. */
+  height: 80vh;
+}
+
+.create-list-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.create-list-sub {
+  margin: 0 0 var(--sp-12);
+  font-size: var(--text-md);
+  color: var(--color-text-muted);
+}
+
+.create-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: var(--sp-8) 0 var(--sp-8);
+}
+
+.create-list-count {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.create-list-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  /* Fill the remaining modal height and scroll, keeping search/toolbar pinned. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--sp-4);
+}
+
+/* Keep rows at their natural height and scroll instead of squashing them. */
+
+.create-list-rows > * {
+  flex-shrink: 0;
+}
+
+.create-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.create-list-row:hover {
+  border-color: var(--color-accent);
+  background: rgba(var(--rgb-accent), 0.12);
+}
+
+.create-list-row.selected {
+  border-color: var(--color-accent);
+  background: rgba(var(--rgb-accent), 0.1);
+}
+
+.create-list-poster {
+  width: 36px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.create-list-poster--empty {
+  background: var(--color-border);
+}
+
+.create-list-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.create-list-year {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.create-list-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-shrink: 0;
+}
+
+.create-list-meta .unmatched-cat-badge {
+  flex-shrink: 0;
+}
+
+/* Fixed slot pinned to the right (margin-left:auto) and always present, so the
+   badges sit just after the title and don't shift when the check toggles. */
+
+.create-list-check {
+  flex-shrink: 0;
+  width: 20px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+}
+
+.create-list-empty {
+  padding: var(--sp-16);
+  text-align: center;
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+}
+
+/* These two footers hold the style toggle plus the action buttons. The toggle's
+   margin-right:auto pushes the buttons to the right; keep them at a fixed content
+   size, vertically centered and compact, so nothing stretches into tall blocks. */
+
+.list-items-modal .modal-footer,
+.create-list-modal .modal-footer {
+  align-items: center;
+  gap: var(--sp-8) var(--sp-12);
+}
+
+.list-items-modal .modal-footer button,
+.create-list-modal .modal-footer button {
+  flex: 0 0 auto;
+  padding: var(--sp-8) var(--sp-16);
+  white-space: nowrap;
+}
+
+/* Narrow modals: give the style toggle its own line and let the buttons stretch
+   to share the row, so wrapped rows line up edge to edge instead of leaving one
+   button hanging off on its own. */
+
+@media (max-width: 768px) {
+  .list-items-modal .modal-footer .publish-style-toggle,
+  .create-list-modal .modal-footer .publish-style-toggle {
+    flex: 1 0 100%;
+    margin-right: 0;
+  }
+  .list-items-modal .modal-footer .modal-footer-actions,
+  .create-list-modal .modal-footer .modal-footer-actions {
+    flex: 1 1 100%;
+  }
+  .list-items-modal .modal-footer .modal-footer-actions button,
+  .create-list-modal .modal-footer .modal-footer-actions button {
+    flex: 1 1 auto;
+  }
+}
+
+.authed-image-loading {
+  background: var(--tint);
+}
+
+.authed-image-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+.authed-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--scrim-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  padding: var(--sp-32);
+}
+
+.authed-image-lightbox-img {
+  max-width: min(90vw, 700px);
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 40px var(--shadow-color);
+}

@@ -1,9 +1,10 @@
-import { Eye, Play, Save, X } from 'lucide-react'
+import { Eye, Play, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig } from '../../api/client'
 import { ManualMediaEntry } from '../../api/posterManager'
 import LibrarySelectGrid from './LibrarySelectGrid'
 import Toolbar from '../Toolbar'
+import SaveActions from '../../components/SaveActions'
 
 type RenamerTabProps = {
   hasUnsavedLibraryChanges: boolean
@@ -33,6 +34,7 @@ type RenamerTabProps = {
   formImdbId: string
   adding: boolean
   onSaveSettings: () => void
+  onCancelSettings: () => void
   onRunRename: (dryRun: boolean) => void
   onSetAutoRunBorder: (enabled: boolean) => void
   onSetAutoRunCleanup: (enabled: boolean) => void
@@ -76,6 +78,7 @@ function RenamerTab({
   formImdbId,
   adding,
   onSaveSettings,
+  onCancelSettings,
   onRunRename,
   onSetAutoRunBorder,
   onSetAutoRunCleanup,
@@ -115,15 +118,7 @@ function RenamerTab({
             Discord
           </button>
         </div>
-        <button
-          className={`btn-toolbar ${(hasUnsavedLibraryChanges || hasUnsavedBorderChanges || hasUnsavedInclude) ? 'btn-unsaved' : ''}`}
-          onClick={onSaveSettings}
-          disabled={(!hasUnsavedLibraryChanges && !hasUnsavedBorderChanges && !hasUnsavedInclude) || saving || libraryConfigs.length === 0}
-          title={libraryConfigs.length === 0 ? 'Configure libraries in Settings first' : ((hasUnsavedLibraryChanges || hasUnsavedBorderChanges || hasUnsavedInclude) ? 'Save changes' : 'No changes to save')}
-        >
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
+        <SaveActions dirty={(hasUnsavedLibraryChanges || hasUnsavedBorderChanges || hasUnsavedInclude)} saving={saving} disabled={(!hasUnsavedLibraryChanges && !hasUnsavedBorderChanges && !hasUnsavedInclude) || saving || libraryConfigs.length === 0} onSave={onSaveSettings} onCancel={onCancelSettings} />
         <button className="btn-toolbar" onClick={() => onRunRename(true)} disabled={renaming} title="Dry run asset renamer">
           <Eye size={16} />
           Dry Run
@@ -155,7 +150,7 @@ function RenamerTab({
                 </div>
               ))}
             </div>
-            <small>Pick which asset types this run processes. Posters come from your poster drives; logos, backgrounds and square art come from your synced artwork drives. <strong style={{ color: '#f59e0b' }}>Unmatched detection checks only the selected asset types.</strong> Click <strong>Save Settings</strong> to apply.</small>
+            <small>Pick which asset types this run processes. Posters come from your poster drives; logos, backgrounds and square art come from your synced artwork drives. <strong className="text-warning-strong">Unmatched detection checks only the selected asset types.</strong> Click <strong>Save Settings</strong> to apply.</small>
             {includeLoaded && include.some((t) => t !== 'posters') && (
               <small className="kometa-asset-note"><strong>Running Kometa against this folder?</strong> Keep <code>dimensional_asset_rename: false</code> in Kometa's settings. When enabled, Kometa treats wide images as backdrops and renames placed <code>logo.png</code> files to <code>background.png</code>.</small>
             )}
@@ -198,7 +193,7 @@ function RenamerTab({
             </div>
             <small>Removes asset folders for media no longer in Radarr/Sonarr/your media servers, plus stale duplicate folders left after a rename. Runs after rename (and border, if on).</small>
             {autoRunCleanup && (
-              <label className="checkbox-option" style={{ marginTop: '0.4rem' }}>
+              <label className="checkbox-option mt-sm">
                 <input type="checkbox" checked={cleanupDeleteUnknown} onChange={(e) => onSetCleanupDeleteUnknown(e.target.checked)} />
                 <span>Also remove unknown/stray folders (no match, no ID — riskier)</span>
               </label>
@@ -213,7 +208,7 @@ function RenamerTab({
           <div className="field-group">
             {libraryConfigs.length === 0 ? (
               <div className="empty-state">
-                <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No Plex instances configured. Configure in Settings → Media Servers.</p>
+                <p className="empty-note">No Plex instances configured. Configure in Settings → Media Servers.</p>
               </div>
             ) : (
               <LibrarySelectGrid
@@ -280,7 +275,7 @@ function RenamerTab({
               value={formTitle}
               onChange={(e) => onFormTitleChange(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && onAddManualEntry()}
-              style={{ flex: 1 }}
+              className="flex-1"
             />
             <input
               type="text"
@@ -310,7 +305,7 @@ function RenamerTab({
               </>
             )}
             <button
-              className="btn-secondary manual-media-add-btn"
+              className="btn-primary manual-media-add-btn"
               disabled={adding || !formTitle.trim()}
               onClick={onAddManualEntry}
             >
@@ -352,11 +347,11 @@ function RenamerTab({
           </div>
         </div>
 
-        <div className="field-group" style={{ marginTop: '0.75rem' }}>
+        <div className="field-group mt-md">
           <label>Entries ({manualEntries.length})</label>
           {manualEntries.length === 0 ? (
             <div className="empty-state">
-              <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No entries yet. Use the form above to add items.</p>
+              <p className="empty-note">No entries yet. Use the form above to add items.</p>
             </div>
           ) : (
             <div className="manual-media-table">
@@ -375,7 +370,7 @@ function RenamerTab({
                     {entry.tvdb_id && <span className="manual-media-entry-meta">TVDB: {entry.tvdb_id}</span>}
                     {entry.imdb_id && <span className="manual-media-entry-meta">{entry.imdb_id}</span>}
                   </div>
-                  <button className="btn-icon-danger" title="Remove entry" onClick={() => onDeleteEntry(entry.id)}>
+                  <button className="btn-icon btn-icon-sm btn-icon-outlined btn-icon-danger" title="Remove entry" onClick={() => onDeleteEntry(entry.id)}>
                     <X size={14} />
                   </button>
                 </div>

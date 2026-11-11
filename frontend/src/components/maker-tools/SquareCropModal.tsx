@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Crop as CropIcon } from 'lucide-react'
+import Modal from '../../components/Modal'
 
 type Sel = { x: number; y: number; size: number }   // display-pixel square selection
 
@@ -126,80 +127,75 @@ export default function SquareCropModal({ imageUrl, title, saving, onCancel, onS
   const outputSize = sel ? Math.round(sel.size * scale) : 0
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content" style={{ maxWidth: 720 }}>
-        <div className="modal-header">
-          <h2>Crop to square art — {title}</h2>
-          <button className="modal-close" onClick={onCancel}>×</button>
-        </div>
-        <div className="modal-body">
-         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', justifyContent: 'center' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <div style={{ position: 'relative', lineHeight: 0, userSelect: 'none', touchAction: 'none', overflow: 'hidden' }}>
-            {/* Cap the height so the whole image fits inside the 80vh modal (header + footer + caption)
-                without the modal-body needing to scroll — otherwise the bottom is hidden below the fold. */}
-            <img ref={imgRef} src={imageUrl} onLoad={measure} draggable={false} alt="" style={{ maxWidth: '100%', maxHeight: 'min(62vh, calc(80vh - 230px))', display: 'block' }} />
-            {sel && !tooSmall && (
-              <>
+    <Modal onClose={onCancel} closeOnOverlay={false}>
+      <Modal.Header title={<>Crop to square art — {title}</>} />
+      <Modal.Body>
+       <div className="square-crop-layout">
+        <div className="square-crop-main">
+        <div className="square-crop-stage">
+          {/* Cap the height so the whole image fits inside the 80vh modal (header + footer + caption)
+              without the modal-body needing to scroll — otherwise the bottom is hidden below the fold. */}
+          <img ref={imgRef} src={imageUrl} onLoad={measure} draggable={false} alt="" className="square-crop-img" />
+          {sel && !tooSmall && (
+      <>
+              <div
+                onPointerDown={(e) => startDrag('move', e)}
+                className="square-crop-box"
+                style={{ left: sel.x, top: sel.y, width: sel.size, height: sel.size }}
+              >
                 <div
-                  onPointerDown={(e) => startDrag('move', e)}
-                  style={{ position: 'absolute', left: sel.x, top: sel.y, width: sel.size, height: sel.size, border: '2px solid #64b5f6', boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.55)', cursor: 'move', boxSizing: 'border-box' }}
-                >
-                  <div
-                    onPointerDown={(e) => startDrag('resize', e)}
-                    style={{ position: 'absolute', right: 2, bottom: 2, width: 14, height: 14, background: '#64b5f6', border: '2px solid #fff', borderRadius: 3, cursor: 'nwse-resize' }}
-                  />
-                </div>
-                {/* live size badge — a SIBLING of the box (containing block = the full image), so its
-                    gray backing sizes to the text rather than the box width; lineHeight resets the
-                    container's lineHeight:0. Positioned to follow the box's top-left. */}
-                <div style={{ position: 'absolute', top: sel.y + 4, left: sel.x + 4, width: 'max-content', lineHeight: 'normal', background: 'rgba(220, 220, 220, 0.95)', color: '#1a1a1a', fontSize: '0.9rem', fontWeight: 700, padding: '3px 8px', borderRadius: 4, border: '1px solid rgba(0, 0, 0, 0.35)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.45)', pointerEvents: 'none', whiteSpace: 'nowrap' }}>
-                  {outputSize} × {outputSize}
-                </div>
-              </>
-            )}
-          </div>
-          {tooSmall ? (
-            <p style={{ fontSize: '0.82rem', color: '#ffb74d', margin: 0, textAlign: 'center' }}>
-              This image is only {display?.nw}×{display?.nh}px — too small to crop a {MIN_OUTPUT}×{MIN_OUTPUT} square. Pick a larger poster or backdrop.
-            </p>
-          ) : (
-            <p style={{ fontSize: '0.78rem', color: '#999', margin: 0, textAlign: 'center' }}>
-              Source image: <strong style={{ color: '#cfd6e4' }}>{display?.nw}×{display?.nh}px</strong>
-              {' '}· drag to move, drag the corner to resize (min {MIN_OUTPUT}×{MIN_OUTPUT}).
-            </p>
+                  onPointerDown={(e) => startDrag('resize', e)}
+                  className="square-crop-handle"
+                />
+              </div>
+              {/* live size badge — a SIBLING of the box (containing block = the full image), so its
+                  gray backing sizes to the text rather than the box width; lineHeight resets the
+                  container's lineHeight:0. Positioned to follow the box's top-left. */}
+              <div className="square-crop-size" style={{ top: sel.y + 4, left: sel.x + 4 }}>
+                {outputSize} × {outputSize}
+              </div>
+            </>
           )}
-          </div>
+        </div>
+        {tooSmall ? (
+          <p className="square-crop-caption text-warning">
+            This image is only {display?.nw}×{display?.nh}px — too small to crop a {MIN_OUTPUT}×{MIN_OUTPUT} square. Pick a larger poster or backdrop.
+          </p>
+        ) : (
+          <p className="square-crop-caption">
+            Source image: <strong className="text-secondary">{display?.nw}×{display?.nh}px</strong>
+            {' '}· drag to move, drag the corner to resize (min {MIN_OUTPUT}×{MIN_OUTPUT}).
+          </p>
+        )}
+        </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0, paddingTop: 2 }}>
-            <span style={{ fontSize: '0.72rem', color: '#888', fontWeight: 600 }}>Presets</span>
-            {PRESETS.map((sz) => {
-              const disabled = !display || tooSmall || sz > maxSquareNative
-              const active = !disabled && outputSize === sz
-              return (
-                <button
-                  key={sz}
-                  type="button"
-                  className={`btn-toolbar ${active ? 'btn-primary' : ''}`}
-                  style={{ minWidth: 0, fontSize: '0.75rem', padding: '5px 12px', justifyContent: 'center' }}
-                  disabled={disabled}
-                  onClick={() => applyPreset(sz)}
-                  title={disabled ? `Image too small for ${sz}×${sz}` : `Set the crop to ${sz}×${sz}`}
-                >
-                  {sz} × {sz}
-                </button>
-              )
-            })}
-          </div>
-         </div>
+        <div className="square-crop-presets">
+          <span className="square-crop-presets-label">Presets</span>
+          {PRESETS.map((sz) => {
+            const disabled = !display || tooSmall || sz > maxSquareNative
+            const active = !disabled && outputSize === sz
+            return (
+              <button
+                key={sz}
+                type="button"
+                className={`btn-toolbar crop-preset-btn ${active ? 'btn-primary' : ''}`}
+                disabled={disabled}
+                onClick={() => applyPreset(sz)}
+                title={disabled ? `Image too small for ${sz}×${sz}` : `Set the crop to ${sz}×${sz}`}
+              >
+                {sz} × {sz}
+              </button>
+            )
+          })}
         </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
-          <button className="btn-primary" style={{ justifyContent: 'center' }} onClick={handleSave} disabled={saving || !sel || tooSmall}>
-            <CropIcon size={15} /> {saving ? 'Saving…' : 'Save as Square Art'}
-          </button>
-        </div>
-      </div>
-    </div>
+       </div>
+      </Modal.Body>
+      <Modal.Footer>
+        <button className="btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button className="btn-primary" onClick={handleSave} disabled={saving || !sel || tooSmall}>
+          <CropIcon size={15} /> {saving ? 'Saving…' : 'Save as Square Art'}
+        </button>
+      </Modal.Footer>
+    </Modal>
   )
 }

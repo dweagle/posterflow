@@ -1,0 +1,404 @@
+/* Asset Renamer tab: rename configuration, manual media, path previews.
+   The poster-manager sheets load in a fixed order (see App.tsx). */
+
+/* Renamer tab: two cards side-by-side, collapse to stacked on small screens */
+
+.renamer-layout-row {
+  display: flex;
+  gap: var(--card-gap);
+  align-items: stretch;
+}
+
+.poster-manager .renamer-config-card,
+.poster-manager .renamer-library-card {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+@media (max-width: 1000px) {
+  .renamer-layout-row {
+    flex-direction: column;
+  }
+
+  .poster-manager .renamer-config-card,
+  .poster-manager .renamer-library-card {
+    flex: none;
+    width: 100%;
+    margin-bottom: 0;
+  }
+}
+
+.checkbox-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-24);
+}
+
+/* ── Manual Media ──────────────────────────────────────── */
+
+.manual-media-section {
+  margin-top: var(--card-gap);
+}
+
+.manual-media-section h2 {
+  margin-bottom: var(--sp-8);
+}
+
+/* Collapsible help box */
+
+.manual-media-help {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--sp-16);
+  background: var(--color-surface-sunken);
+}
+
+.manual-media-help-summary {
+  padding: var(--sp-8) var(--sp-12);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.manual-media-help-summary::before {
+  content: '▶';
+  font-size: var(--text-3xs);
+  transition: transform 0.15s;
+  display: inline-block;
+}
+
+.manual-media-help[open] .manual-media-help-summary::before {
+  transform: rotate(90deg);
+}
+
+.manual-media-help-summary::-webkit-details-marker {
+  display: none;
+}
+
+.manual-media-help-body {
+  padding: var(--sp-8) var(--sp-12) var(--sp-12);
+  border-top: 1px solid var(--color-surface-raised);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.manual-media-help-body > p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.manual-media-help-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding-left: var(--sp-8);
+  border-left: 2px solid var(--color-border);
+}
+
+.manual-media-help-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.manual-media-help-example {
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+  line-height: 1.55;
+}
+
+.manual-media-help-example em {
+  color: var(--color-text-muted);
+  font-style: normal;
+}
+
+.manual-media-help-note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-disabled);
+  font-style: italic;
+}
+
+.manual-media-search-row {
+  display: flex;
+  gap: var(--sp-8);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Outranks the field group's full-width control by matching its specificity and loading later. */
+.field-group select.manual-media-type-select {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+/* Outranks the field group's full-width control by matching its specificity and loading later. */
+.field-group input.manual-media-year-input {
+  width: 72px;
+  flex-shrink: 0;
+}
+
+/* Outranks the field group's full-width control by matching its specificity and loading later. */
+.field-group input.manual-media-seasons-input {
+  width: 90px;
+  flex-shrink: 0;
+}
+
+/* Specials checkbox inline with seasons field */
+
+.manual-media-specials-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.manual-media-specials-label input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Add button: matches btn-secondary but with primary accent */
+
+.poster-manager .manual-media-add-btn {
+  flex-shrink: 0;
+}
+
+.manual-media-ids-warning {
+  margin-top: var(--sp-8);
+  font-size: var(--text-sm);
+  color: var(--color-warning-strong);
+  opacity: 0.85;
+}
+
+/* IDs row below the primary row */
+
+.manual-media-ids-row {
+  display: flex;
+  gap: var(--sp-16);
+  margin-top: var(--sp-8);
+  flex-wrap: wrap;
+}
+
+.manual-media-id-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.manual-media-id-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.manual-media-table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.manual-media-entry-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.manual-media-entry-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.manual-media-entry-title {
+  color: var(--color-text);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.manual-media-entry-year {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+}
+
+.manual-media-entry-meta {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
+
+/* Live preview of the paths a setting produces, so the layout is concrete. */
+
+.path-example {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-8);
+  padding: var(--sp-8) var(--sp-8);
+  background: var(--color-slate-deep);
+  border-left: 2px solid var(--color-accent-deep);
+  border-radius: var(--radius-sm);
+}
+
+.path-example-label {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: var(--sp-2);
+}
+
+.path-example code {
+  color: var(--color-accent-soft);
+  font-size: var(--text-xs);
+  /* Long destinations shouldn't widen the settings grid. */
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+
+  .checkbox-row {
+    grid-template-columns: 1fr;
+  }
+
+  .priority-content {
+    grid-template-columns: 1fr;
+  }
+
+  .style-checkboxes {
+    flex-direction: column;
+  }
+
+  .drive-cards {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 140px));
+  }
+
+  .coverage-grid {
+    grid-template-columns: 1fr;
+  }
+
+  }
+
+.checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.asset-include-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-24);
+  margin: var(--sp-6) 0 var(--sp-8);
+  min-height: 26px; /* reserve the row so toggles don't cause layout shift while loading */
+}
+
+.asset-include-toggle {
+  align-self: flex-start;
+}
+
+/* Reserve toggle-row height so gated (load-deferred) toggles don't shift layout. */
+
+.renamer-config-card .toggle-field {
+  min-height: 24px;
+}
+
+.renamer-config-card .field-group {
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-8);
+}
+
+.renamer-config-card .field-group small {
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* Sub-group headings inside the Rename Configuration card. */
+
+.config-subgroup-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-6) var(--sp-12);
+  flex-wrap: wrap;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin-bottom: var(--sp-4);
+}
+
+.config-subgroup-divider {
+  margin-top: var(--sp-12);
+  padding-top: var(--sp-8);
+  border-top: 1px solid var(--hairline-faint);
+}
+
+.config-subgroup-hint {
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text-faint);
+}
+
+.checkbox-option input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--color-accent-deep);
+  width: 16px;
+  height: 16px;
+}
+
+/* Inline row of checkbox options (e.g. Asset Cleanup + its sub-toggle) */
+
+.checkbox-option-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-24);
+}
+
+.checkbox-option-with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.checkbox-option-with-info .toolbar-info svg {
+  width: 14px;
+  height: 14px;
+}
+
+.season-mode-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}

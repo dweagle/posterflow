@@ -17,7 +17,7 @@ function AssetSearch() {
 
   return (
     <div className="page-container">
-      <div className="poster-search-header">
+      <div className="page-header poster-search-header">
         <h1>Asset Search</h1>
         <p>
           Search the synced Google Drive poster and artwork folders and preview what each drive offers.

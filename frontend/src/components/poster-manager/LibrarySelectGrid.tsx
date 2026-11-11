@@ -35,7 +35,7 @@ function LibrarySelectGrid({ libraryConfigs, selected, onToggle }: LibrarySelect
               )
             })}
             {enabled.length === 0 && (
-              <p style={{ color: '#888', fontSize: '0.85rem', fontStyle: 'italic', margin: '0.25rem 0' }}>
+              <p className="library-select-empty">
                 No libraries enabled
               </p>
             )}

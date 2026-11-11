@@ -1,0 +1,233 @@
+/* Form fields. `.form-group` stacks a label, one control and an optional hint; the control takes
+   the row's width. Rows that lay out their own controls (toggles, checkbox lists, inline inputs
+   beside a button) do not use it and style themselves. The selectors stay at one class of
+   specificity (`:where`), so a page's own rule for a dense group wins by loading later. */
+.form-group {
+  margin-bottom: var(--sp-16);
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-group label:where(:not(.checkbox-label, .artwork-type-option)),
+.field-label {
+  display: block;
+  margin-bottom: var(--sp-6);
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.form-group input:where(:not([type='checkbox'], [type='radio'])),
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: var(--sp-8) var(--sp-12);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--text-md);
+  transition: border-color 0.2s;
+}
+
+.form-group input:where(:not([type='checkbox'], [type='radio'])):focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+/* Every text field and select, inside a form group or not, is the raised field: one surface, one
+   border, one radius. A page may size it (padding, height, width); it does not recolor it. */
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'])),
+textarea {
+  background-color: var(--color-surface-raised);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+}
+
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'])):focus,
+textarea:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+select {
+  padding: var(--sp-8) var(--sp-12);
+  background-color: var(--color-surface-raised);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+select:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+/* A disabled control looks it, everywhere. A checkbox or radio dims with its caption (the label
+   around it), or alone when no label wraps it. The toggle switch has its own disabled look
+   (Toggle.css), and a disabled fieldset is dimmed as one (the Overlays backdrop panel), so the
+   controls in it are not dimmed twice. */
+input:where(:not([type='checkbox'], [type='radio'])):disabled:where(:not(fieldset:disabled *)),
+textarea:disabled:where(:not(fieldset:disabled *)),
+select:disabled:where(:not(fieldset:disabled *)),
+:where(input[type='checkbox'], input[type='radio']):disabled:where(:not(label > *, fieldset:disabled *)) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+label:where(:not(.toggle-switch, fieldset:disabled *)):has(> :where(input[type='checkbox'], input[type='radio']):disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* The hint under a control. */
+.form-group small,
+.field-hint {
+  display: block;
+  margin-top: var(--sp-4);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--color-text-faint);
+}
+
+.form-group small code,
+.field-hint code {
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* A checkbox with its caption on one line. */
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  cursor: pointer;
+}
+
+.checkbox-label input[type='checkbox'] {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* A checkbox with a title and a description, boxed as a card row (`checkbox-label checkbox-card`). */
+.checkbox-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-12);
+  padding: var(--sp-16);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.checkbox-card:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-border);
+}
+
+.checkbox-card input[type='checkbox'] {
+  margin-top: var(--sp-4);
+}
+
+.checkbox-card span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.checkbox-card strong {
+  color: var(--color-text);
+  font-size: var(--text-base);
+}
+
+.checkbox-card small {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+/* A boxed list of checkboxes. */
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-12);
+  background-color: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* A field with an eye button inside it (API keys, tokens): the wrapper positions the button and
+   the control leaves room for it. Pages size the control; the look is the shared one. */
+.input-with-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-toggle input,
+.input-with-toggle textarea {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  padding-right: var(--sp-40);
+}
+
+.input-with-toggle .toggle-visibility {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: transparent;
+  border: none;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.input-with-toggle .toggle-visibility:hover {
+  color: var(--color-accent);
+}
+
+/* Placeholders, the invalid state, and a number field without its spinner. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-faint);
+}
+
+input.invalid,
+select.invalid,
+textarea.invalid {
+  border-color: var(--color-danger-soft);
+}
+
+input.no-spinner::-webkit-outer-spin-button,
+input.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input.no-spinner {
+  -moz-appearance: textfield;
+}

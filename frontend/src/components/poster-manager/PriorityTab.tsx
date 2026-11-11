@@ -14,6 +14,7 @@ type PriorityTabProps = {
   hasUnsavedPriorityChanges: boolean
   saving: boolean
   onSavePriority: () => void
+  onCancelPriority: () => void
   enabledStyles: Set<string>
   onToggleStyle: (style: 'MM2K' | 'CL2K' | 'Custom') => void
   drives: Drive[]
@@ -43,6 +44,7 @@ function PriorityTab({
   hasUnsavedPriorityChanges,
   saving,
   onSavePriority,
+  onCancelPriority,
   enabledStyles,
   onToggleStyle,
   drives,
@@ -122,6 +124,7 @@ function PriorityTab({
         saving={saving}
         hasUnsavedChanges={hasUnsavedPriorityChanges}
         onSave={onSavePriority}
+        onCancel={onCancelPriority}
       />
 
       <div className="priority-tab">
@@ -211,7 +214,7 @@ function PriorityTab({
                           <div className="style-usage-preview-more">+ {items.length - PREVIEW_LIMIT} more...</div>
                         )}
                       </div>
-                      <button className="card-view-all-btn" onClick={() => setOpenFallbackStyle(style)}>
+                      <button className="btn-secondary btn-sm btn-block card-view-all-btn" onClick={() => setOpenFallbackStyle(style)}>
                         <List size={14} />
                         View All {count.toLocaleString()} Posters
                       </button>
@@ -356,7 +359,7 @@ function PriorityTab({
             <div className={`priority-drop-zone ${priorityList.length === 0 ? 'empty' : ''}`} onDragOver={onDragOver} onDrop={(e) => onDropInPriority(e)} onDragLeave={onDragLeave}>
               {priorityList.length === 0 ? (
                 <div className="empty-message">
-                  <GripVertical size={32} color="#666" />
+                  <GripVertical size={32} color="var(--color-text-disabled)" />
                   <p>Drag drives here to set priority</p>
                 </div>
               ) : (
@@ -403,7 +406,7 @@ function PriorityTab({
                             <span className={`drive-badge drive-badge-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`}>
                               {drive.is_custom ? 'Custom' : drive.style_type}
                             </span>
-                            <button className="btn-remove" onClick={() => onRemoveFromPriority(drive.id)} title="Remove from priority">
+                            <button className="btn-icon btn-icon-sm btn-icon-outlined btn-icon-danger" onClick={() => onRemoveFromPriority(drive.id)} title="Remove from priority">
                               <Trash2 size={14} />
                             </button>
                           </div>

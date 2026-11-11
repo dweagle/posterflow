@@ -57,14 +57,14 @@ describe('PriorityHeader', () => {
 
   it('disables save with no pending changes', () => {
     renderHeader()
-    expect((screen.getByRole('button', { name: /Save Settings/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /^Saved?$/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('saves the owning tab once dirty', async () => {
     const user = userEvent.setup()
     const props = renderHeader({ hasUnsavedChanges: true })
 
-    const save = screen.getByRole('button', { name: /Save Settings/i }) as HTMLButtonElement
+    const save = screen.getByRole('button', { name: /^Saved?$/ }) as HTMLButtonElement
     expect(save.disabled).toBe(false)
     expect(save.className).toContain('btn-unsaved')
 

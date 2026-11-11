@@ -66,7 +66,8 @@ export default function PosterDriveSearchModal({
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.preventDefault()
         onClose()
       }
     }
@@ -154,7 +155,7 @@ export default function PosterDriveSearchModal({
       <div className="drive-search-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="drive-search-modal-header">
           <h2>{target ? (isArtwork ? 'Pick Artwork' : 'Pick a Poster') : 'Search Drive Assets'}</h2>
-          <button type="button" className="drive-search-modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="btn-icon drive-search-modal-close" onClick={onClose} aria-label="Close">
             <X size={20} />
           </button>
         </div>

@@ -10,6 +10,7 @@ import CreateListModal, { type SelectableListItem } from './CreateListModal'
 import PosterStyleTmdbSearch from './PosterStyleTmdbSearch'
 import SortControls from './SortControls'
 import { sortItems, useSortPrefs } from './itemSort'
+import Modal from '../../components/Modal'
 
 type PosterStyleModalProps = {
   preferredStyle: string
@@ -39,10 +40,6 @@ export default function PosterStyleModal({
   const { getStatus: getClaimStatus } = useCommunityClaimStatus()
   const [publishing, setPublishing] = useState(false)
   const [createListOpen, setCreateListOpen] = useState(false)
-
-  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose()
-  }
 
   // Build community-list inputs from a set of fallback items, tagged with the
   // preferred style. Movies/collections publish one card each. Shows group by
@@ -198,81 +195,72 @@ export default function PosterStyleModal({
   )
 
   return (
-    <>
-    <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content schedule-modal list-items-modal">
-        <div className="modal-header">
-          <h2>
-            Missing <span className={`style-badge style-${preferredKey}`}>{preferredStyle}</span> Posters
-          </h2>
-          <button className="modal-close" onClick={onClose}>×</button>
+  <>
+    <Modal onClose={onClose} size="lg" className="list-items-modal">
+      <Modal.Header title={<>Missing <span className={`style-badge style-${preferredKey}`}>{preferredStyle}</span> Posters</>} />
+      <Modal.Body>
+        <p className="style-fallback-modal-subtitle">
+          These {items.length.toLocaleString()} poster{items.length !== 1 ? 's' : ''} across{' '}
+          {selectableItems.length.toLocaleString()} title{selectableItems.length !== 1 ? 's' : ''} used{' '}
+          <span className={`style-badge style-${fallbackKey}`}>{fallbackStyle}</span> because no{' '}
+          <span className={`style-badge style-${preferredKey}`}>{preferredStyle}</span> poster was available.
+        </p>
+
+        <div className="unmatched-search-bar">
+          <Search size={15} className="search-bar-icon" />
+          <input
+            type="text"
+            className="unmatched-search-input"
+            placeholder={`Search ${items.length} posters…`}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button className="btn-icon btn-icon-sm search-clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
+              <X size={14} />
+            </button>
+          )}
         </div>
 
-        <div className="modal-body">
-          <p className="style-fallback-modal-subtitle">
-            These {items.length.toLocaleString()} poster{items.length !== 1 ? 's' : ''} across{' '}
-            {selectableItems.length.toLocaleString()} title{selectableItems.length !== 1 ? 's' : ''} used{' '}
-            <span className={`style-badge style-${fallbackKey}`}>{fallbackStyle}</span> because no{' '}
-            <span className={`style-badge style-${preferredKey}`}>{preferredStyle}</span> poster was available.
+        <SortControls prefs={prefs} onChange={setPrefs} showSeasons={hasShows} />
+
+        <div className="unmatched-list">
+          <p className="list-count">
+            {sortedItems.length !== groupedItems.length
+              ? `${sortedItems.length} of ${groupedItems.length} titles`
+              : `${groupedItems.length} titles`}
           </p>
-
-          <div className="unmatched-search-bar">
-            <Search size={15} className="search-bar-icon" />
-            <input
-              type="text"
-              className="unmatched-search-input"
-              placeholder={`Search ${items.length} posters…`}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            {searchQuery && (
-              <button className="search-clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          <SortControls prefs={prefs} onChange={setPrefs} showSeasons={hasShows} />
-
-          <div className="unmatched-list">
-            <p className="list-count">
-              {sortedItems.length !== groupedItems.length
-                ? `${sortedItems.length} of ${groupedItems.length} titles`
-                : `${groupedItems.length} titles`}
-            </p>
-            {sortedItems.map(renderItem)}
-          </div>
+          {sortedItems.map(renderItem)}
         </div>
-
-        <div className="modal-footer">
-          <div className="modal-footer-actions">
-            <button className="btn-secondary" onClick={onClose}>Close</button>
-            <button
-              className="btn-secondary"
-              onClick={handleAddToLists}
-              disabled={publishing || items.length === 0}
-              title={isConnected ? 'Publish these items to the Community Lists tab for makers' : 'Connect Discord to publish to Community Lists'}
-            >
-              {publishing ? <Loader2 size={14} className="spin-icon" /> : <ListPlus size={14} />}
-              Add All to List
-            </button>
-            <button
-              className="btn-secondary"
-              onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
-              disabled={publishing || items.length === 0}
-              title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
-            >
-              <ListChecks size={14} />
-              Create List
-            </button>
-            <button className="btn-primary" onClick={onDownload}>
-              <Download size={14} />
-              Download List
-            </button>
-          </div>
+      </Modal.Body>
+      <Modal.Footer>
+        <div className="modal-footer-actions">
+          <button className="btn-secondary" onClick={onClose}>Close</button>
+          <button
+            className="btn-secondary"
+            onClick={handleAddToLists}
+            disabled={publishing || items.length === 0}
+            title={isConnected ? 'Publish these items to the Community Lists tab for makers' : 'Connect Discord to publish to Community Lists'}
+          >
+            {publishing ? <Loader2 size={14} className="spinning" /> : <ListPlus size={14} />}
+            Add All to List
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
+            disabled={publishing || items.length === 0}
+            title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
+          >
+            <ListChecks size={14} />
+            Create List
+          </button>
+          <button className="btn-primary" onClick={onDownload}>
+            <Download size={14} />
+            Download List
+          </button>
         </div>
-      </div>
-    </div>
+      </Modal.Footer>
+    </Modal>
 
     {createListOpen && (
       <CreateListModal

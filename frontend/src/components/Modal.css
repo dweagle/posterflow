@@ -1,0 +1,179 @@
+/* The one dialog frame (components/Modal.tsx): a dimmed overlay, a surface card with a header, a
+   scrolling body and a footer of right-aligned buttons. A page stylesheet sizes its own modal
+   (`className`, or a size) and lays out the body; it does not restyle the frame. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-16);
+  background: var(--scrim-strong);
+  backdrop-filter: blur(4px);
+  animation: modal-fade 0.15s ease-out;
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--modal-width, 700px);
+  max-height: 90vh;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 20px 60px var(--shadow-color);
+  outline: none;
+  animation: modal-rise 0.15s ease-out;
+}
+
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-rise {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  .modal-content {
+    animation: none;
+  }
+}
+
+.modal-sm { --modal-width: 450px; }
+.modal-lg { --modal-width: 800px; }
+.modal-xl { --modal-width: 1050px; }
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-20) var(--sp-24);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.modal-header h2 {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+  margin: 0;
+  font-size: var(--text-xl);
+  color: var(--color-title);
+}
+
+.modal-close {
+  flex-shrink: 0;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.modal-close:hover:not(:disabled) {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--sp-24);
+  overflow-y: auto;
+}
+
+.modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-12);
+  padding: var(--sp-20) var(--sp-24);
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+/* A footer that carries a left-hand control (a toggle, a count) groups its buttons here so they
+   keep the right edge and wrap as one block. */
+.modal-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-8) var(--sp-12);
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+
+@media (max-width: 768px) {
+  .modal-header {
+    padding: var(--sp-16);
+  }
+
+  .modal-header h2 {
+    font-size: var(--text-lg);
+  }
+
+  .modal-body {
+    padding: var(--sp-16);
+  }
+
+  .modal-footer {
+    padding: var(--sp-16);
+  }
+}
+
+/* Phones: the card takes nearly the whole screen and the footer buttons share its width. */
+@media (max-width: 550px) {
+  .modal-overlay {
+    padding: var(--sp-8);
+  }
+
+  .modal-content {
+    max-height: calc(100vh - 1rem);
+  }
+
+  .modal-footer > .btn-primary,
+  .modal-footer > .btn-secondary,
+  .modal-footer > .btn-danger,
+  .modal-footer-actions > .btn-primary,
+  .modal-footer-actions > .btn-secondary,
+  .modal-footer-actions > .btn-danger {
+    flex: 1 1 auto;
+  }
+}
+
+/* Body copy inside a modal: the explanation, then a smaller note (color via a text utility). */
+.modal-text {
+  margin: 0 0 var(--sp-12);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.modal-note {
+  margin: var(--sp-16) 0 0;
+  font-size: var(--text-md);
+  line-height: 1.6;
+}
+
+.modal-empty {
+  padding: var(--sp-32);
+  text-align: center;
+}

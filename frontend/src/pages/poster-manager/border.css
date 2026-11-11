@@ -1,0 +1,564 @@
+/* Border Replacer tab: colors, gradients, holidays, overlays and the Plex rules.
+   The poster-manager sheets load in a fixed order (see App.tsx). */
+
+/* Border Color Input and List */
+
+.color-input-row {
+  display: flex;
+  gap: var(--sp-8);
+  margin-bottom: 0;
+  max-width: 480px;
+}
+
+.color-input-row input[type="color"] {
+  width: 60px;
+  height: 36px;
+  cursor: pointer;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.color-input-row input[type="text"] {
+  flex: 1;
+  font-family: monospace;
+}
+
+.color-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  margin-top: 0;
+}
+
+/* Compact color chips that sit next to each other and wrap by width */
+
+.color-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-4) var(--sp-6);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.color-preview {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.color-value {
+  font-family: monospace;
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+}
+
+.holiday-preset-row {
+  display: flex;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-16);
+}
+
+.holiday-preset-row select {
+  flex: 1;
+  padding: var(--sp-8) var(--sp-12);
+  font-size: var(--text-md);
+}
+
+.custom-holiday-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-16);
+  padding: var(--sp-12);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-inset);
+}
+
+.custom-holiday-form label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.custom-holiday-form input[type="text"] {
+  padding: var(--sp-8) var(--sp-12);
+  font-size: var(--text-md);
+}
+
+/* Holiday name + Add button on one row */
+
+.custom-holiday-name-row {
+  display: flex;
+  gap: var(--sp-8);
+  align-items: stretch;
+}
+
+.custom-holiday-name-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.custom-holiday-range {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+
+.custom-holiday-range span {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.custom-holiday-range select {
+  width: auto;
+  padding: var(--sp-8) var(--sp-8);
+  font-size: var(--text-sm);
+}
+
+.holiday-schedule-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--sp-12);
+}
+
+.holiday-schedule-item {
+  flex: 0 0 320px;
+  max-width: 100%;
+  padding: var(--sp-12);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* While editing, a card needs full width for the 3-column style controls */
+
+.holiday-schedule-item:has(.holiday-edit-panel) {
+  flex-basis: 100%;
+}
+
+.holiday-schedule-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+}
+
+.holiday-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.holiday-edit-row {
+  margin-top: var(--sp-12);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+
+.holiday-edit-row span {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.holiday-edit-row select {
+  width: auto;
+  padding: var(--sp-6) var(--sp-8);
+  font-size: var(--text-sm);
+}
+
+.holiday-edit-panel {
+  margin-top: var(--sp-12);
+  padding: var(--sp-12);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.holiday-edit-empty {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+
+.holiday-name {
+  color: var(--color-text-body);
+  font-weight: 600;
+  font-size: var(--text-md);
+}
+
+.holiday-range {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin-top: var(--sp-4);
+  font-family: monospace;
+}
+
+.holiday-color-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-top: var(--sp-12);
+  flex-wrap: wrap;
+}
+
+.holiday-color-swatch {
+  width: 26px;
+  height: 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+}
+
+/* ── Plex Border Rules ─────────────────────────────────────────────────── */
+
+/* Three columns: rules (widest) · run-type toggles · library selection. */
+
+/* ── Border rules: setup form (left) + compact rule list (right) ────────── */
+
+.rule-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.rule-config-wrap {
+  position: relative;
+}
+
+.rule-config-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 340px;
+  max-width: min(340px, 88vw);
+  max-height: 65vh;
+  overflow-y: auto;
+  padding: var(--sp-16) var(--sp-16);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 28px var(--shadow-color);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-16);
+}
+
+.rule-config-heading {
+  display: block;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--color-text-body);
+  margin-bottom: var(--sp-4);
+}
+
+.rule-runtype-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.rule-workspace {
+  display: flex;
+  gap: var(--sp-24);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.rule-setup-card {
+  flex: 16 1 420px;
+  min-width: 300px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-inset);
+  display: flex;
+  flex-direction: column;
+}
+
+.rule-setup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-12);
+}
+
+.rule-setup-title {
+  font-weight: 600;
+  font-size: var(--text-base);
+  color: var(--color-text-body);
+}
+
+.rule-setup-footer {
+  display: flex;
+  gap: var(--sp-8);
+  margin-top: var(--sp-16);
+}
+
+.rule-list-col {
+  flex: 9 1 236px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* Compact one-row rule card. */
+
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: var(--sp-6) var(--sp-6) var(--sp-6) var(--sp-8);
+}
+
+.rule-row-editing {
+  border-color: var(--color-accent-deep);
+  background: var(--color-slate-deep);
+}
+
+.rule-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  overflow: hidden;
+}
+
+.rule-row-title {
+  font-weight: 600;
+  font-size: var(--text-sm);
+  color: var(--color-text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  max-width: 45%;
+}
+
+.rule-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.rule-badge {
+  font-size: var(--text-2xs);
+  padding: var(--sp-2) var(--sp-8);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.rule-badge-match {
+  background: var(--color-slate-deep);
+  color: var(--color-accent-soft);
+}
+
+.rule-badge-value {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-body);
+  font-family: monospace;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rule-badge-mode.mode-include {
+  background: rgba(var(--rgb-success), 0.2);
+  color: var(--color-success-soft);
+}
+
+.rule-badge-mode.mode-except {
+  background: rgba(var(--rgb-accent), 0.2);
+  color: var(--color-accent-soft);
+}
+
+.rule-badge-mode.mode-skip {
+  background: var(--tint-strong);
+  color: var(--color-text-muted);
+}
+
+.rule-badge-warn {
+  background: rgba(var(--rgb-warning), 0.2);
+  color: var(--color-warning-strong);
+}
+
+.rule-row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-shrink: 0;
+}
+
+.rule-reorder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.rule-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.rule-fields-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-12);
+}
+
+.rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 170px;
+}
+
+.rule-field label {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.rule-field input[type="text"],
+.rule-field select {
+  padding: var(--sp-6) var(--sp-8);
+  font-size: var(--text-md);
+}
+
+.rule-count {
+  color: var(--color-text-faint);
+  font-weight: 400;
+}
+
+/* Border style + overlay frame controls */
+
+.border-overlay-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+
+.border-overlay-row select {
+  min-width: 220px;
+}
+
+.border-style-preview-wrap {
+  margin-top: var(--sp-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.border-style-preview-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+}
+
+.border-style-preview {
+  width: 140px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--hairline);
+  background: var(--tint-faint);
+}
+
+.holiday-frame-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-6);
+  height: 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--rgb-accent), 0.15);
+  border: 1px solid rgba(var(--rgb-accent), 0.4);
+  color: var(--color-accent-soft);
+  font-size: var(--text-3xs);
+  line-height: 1;
+}
+
+/* Border page: basic settings in a single row, items packed close together */
+
+.border-basic-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-16) var(--sp-32);
+  align-items: flex-start;
+}
+
+.border-basic-row .field-group {
+  flex: 0 0 auto;
+}
+
+.border-settings-card .field-group {
+  gap: var(--sp-8);
+}
+
+/* Preview card: preview on the left, style settings next to it */
+
+.border-style-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--card-gap);
+  align-items: flex-start;
+}
+
+/* Each settings column in the (preview / style / sub-settings) layout */
+
+.border-style-layout .border-style-settings-col {
+  flex: 1 1 280px;
+}
+
+.border-style-preview-col {
+  flex: 0 0 auto;
+}
+
+.border-style-settings-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-24);
+}
+
+.border-style-preview-col .border-style-preview {
+  width: 170px;
+}
+
+@media (max-width: 1000px) {
+  .border-style-layout {
+    flex-direction: column;
+  }
+}
+
+.border-subtabs {
+  margin-bottom: var(--card-gap);
+}

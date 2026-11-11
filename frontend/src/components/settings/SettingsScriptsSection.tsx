@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { FileCode, RefreshCw } from 'lucide-react'
 import { getAvailableScripts, getHooks, saveHooks, getScriptLogging, setScriptLogging, type HookConfig } from '../../api/scripts'
 import './SettingsScriptsSection.css'
+import SaveActions from '../SaveActions'
 
 type ToastType = 'success' | 'error' | 'info'
 
@@ -22,6 +23,7 @@ type HooksState = Record<string, HookConfig>
 
 function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
   const [hooks, setHooks] = useState<HooksState>({})
+  const [savedHooks, setSavedHooks] = useState<HooksState>({})
   const [scriptsDir, setScriptsDir] = useState('/config/scripts')
   const [availableScripts, setAvailableScripts] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -35,6 +37,7 @@ function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
     try {
       const [hooksRes, scriptsRes, loggingRes] = await Promise.all([getHooks(), getAvailableScripts(), getScriptLogging()])
       setHooks(hooksRes.hooks)
+      setSavedHooks(hooksRes.hooks)
       setScriptsDir(hooksRes.scripts_dir)
       setAvailableScripts(scriptsRes.scripts)
       setScriptLoggingEnabled(loggingRes.enabled)
@@ -94,6 +97,7 @@ function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
         }
       }
       await saveHooks(payload)
+      setSavedHooks(hooks)
       showToast('Scripts configuration saved', 'success')
     } catch {
       showToast('Failed to save scripts configuration', 'error')
@@ -136,14 +140,14 @@ function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
         <div className="scripts-table-header-actions">
           <div className="scripts-logging-toggle">
             <span className="scripts-logging-label">Show script output in PosterFlow logs</span>
-            <label className="scripts-toggle" title={scriptLoggingEnabled ? 'Script output shown in logs' : 'Script output hidden from logs'}>
+            <label className="toggle-switch" title={scriptLoggingEnabled ? 'Script output shown in logs' : 'Script output hidden from logs'}>
               <input
                 type="checkbox"
                 checked={scriptLoggingEnabled}
                 disabled={togglingLogging}
                 onChange={(e) => handleToggleLogging(e.target.checked)}
               />
-              <span className="scripts-toggle-slider" />
+              <span className="toggle-slider" />
             </label>
           </div>
           <button
@@ -181,13 +185,13 @@ function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
               <span className="scripts-job-label">{hook.label ?? key}</span>
 
               <span className="scripts-toggle-cell">
-                <label className="scripts-toggle">
+                <label className="toggle-switch">
                   <input
                     type="checkbox"
                     checked={hook.enabled}
                     onChange={(e) => updateHook(key, 'enabled', e.target.checked)}
                   />
-                  <span className="scripts-toggle-slider" />
+                  <span className="toggle-slider" />
                 </label>
               </span>
 
@@ -236,9 +240,12 @@ function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
       </div>
 
       <div className="scripts-footer">
-        <button className="btn-primary" onClick={handleSave} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+        <SaveActions
+          dirty={JSON.stringify(hooks) !== JSON.stringify(savedHooks)}
+          saving={saving}
+          onSave={handleSave}
+          onCancel={() => setHooks(savedHooks)}
+        />
       </div>
     </div>
   )

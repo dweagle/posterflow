@@ -172,6 +172,8 @@ describe('SetupWizard', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByRole('heading', { name: 'API Keys' })
+    expect(screen.getByText('Recommended')).toBeTruthy()  // TMDB: not needed to finish, but most features want it
+    expect(screen.getAllByText('Optional')).toHaveLength(3)  // TheTVDB, its PIN, fanart.tv
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Destination Folder Setup')

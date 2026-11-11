@@ -1,4 +1,5 @@
 import { Bell, Calendar, Cloud, Database, FileCode, Server, Settings, Shield, Wrench } from 'lucide-react'
+import Tabs, { type TabItem } from '../Tabs'
 
 type SettingsTab = 'basic' | 'notifications' | 'rclone' | 'media' | 'scheduling' | 'backup' | 'maintenance' | 'security' | 'scripts'
 
@@ -7,47 +8,20 @@ type SettingsTabsProps = {
   onTabChange: (tab: SettingsTab) => void
 }
 
+const ITEMS: TabItem<SettingsTab>[] = [
+  { key: 'basic', label: 'General', icon: <Settings size={16} /> },
+  { key: 'notifications', label: 'Notifications', icon: <Bell size={16} /> },
+  { key: 'scheduling', label: 'Scheduling', icon: <Calendar size={16} /> },
+  { key: 'media', label: 'Media Servers', icon: <Server size={16} /> },
+  { key: 'rclone', label: 'Rclone', icon: <Cloud size={16} /> },
+  { key: 'backup', label: 'Backup & Restore', icon: <Database size={16} /> },
+  { key: 'maintenance', label: 'Maintenance', icon: <Wrench size={16} /> },
+  { key: 'security', label: 'Security', icon: <Shield size={16} /> },
+  { key: 'scripts', label: 'Scripts', icon: <FileCode size={16} /> },
+]
+
 function SettingsTabs({ activeTab, onTabChange }: SettingsTabsProps) {
-  return (
-    <div className="settings-tabs">
-      <button className={activeTab === 'basic' ? 'active' : ''} onClick={() => onTabChange('basic')}>
-        <Settings size={16} className="tab-icon" />
-        General
-      </button>
-      <button className={activeTab === 'notifications' ? 'active' : ''} onClick={() => onTabChange('notifications')}>
-        <Bell size={16} className="tab-icon" />
-        Notifications
-      </button>
-      <button className={activeTab === 'scheduling' ? 'active' : ''} onClick={() => onTabChange('scheduling')}>
-        <Calendar size={16} className="tab-icon" />
-        Scheduling
-      </button>
-      <button className={activeTab === 'media' ? 'active' : ''} onClick={() => onTabChange('media')}>
-        <Server size={16} className="tab-icon" />
-        Media Servers
-      </button>
-      <button className={activeTab === 'rclone' ? 'active' : ''} onClick={() => onTabChange('rclone')}>
-        <Cloud size={16} className="tab-icon" />
-        Rclone
-      </button>
-      <button className={activeTab === 'backup' ? 'active' : ''} onClick={() => onTabChange('backup')}>
-        <Database size={16} className="tab-icon" />
-        Backup & Restore
-      </button>
-      <button className={activeTab === 'maintenance' ? 'active' : ''} onClick={() => onTabChange('maintenance')}>
-        <Wrench size={16} className="tab-icon" />
-        Maintenance
-      </button>
-      <button className={activeTab === 'security' ? 'active' : ''} onClick={() => onTabChange('security')}>
-        <Shield size={16} className="tab-icon" />
-        Security
-      </button>
-      <button className={activeTab === 'scripts' ? 'active' : ''} onClick={() => onTabChange('scripts')}>
-        <FileCode size={16} className="tab-icon" />
-        Scripts
-      </button>
-    </div>
-  )
+  return <Tabs ariaLabel="Settings tabs" items={ITEMS} value={activeTab} onChange={onTabChange} />
 }
 
 export default SettingsTabs

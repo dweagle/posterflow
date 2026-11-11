@@ -33,14 +33,14 @@ function MaintenanceSection({
           <p>Remove database records for poster and artwork files that have been deleted from disk (including files from unsubscribed or deprecated drives). This only prunes stale records — it never deletes files or touches your renamed destination folders.</p>
 
           {!databaseStats && !loadingStats && (
-            <button className="btn-secondary" onClick={onFetchStats} style={{ marginTop: '1rem' }}>
-              <Database size={16} style={{ marginRight: '0.5rem' }} />
+            <button className="btn-secondary mt-lg" onClick={onFetchStats}>
+              <Database size={16} />
               Check Database Health
             </button>
           )}
 
           {loadingStats && (
-            <div style={{ marginTop: '1rem', color: '#aaa' }}>
+            <div className="mt-lg text-muted">
               Loading database statistics...
             </div>
           )}
@@ -54,7 +54,7 @@ function MaintenanceSection({
                 </div>
                 <div className="stat-row">
                   <span className="stat-label">Orphaned Records:</span>
-                  <span className="stat-value" style={{ color: databaseStats.orphaned_count > 0 ? '#ffb74d' : '#4caf50' }}>
+                  <span className={databaseStats.orphaned_count > 0 ? 'stat-value text-warning' : 'stat-value text-success'}>
                     {databaseStats.orphaned_count.toLocaleString()}
                   </span>
                 </div>
@@ -116,9 +116,9 @@ function MaintenanceSection({
                 </div>
               )}
 
-              <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
+              <div className="row row-lg mt-xl">
                 <button className="btn-secondary" onClick={onFetchStats} disabled={loadingStats || cleanupLoading}>
-                  <Database size={16} style={{ marginRight: '0.5rem' }} />
+                  <Database size={16} />
                   Refresh Stats
                 </button>
 
@@ -135,7 +135,7 @@ function MaintenanceSection({
               </div>
 
               {databaseStats.orphaned_count === 0 && (
-                <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: 'rgba(76, 175, 80, 0.1)', borderRadius: '0.5rem', color: '#4caf50' }}>
+                <div className="success-note">
                   ✓ Database is clean! No orphaned records found.
                 </div>
               )}
@@ -143,7 +143,7 @@ function MaintenanceSection({
           )}
 
           {databaseStats && databaseStats.orphaned_count > 0 && (
-            <div className="backup-warning" style={{ marginTop: '1.5rem' }}>
+            <div className="backup-warning mt-xl">
               ⚠️ <strong>Warning:</strong> This action cannot be undone. Database records for deleted files will be permanently removed.
             </div>
           )}

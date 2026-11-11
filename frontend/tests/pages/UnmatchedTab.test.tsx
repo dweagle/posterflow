@@ -176,11 +176,11 @@ describe('UnmatchedTab (posters)', () => {
     const user = userEvent.setup()
 
     renderTab()
-    expect((screen.getByRole('button', { name: /Save Settings/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /^Saved?$/ }) as HTMLButtonElement).disabled).toBe(true)
 
     cleanup()
     const props = renderTab({ hasUnsavedLibraryChanges: true })
-    const save = screen.getByRole('button', { name: /Save Settings/i }) as HTMLButtonElement
+    const save = screen.getByRole('button', { name: /^Saved?$/ }) as HTMLButtonElement
     expect(save.disabled).toBe(false)
 
     await user.click(save)

@@ -74,9 +74,9 @@ function UnmatchedIgnoreList({ onChanged }: { onChanged?: () => void }) {
 
   return (
     <div className="unmatched-ignore-list">
-      <label style={{ display: 'block', fontWeight: 500 }}>Ignored Items</label>
+      <label className="field-label">Ignored Items</label>
       <small>
-        Items hidden from unmatched detection. Add them with the <EyeOff size={11} style={{ verticalAlign: 'text-top' }} /> button
+        Items hidden from unmatched detection. Add them with the <EyeOff size={11} className="icon-inline" /> button
         on the unmatched lists or manually below. Removing one here makes it show as unmatched again.
       </small>
       <div className="unmatched-ignore-warning">
@@ -84,7 +84,7 @@ function UnmatchedIgnoreList({ onChanged }: { onChanged?: () => void }) {
         <span>Ignoring an item covers every asset type: hide a poster and its artwork is hidden too, and vice versa.</span>
       </div>
       {items === null ? (
-        <div className="unmatched-ignore-empty"><Loader2 size={14} className="spin-icon" /></div>
+        <div className="unmatched-ignore-empty"><Loader2 size={14} className="spinning" /></div>
       ) : items.length === 0 ? (
         <div className="unmatched-ignore-empty">No ignored items.</div>
       ) : (
@@ -103,13 +103,13 @@ function UnmatchedIgnoreList({ onChanged }: { onChanged?: () => void }) {
                 onClick={() => handleRemove(item, idx)}
                 disabled={removingIdx !== null}
               >
-                {removingIdx === idx ? <Loader2 size={13} className="spin-icon" /> : <X size={13} />}
+                {removingIdx === idx ? <Loader2 size={13} className="spinning" /> : <X size={13} />}
               </button>
             </div>
           ))}
         </div>
       )}
-      <label style={{ display: 'block', fontWeight: 500, marginTop: '0.75rem' }}>Manual Entry</label>
+      <label className="field-label mt-md">Manual Entry</label>
       <div className="unmatched-ignore-add">
         <select
           value={addType}
@@ -144,7 +144,7 @@ function UnmatchedIgnoreList({ onChanged }: { onChanged?: () => void }) {
           onClick={handleAdd}
           disabled={adding || !addTitle.trim()}
         >
-          {adding ? <Loader2 size={13} className="spin-icon" /> : <Plus size={13} />}
+          {adding ? <Loader2 size={13} className="spinning" /> : <Plus size={13} />}
           <span>Add</span>
         </button>
       </div>

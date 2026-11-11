@@ -14,6 +14,7 @@ import './GDrives.css'
 import Toolbar from '../components/Toolbar'
 import { getAddToPriorityPref, setAddToPriorityPref } from '../utils/priorityPrompt'
 import { formatDateShortTime } from '../utils/datetime'
+import Tabs from '../components/Tabs'
 
 // Build a Google Drive folder URL, skipping placeholder IDs for custom drives without a real ID
 const driveFolderUrl = (driveId: string): string | null =>
@@ -513,27 +514,20 @@ function GDrives() {
 
   return (
     <div className="page-container gdrives">
-      <div className="gdrives-header">
+      <div className="page-header gdrives-header">
         <h1>Google Drives</h1>
         <p>{scope === 'artwork' ? 'Logo, backdrop & square-art drives' : 'Subscribe to community poster collections'}</p>
       </div>
 
-      <div className="gdrives-tabs">
-        <button
-          className={scope === 'posters' ? 'active' : ''}
-          onClick={() => { setScope('posters'); localStorage.setItem('posterflow.gdrives.scope', 'posters') }}
-        >
-          <Image size={16} className="tab-icon" />
-          Posters
-        </button>
-        <button
-          className={scope === 'artwork' ? 'active' : ''}
-          onClick={() => { setScope('artwork'); localStorage.setItem('posterflow.gdrives.scope', 'artwork') }}
-        >
-          <Layers size={16} className="tab-icon" />
-          Artwork
-        </button>
-      </div>
+      <Tabs
+        ariaLabel="Drive scope"
+        value={scope}
+        onChange={(next) => { setScope(next); localStorage.setItem('posterflow.gdrives.scope', next) }}
+        items={[
+          { key: 'posters', label: 'Posters', icon: <Image size={16} /> },
+          { key: 'artwork', label: 'Artwork', icon: <Layers size={16} /> },
+        ]}
+      />
 
       {allNewDrives.length > 0 && (
         <div className="new-drives-notice" role="status">
@@ -557,7 +551,7 @@ function GDrives() {
           </span>
           <button
             type="button"
-            className="new-drives-notice-dismiss"
+            className="btn-secondary btn-sm new-drives-notice-dismiss"
             onClick={() => void handleDismissNewDrives()}
             title="Remove the New tags now (they fade on their own after two weeks)"
           >
@@ -613,7 +607,7 @@ function GDrives() {
             <Settings2 size={16} /> Configure
           </button>
           <button 
-            className="btn-toolbar btn-reload" 
+            className="btn-toolbar" 
             onClick={handleReloadDrives}
             disabled={reloading}
             title="Reload community drives from remote source"
@@ -621,14 +615,14 @@ function GDrives() {
             {reloading ? (<><RotateCw size={16} className="spinning" /> Reloading...</>) : (<><RotateCw size={16} /> Reload</>)}
           </button>
           <button 
-            className="btn-toolbar btn-add-custom" 
+            className="btn-toolbar" 
             onClick={() => setShowAddModal(true)}
             title="Add a custom Google Drive"
           >
             <Plus size={16} /> Custom
           </button>
           <button
-            className="btn-toolbar btn-sync-all"
+            className="btn-toolbar btn-primary"
             onClick={handleSyncAll}
             disabled={syncingAll || subscribedCount === 0}
             title={subscribedCount > 0 ? `Sync all ${subscribedCount} subscribed drives` : 'No subscribed drives to sync'}
@@ -642,27 +636,27 @@ function GDrives() {
         {!hiddenStyles.has('CL2K') && (
           <div className="bulk-action-group">
             <span className="bulk-label">CL2K:</span>
-            <button className="btn-bulk" onClick={() => handleBulkSubscribe('CL2K')}>Subscribe All</button>
-            <button className="btn-bulk" onClick={() => handleBulkUnsubscribe('CL2K')}>Unsubscribe All</button>
+            <button className="btn-secondary" onClick={() => handleBulkSubscribe('CL2K')}>Subscribe All</button>
+            <button className="btn-secondary" onClick={() => handleBulkUnsubscribe('CL2K')}>Unsubscribe All</button>
           </div>
         )}
         {!hiddenStyles.has('MM2K') && (
           <div className="bulk-action-group">
             <span className="bulk-label">MM2K:</span>
-            <button className="btn-bulk" onClick={() => handleBulkSubscribe('MM2K')}>Subscribe All</button>
-            <button className="btn-bulk" onClick={() => handleBulkUnsubscribe('MM2K')}>Unsubscribe All</button>
+            <button className="btn-secondary" onClick={() => handleBulkSubscribe('MM2K')}>Subscribe All</button>
+            <button className="btn-secondary" onClick={() => handleBulkUnsubscribe('MM2K')}>Unsubscribe All</button>
           </div>
         )}
         <div className="bulk-action-group">
           <span className="bulk-label">Custom:</span>
-          <button className="btn-bulk" onClick={() => handleBulkSubscribe('custom')}>Subscribe All</button>
-          <button className="btn-bulk" onClick={() => handleBulkUnsubscribe('custom')}>Unsubscribe All</button>
+          <button className="btn-secondary" onClick={() => handleBulkSubscribe('custom')}>Subscribe All</button>
+          <button className="btn-secondary" onClick={() => handleBulkUnsubscribe('custom')}>Unsubscribe All</button>
         </div>
       </div>
 
       {/* Drives controls: filter + sort */}
       <div className="drives-controls">
-        <div className="filter-buttons">
+        <div className="filter-buttons pf-subtabs">
           <button 
             className={filter === 'all' ? 'active' : ''} 
             onClick={() => setFilter('all')}
@@ -738,7 +732,7 @@ function GDrives() {
                           <div className="deprecated-badge">⚠️ DEPRECATED</div>
                           <p className="deprecated-message">This drive has been removed from the community list</p>
                           <button 
-                            className="btn-delete-icon" 
+                            className="btn-icon btn-icon-sm btn-icon-danger btn-delete-icon" 
                             onClick={() => confirmDeleteDrive(drive.id, drive.name, drive.is_deprecated)}
                             title="Delete drive"
                           >
@@ -748,7 +742,7 @@ function GDrives() {
                       )}
                       {drive.is_custom && !drive.is_deprecated && (
                         <button 
-                          className="btn-delete-icon" 
+                          className="btn-icon btn-icon-sm btn-icon-danger btn-delete-icon" 
                           onClick={() => confirmDeleteDrive(drive.id, drive.name, drive.is_deprecated)}
                           title="Delete drive"
                         >
@@ -765,7 +759,7 @@ function GDrives() {
                           onMouseEnter={(e) => openIdTooltip(drive.id, e)}
                           onMouseLeave={hideIdTooltip}
                         >
-                          <button className="btn-drive-id-info">
+                          <button className="btn-icon btn-icon-sm">
                             <Info size={13} />
                           </button>
                           {idTooltip === drive.id && (
@@ -781,7 +775,7 @@ function GDrives() {
                               <div className="drive-id-tooltip-row">
                                 <span className="drive-id-tooltip-text">{drive.drive_id}</span>
                                 <button
-                                  className="btn-copy-id"
+                                  className="btn-icon btn-icon-sm btn-icon-outlined btn-copy-id"
                                   onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
                                   title="Copy to clipboard"
                                 >
@@ -828,7 +822,7 @@ function GDrives() {
                         {drive.subscribed ? (
                           <>
                             <button 
-                              className="btn-icon btn-sync" 
+                              className="btn-icon btn-icon-primary" 
                               onClick={() => handleSync(drive.id)}
                               disabled={syncingDrive === drive.id}
                               title={syncingDrive === drive.id ? 'Starting sync...' : 'Sync drive'}
@@ -836,14 +830,14 @@ function GDrives() {
                               <RefreshCw size={16} />
                             </button>
                             <button 
-                              className="btn-icon btn-edit" 
+                              className="btn-icon btn-icon-filled" 
                               onClick={() => setEditingDrive(drive)}
                               title="Drive settings"
                             >
                               <SettingsIcon size={16} />
                             </button>
                             <button 
-                              className="btn-icon btn-subscribed" 
+                              className="btn-icon btn-icon-filled btn-icon-danger" 
                               onClick={() => handleUnsubscribe(drive.id)}
                               title="Unsubscribe from drive"
                             >
@@ -853,14 +847,14 @@ function GDrives() {
                         ) : (
                           <>
                             <button 
-                              className="btn-icon btn-edit" 
+                              className="btn-icon btn-icon-filled" 
                               onClick={() => setEditingDrive(drive)}
                               title="Drive settings"
                             >
                               <SettingsIcon size={16} />
                             </button>
                             <button 
-                              className="btn-subscribe" 
+                              className="btn-primary" 
                               onClick={() => handleSubscribe(drive.id)}
                               title="Subscribe to drive"
                             >
@@ -887,7 +881,7 @@ function GDrives() {
                   <div className="deprecated-badge">⚠️ DEPRECATED</div>
                   <p className="deprecated-message">This drive has been removed from the community list</p>
                   <button 
-                    className="btn-delete-icon" 
+                    className="btn-icon btn-icon-sm btn-icon-danger btn-delete-icon" 
                     onClick={() => confirmDeleteDrive(drive.id, drive.name, drive.is_deprecated)}
                     title="Delete drive"
                   >
@@ -897,7 +891,7 @@ function GDrives() {
               )}
               {drive.is_custom && !drive.is_deprecated && (
                 <button 
-                  className="btn-delete-icon" 
+                  className="btn-icon btn-icon-sm btn-icon-danger btn-delete-icon" 
                   onClick={() => confirmDeleteDrive(drive.id, drive.name, drive.is_deprecated)}
                   title="Delete drive"
                 >
@@ -914,7 +908,7 @@ function GDrives() {
                   onMouseEnter={(e) => openIdTooltip(drive.id, e)}
                   onMouseLeave={hideIdTooltip}
                 >
-                  <button className="btn-drive-id-info">
+                  <button className="btn-icon btn-icon-sm">
                     <Info size={13} />
                   </button>
                   {idTooltip === drive.id && (
@@ -930,7 +924,7 @@ function GDrives() {
                       <div className="drive-id-tooltip-row">
                         <span className="drive-id-tooltip-text">{drive.drive_id}</span>
                         <button
-                          className="btn-copy-id"
+                          className="btn-icon btn-icon-sm btn-icon-outlined btn-copy-id"
                           onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
                           title="Copy to clipboard"
                         >
@@ -977,7 +971,7 @@ function GDrives() {
                 {drive.subscribed ? (
                   <>
                     <button 
-                      className="btn-icon btn-sync" 
+                      className="btn-icon btn-icon-primary" 
                       onClick={() => handleSync(drive.id)}
                       disabled={syncingDrive === drive.id}
                       title={syncingDrive === drive.id ? 'Starting sync...' : 'Sync drive'}
@@ -985,14 +979,14 @@ function GDrives() {
                       <RefreshCw size={16} />
                     </button>
                     <button 
-                      className="btn-icon btn-edit" 
+                      className="btn-icon btn-icon-filled" 
                       onClick={() => setEditingDrive(drive)}
                       title="Drive settings"
                     >
                       <SettingsIcon size={16} />
                     </button>
                     <button 
-                      className="btn-icon btn-subscribed" 
+                      className="btn-icon btn-icon-filled btn-icon-danger" 
                       onClick={() => handleUnsubscribe(drive.id)}
                       title="Unsubscribe from drive"
                     >
@@ -1002,14 +996,14 @@ function GDrives() {
                 ) : (
                   <>
                     <button 
-                      className="btn-icon btn-edit" 
+                      className="btn-icon btn-icon-filled" 
                       onClick={() => setEditingDrive(drive)}
                       title="Drive settings"
                     >
                       <SettingsIcon size={16} />
                     </button>
                     <button 
-                      className="btn-subscribe" 
+                      className="btn-primary" 
                       onClick={() => handleSubscribe(drive.id)}
                       title="Subscribe to drive"
                     >

@@ -1,17 +1,73 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
+import { lazy, Suspense, useState, useEffect, useRef } from 'react'
 import MainLayout from './components/MainLayout'
-import SetupWizard from './pages/SetupWizard'
+// Every stylesheet, eagerly and in cascade order. Pages load lazily, and shared components lean on
+// page stylesheets (ServiceLinks is styled by the maker-tools sheets), so no sheet may wait for a
+// page's chunk.
+import './styles/globals.css'
+import './components/ConfirmDialog.css'
+import './components/Toast.css'
+import './components/Sidebar.css'
+import './components/IdarrQuickAddNotice.css'
+import './components/UpdateBanner.css'
+import './components/MainLayout.css'
+import './components/Toolbar.css'
+import './components/Button.css'
+import './components/IconButton.css'
+import './components/Modal.css'
+import './components/Tabs.css'
+import './components/Subtabs.css'
+import './components/Card.css'
+import './components/PageHeader.css'
+import './components/Form.css'
+import './components/LibraryList.css'
+import './components/Toggle.css'
+import './components/settings/GoogleDriveCredentialsGuide.css'
+import './pages/SetupWizard.css'
+import './pages/Dashboard.css'
+import './components/ArtworkTypePicker.css'
+import './components/GdriveStorageModal.css'
+import './pages/GDrives.css'
+import './components/LogPane.css'
+import './pages/Logs.css'
+import './components/settings/SettingsSecuritySection.css'
+import './components/settings/SettingsScriptsSection.css'
+import './pages/Settings.css'
+import './components/FloatTip.css'
+import './pages/AssetSearch.css'
+import './components/PosterDriveSearchModal.css'
+import './pages/poster-manager/base.css'
+import './pages/poster-manager/flow.css'
+import './pages/poster-manager/renamer.css'
+import './pages/poster-manager/settings.css'
+import './pages/poster-manager/border.css'
+import './pages/poster-manager/priority.css'
+import './pages/poster-manager/unmatched.css'
+import './pages/poster-manager/requests.css'
+import './pages/IDarr.css'
+import './pages/maker-tools/base.css'
+import './pages/maker-tools/search.css'
+import './pages/maker-tools/gallery.css'
+import './pages/maker-tools/psd.css'
+import './pages/maker-tools/unmatched.css'
+import './pages/maker-tools/artwork.css'
+import './pages/maker-tools/reminders.css'
+import './pages/PlexUpload.css'
+import './pages/CommunityRequests.css'
+import './components/LockScreen.css'
+import './styles/utilities.css'
 import Dashboard from './pages/Dashboard'
-import GDrives from './pages/GDrives'
-import Logs from './pages/Logs'
-import Settings from './pages/Settings'
-import PosterManager from './pages/PosterManager'
-import IDarr from './pages/IDarr'
-import MakerTools from './pages/MakerTools'
-import AssetSearch from './pages/AssetSearch'
-import PlexUpload from './pages/PlexUpload'
-import CommunityRequests from './pages/CommunityRequests'
+// Each page is its own chunk, fetched the first time it opens; the Dashboard, the first page seen, stays in the main bundle.
+const SetupWizard = lazy(() => import('./pages/SetupWizard'))
+const GDrives = lazy(() => import('./pages/GDrives'))
+const Logs = lazy(() => import('./pages/Logs'))
+const Settings = lazy(() => import('./pages/Settings'))
+const PosterManager = lazy(() => import('./pages/PosterManager'))
+const IDarr = lazy(() => import('./pages/IDarr'))
+const MakerTools = lazy(() => import('./pages/MakerTools'))
+const AssetSearch = lazy(() => import('./pages/AssetSearch'))
+const PlexUpload = lazy(() => import('./pages/PlexUpload'))
+const CommunityRequests = lazy(() => import('./pages/CommunityRequests'))
 import { CommunityClaimStatusProvider } from './hooks/useCommunityClaimStatus'
 import { checkSetupComplete } from './api/client'
 import { ToastProvider } from './components/Toast'
@@ -19,6 +75,7 @@ import { AppEventsProvider } from './contexts/AppEventsContext'
 import { RemindersProvider } from './contexts/RemindersContext'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import LockScreen from './components/LockScreen'
+import RouteLoading from './components/RouteLoading'
 
 const LAST_ROUTE_STORAGE_KEY = 'posterflow.navigation.lastRoute'
 
@@ -95,14 +152,7 @@ function AppContent() {
   // Auth check still in progress
   if (!isReady) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        background: '#121212',
-        color: '#fff'
-      }}>
+      <div className="app-loading">
         <h2>Loading PosterFlow...</h2>
       </div>
     )
@@ -116,14 +166,7 @@ function AppContent() {
   // Authenticated – waiting for setup check
   if (isSetupComplete === null) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        background: '#121212',
-        color: '#fff'
-      }}>
+      <div className="app-loading">
         <h2>Loading PosterFlow...</h2>
       </div>
     )
@@ -138,7 +181,7 @@ function AppContent() {
           <Routes>
           {!isSetupComplete ? (
             <>
-              <Route path="/setup" element={<SetupWizard onComplete={() => setIsSetupComplete(true)} />} />
+              <Route path="/setup" element={<Suspense fallback={<RouteLoading />}><SetupWizard onComplete={() => setIsSetupComplete(true)} /></Suspense>} />
               <Route path="*" element={<Navigate to="/setup" replace />} />
             </>
           ) : (
@@ -157,7 +200,7 @@ function AppContent() {
                 <Route path="settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
-              <Route path="/setup" element={<SetupWizard onComplete={() => window.history.back()} />} />
+              <Route path="/setup" element={<Suspense fallback={<RouteLoading />}><SetupWizard onComplete={() => window.history.back()} /></Suspense>} />
             </>
           )}
           </Routes>

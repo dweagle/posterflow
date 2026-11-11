@@ -40,6 +40,7 @@ import { useSettingsMedia } from '../hooks/useSettingsMedia'
 import { useSettingsOperations } from '../hooks/useSettingsOperations'
 import { API_KEY_SETTINGS, ApiKeyName, useSettingsCore } from '../hooks/useSettingsCore'
 import './Settings.css'
+import SaveActions from '../components/SaveActions'
 
 type SettingsTab = 'basic' | 'notifications' | 'rclone' | 'media' | 'scheduling' | 'backup' | 'maintenance' | 'security' | 'scripts'
 const SETTINGS_TAB_STORAGE_KEY = 'posterflow.settings.activeTab'
@@ -142,6 +143,7 @@ const NOTIFICATION_FEATURE_ORDER = [
   'plex_upload',
   'idarr',
   'maker_monitor',
+  'tools',
   'system_errors',
 ]
 
@@ -177,6 +179,11 @@ const NOTIFICATION_FEATURE_EVENTS: Record<string, { type: 'success' | 'error' | 
     { type: 'info', label: 'Info - Posters needed report — upcoming seasons, premieres found, posters needed' },
     { type: 'error', label: 'Error - Maker Monitor failed — error message' },
   ],
+  tools: [
+    { type: 'success', label: 'Success - Arr rename run: files and folders renamed (old → new), what was held back or left for later, how far the cycle got' },
+    { type: 'error', label: 'Error - Arr rename run that needs a look: the run failed or stopped, a file went missing, an irregular folder was held back or renamed anyway, an item was deleted mid-run' },
+    { type: 'info', label: 'Info - Arr rename run with nothing renamed, and dry runs' },
+  ],
   system_errors: [
     { type: 'error', label: 'Error - Major error from any feature — source and error message' },
   ],
@@ -190,6 +197,7 @@ const NOTIFICATION_FEATURE_LABELS: Record<string, string> = {
   plex_upload: 'Asset Upload Item',
   idarr: 'IDarr Summary',
   maker_monitor: 'Maker Monitor Summary',
+  tools: 'Tools (Arr Rename and Upgrade Summaries)',
   system_errors: 'Major Errors',
 }
 
@@ -318,6 +326,8 @@ const autoGrowTextarea = (element: HTMLTextAreaElement | null) => {
 
 function Settings() {
   const MASKED_VALUE = '***masked***'
+  // A key field has something new to save once it holds text that is not the saved mask.
+  const keyEdited = (value?: string) => Boolean(value) && value !== MASKED_VALUE && value!.trim() !== ''
 
   const navigate = useNavigate()
   const [toggleAnimationsEnabled, setToggleAnimationsEnabled] = useState(false)
@@ -838,10 +848,25 @@ function Settings() {
     setActiveTab(nextTab)
   }
 
+  // Drop the unsaved edits on a section and go back to what was last saved.
+  const revertRcloneSettings = () => {
+    setRcloneSettings(normalizeRcloneSettings(rcloneBaselineRef.current))
+    setHasUnsavedRclone(false)
+  }
+
+  const revertDiscordSettings = () => {
+    setDiscordConfig(normalizeDiscordConfig(discordBaselineRef.current))
+    setHasUnsavedDiscord(false)
+  }
+
+  const revertAppriseSettings = () => {
+    setAppriseConfig(normalizeAppriseConfig(appriseBaselineRef.current))
+    setHasUnsavedApprise(false)
+  }
+
   const handleDiscardChanges = () => {
     if (activeTab === 'rclone') {
-      setRcloneSettings(normalizeRcloneSettings(rcloneBaselineRef.current))
-      setHasUnsavedRclone(false)
+      revertRcloneSettings()
     }
 
     if (activeTab === 'media') {
@@ -853,10 +878,8 @@ function Settings() {
     }
 
     if (activeTab === 'notifications') {
-      setDiscordConfig(normalizeDiscordConfig(discordBaselineRef.current))
-      setHasUnsavedDiscord(false)
-      setAppriseConfig(normalizeAppriseConfig(appriseBaselineRef.current))
-      setHasUnsavedApprise(false)
+      revertDiscordSettings()
+      revertAppriseSettings()
     }
 
     if (pendingTabChange) {
@@ -1107,14 +1130,14 @@ function Settings() {
   }
 
   return (
-    <div className={`page-container settings ${toggleAnimationsEnabled ? 'toggle-animations-enabled' : ''}`}>
-      <div className="settings-title-row">
+    <div className={`page-container settings ${toggleAnimationsEnabled ? '' : 'toggles-settling'}`}>
+      <div className="page-header settings-title-row">
         <div>
           <h1>Settings</h1>
           <p className="settings-description">Configure application settings</p>
         </div>
         <button 
-          className="btn-rerun-setup" 
+          className="btn-secondary" 
           onClick={() => navigate('/setup')}
           title="Re-run Setup Wizard"
         >
@@ -1136,7 +1159,7 @@ function Settings() {
                 <label>TMDB API Key</label>
                 <p className="setting-description">
                   Used by Unmatched Assets, IDarr, and the Maker Tools monitor to search The Movie Database. Get a free key at{' '}
-                  <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                  <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">
                     themoviedb.org
                   </a>.
                 </p>
@@ -1158,23 +1181,19 @@ function Settings() {
                     {showTmdbKey ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
-                <button
-                  className="btn-primary btn-inline-save"
-                  onClick={handleSaveTmdbApiKey}
-                  disabled={saving}
-                >
-                  Save
-                </button>
-                {savedApiKeys.tmdb && (
-                  <button
-                    className="btn-secondary btn-inline-save"
-                    type="button"
-                    onClick={() => setRemoveApiKey('tmdb')}
-                    disabled={saving}
-                  >
-                    Remove
-                  </button>
-                )}
+                <span className="settings-input-actions">
+                  <SaveActions dirty={keyEdited(tmdbApiKey)} saving={saving} onSave={handleSaveTmdbApiKey} />
+                  {savedApiKeys.tmdb && (
+                    <button
+                      className="btn-danger"
+                      type="button"
+                      onClick={() => setRemoveApiKey('tmdb')}
+                      disabled={saving}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
               </div>
             </div>
             <SourceAttribution source="tmdb" />
@@ -1185,7 +1204,7 @@ function Settings() {
                   Optional. Adds TheTVDB as a second source in the Maker Tools image browser, and lets the
                   Maker Tools monitor take season numbers and premiere dates from TheTVDB — the same source
                   Sonarr uses — with TMDB as the fallback. Create a v4 key at{' '}
-                  <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                  <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer">
                     thetvdb.com
                   </a>. Leave the PIN blank unless yours is a subscriber-supported key.
                 </p>
@@ -1209,28 +1228,24 @@ function Settings() {
                 </div>
                 <input
                   type="password"
-                  style={{ maxWidth: 130 }}
+                  className="field-w-xs"
                   value={tvdbPin === MASKED_VALUE ? '' : tvdbPin}
                   onChange={(e) => setTvdbPin(e.target.value)}
                   placeholder={tvdbPin === MASKED_VALUE ? '••••• PIN' : 'PIN (optional)'}
                 />
-                <button
-                  className="btn-primary btn-inline-save"
-                  onClick={handleSaveTvdbApiKey}
-                  disabled={saving}
-                >
-                  Save
-                </button>
-                {savedApiKeys.tvdb && (
-                  <button
-                    className="btn-secondary btn-inline-save"
-                    type="button"
-                    onClick={() => setRemoveApiKey('tvdb')}
-                    disabled={saving}
-                  >
-                    Remove
-                  </button>
-                )}
+                <span className="settings-input-actions">
+                  <SaveActions dirty={keyEdited(tvdbApiKey) || keyEdited(tvdbPin)} saving={saving} onSave={handleSaveTvdbApiKey} />
+                  {savedApiKeys.tvdb && (
+                    <button
+                      className="btn-danger"
+                      type="button"
+                      onClick={() => setRemoveApiKey('tvdb')}
+                      disabled={saving}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
               </div>
             </div>
             <SourceAttribution source="tvdb" />
@@ -1240,7 +1255,7 @@ function Settings() {
                 <p className="setting-description">
                   Optional. Adds fanart.tv as a third source in the Maker Tools image browser and the
                   Artwork Finder, alongside TMDB and TheTVDB. Sign in at{' '}
-                  <a href="https://fanart.tv/" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                  <a href="https://fanart.tv/" target="_blank" rel="noopener noreferrer">
                     fanart.tv
                   </a>{' '}
                   and copy the personal API key from your profile.
@@ -1263,23 +1278,19 @@ function Settings() {
                     {showFanartKey ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
-                <button
-                  className="btn-primary btn-inline-save"
-                  onClick={handleSaveFanartApiKey}
-                  disabled={saving}
-                >
-                  Save
-                </button>
-                {savedApiKeys.fanart && (
-                  <button
-                    className="btn-secondary btn-inline-save"
-                    type="button"
-                    onClick={() => setRemoveApiKey('fanart')}
-                    disabled={saving}
-                  >
-                    Remove
-                  </button>
-                )}
+                <span className="settings-input-actions">
+                  <SaveActions dirty={keyEdited(fanartApiKey)} saving={saving} onSave={handleSaveFanartApiKey} />
+                  {savedApiKeys.fanart && (
+                    <button
+                      className="btn-danger"
+                      type="button"
+                      onClick={() => setRemoveApiKey('fanart')}
+                      disabled={saving}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
               </div>
             </div>
             <SourceAttribution source="fanart" />
@@ -1312,7 +1323,7 @@ function Settings() {
                   Optional and experimental. Adds a Remove Text button to the maker card's image preview.
                   Gemini redraws a poster or backdrop without its title and credits, and you download the result.
                   Google bills each image to this key. Create one in{' '}
-                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
                     Google AI Studio
                   </a>.
                 </p>
@@ -1334,23 +1345,19 @@ function Settings() {
                     {showGeminiKey ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
-                <button
-                  className="btn-primary btn-inline-save"
-                  onClick={handleSaveGeminiApiKey}
-                  disabled={saving}
-                >
-                  Save
-                </button>
-                {savedApiKeys.gemini && (
-                  <button
-                    className="btn-secondary btn-inline-save"
-                    type="button"
-                    onClick={() => setRemoveApiKey('gemini')}
-                    disabled={saving}
-                  >
-                    Remove
-                  </button>
-                )}
+                <span className="settings-input-actions">
+                  <SaveActions dirty={keyEdited(geminiApiKey)} saving={saving} onSave={handleSaveGeminiApiKey} />
+                  {savedApiKeys.gemini && (
+                    <button
+                      className="btn-danger"
+                      type="button"
+                      onClick={() => setRemoveApiKey('gemini')}
+                      disabled={saving}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
               </div>
             </div>
           </div>
@@ -1451,15 +1458,7 @@ function Settings() {
                 Configure one Discord webhook and choose which PosterFlow areas send notifications.
               </p>
             </div>
-            <button
-              type="button"
-              className={`btn-save ${hasUnsavedDiscord ? 'btn-unsaved' : ''}`}
-              onClick={handleSaveDiscordNotifications}
-              disabled={saving || !hasUnsavedDiscord}
-              title={hasUnsavedDiscord ? 'Save changes' : 'No changes to save'}
-            >
-              {saving ? 'Saving...' : 'Save Discord Settings'}
-            </button>
+            <SaveActions dirty={hasUnsavedDiscord} saving={saving} disabled={saving || !hasUnsavedDiscord} onSave={handleSaveDiscordNotifications} onCancel={revertDiscordSettings} />
           </div>
 
           <div className="setting-item">
@@ -1492,25 +1491,25 @@ function Settings() {
             <details className="feature-events-disclosure global-events-disclosure">
               <summary className="feature-events-summary">How does it work?</summary>
               <ul className="feature-events-list">
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Each enabled feature below sends notifications to this webhook URL.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Features with their own webhook URL override send to that channel instead.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Global Ping Target is used as a fallback — only if a feature has no ping target of its own.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>If a feature has its own ping target, its own "Ping on error / success / info" toggles are used instead of the global ones.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span>Each enabled feature below sends notifications to this webhook URL.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span>Features with their own webhook URL override send to that channel instead.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span>Global Ping Target is used as a fallback — only if a feature has no ping target of its own.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span>If a feature has its own ping target, its own "Ping on error / success / info" toggles are used instead of the global ones.</li>
               </ul>
               <div className="feature-events-divider" />
               <p className="feature-events-subheading">Finding your Webhook URL</p>
               <ul className="feature-events-list">
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>1.</span>In Discord, open <strong>Server Settings</strong> → <strong>Integrations</strong> → <strong>Webhooks</strong>.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>2.</span>Click <strong>New Webhook</strong>, pick a channel, then click <strong>Copy Webhook URL</strong>.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>3.</span>Paste the URL here. It starts with <code>https://discord.com/api/webhooks/…</code></li>
+                <li className="feature-event-item"><span className="feature-event-icon text-muted">1.</span>In Discord, open <strong>Server Settings</strong> → <strong>Integrations</strong> → <strong>Webhooks</strong>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-muted">2.</span>Click <strong>New Webhook</strong>, pick a channel, then click <strong>Copy Webhook URL</strong>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-muted">3.</span>Paste the URL here. It starts with <code>https://discord.com/api/webhooks/…</code></li>
               </ul>
               <div className="feature-events-divider" />
               <p className="feature-events-subheading">Finding User IDs &amp; Role IDs</p>
               <ul className="feature-events-list">
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>1.</span>Enable <strong>Developer Mode</strong> in Discord: <em>User Settings → Advanced → Developer Mode</em>.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>2.</span><strong>User ID:</strong> Right-click a user → <em>Copy User ID</em>. Use as <code>{'<@USER_ID>'}</code>.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>3.</span><strong>Role ID:</strong> Right-click a role in <em>Server Settings → Roles</em> → <em>Copy Role ID</em>. Use as <code>{'<@&ROLE_ID>'}</code>.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>4.</span>Use <code>@here</code> or <code>@everyone</code> to ping all online / all members in the channel.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-muted">1.</span>Enable <strong>Developer Mode</strong> in Discord: <em>User Settings → Advanced → Developer Mode</em>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-muted">2.</span><strong>User ID:</strong> Right-click a user → <em>Copy User ID</em>. Use as <code>{'<@USER_ID>'}</code>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-muted">3.</span><strong>Role ID:</strong> Right-click a role in <em>Server Settings → Roles</em> → <em>Copy Role ID</em>. Use as <code>{'<@&ROLE_ID>'}</code>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-muted">4.</span>Use <code>@here</code> or <code>@everyone</code> to ping all online / all members in the channel.</li>
               </ul>
             </details>
             <div className="settings-input-row">
@@ -1751,15 +1750,7 @@ function Settings() {
                 Send the same notifications through Apprise to Telegram, Pushover, ntfy, Gotify, Slack, email and many more services.
               </p>
             </div>
-            <button
-              type="button"
-              className={`btn-save ${hasUnsavedApprise ? 'btn-unsaved' : ''}`}
-              onClick={handleSaveAppriseNotifications}
-              disabled={saving || !hasUnsavedApprise}
-              title={hasUnsavedApprise ? 'Save changes' : 'No changes to save'}
-            >
-              {saving ? 'Saving...' : 'Save Apprise Settings'}
-            </button>
+            <SaveActions dirty={hasUnsavedApprise} saving={saving} disabled={saving || !hasUnsavedApprise} onSave={handleSaveAppriseNotifications} onCancel={revertAppriseSettings} />
           </div>
 
           <div className="setting-item">
@@ -1792,12 +1783,12 @@ function Settings() {
             <details className="feature-events-disclosure global-events-disclosure">
               <summary className="feature-events-summary">How does it work?</summary>
               <ul className="feature-events-list">
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Apprise turns one URL into a delivery to one service. The URL names the service and carries its credentials.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span><span>Find the URL format for your service at <a href="https://appriseit.com/" target="_blank" rel="noreferrer">appriseit.com</a>.</span></li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Lines starting with <code>#</code> are ignored, so you can label your URLs.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Running the Apprise API server? Add <code>apprise://HOST:PORT/KEY</code> and manage targets there.</li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span><span>Tags route notifications. Prefix a URL with tags, for example <code>home, urgent = pover://USER_KEY@APP_TOKEN</code>.</span></li>
-                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span><span>A feature with tags only sends to URLs carrying one of them. A URL tagged <code>always</code> receives everything.</span></li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span>Apprise turns one URL into a delivery to one service. The URL names the service and carries its credentials.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span><span>Find the URL format for your service at <a href="https://appriseit.com/" target="_blank" rel="noreferrer">appriseit.com</a>.</span></li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span>Lines starting with <code>#</code> are ignored, so you can label your URLs.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span>Running the Apprise API server? Add <code>apprise://HOST:PORT/KEY</code> and manage targets there.</li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span><span>Tags route notifications. Prefix a URL with tags, for example <code>home, urgent = pover://USER_KEY@APP_TOKEN</code>.</span></li>
+                <li className="feature-event-item"><span className="feature-event-icon text-accent">•</span><span>A feature with tags only sends to URLs carrying one of them. A URL tagged <code>always</code> receives everything.</span></li>
               </ul>
             </details>
             <div className="settings-input-row">
@@ -1975,6 +1966,7 @@ function Settings() {
             showToken={showToken}
             onToggleTokenVisibility={handleToggleTokenVisibility}
             onSave={handleSaveRcloneWithSnapshot}
+            onCancel={revertRcloneSettings}
             onUploadServiceAccount={handleUploadServiceAccount}
             uploadingServiceAccount={uploadingServiceAccount}
             saving={saving}

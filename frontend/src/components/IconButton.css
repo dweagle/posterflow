@@ -1,0 +1,74 @@
+/* Icon buttons: a square of the shared button height holding one icon, for an action whose
+   name is its tooltip. Quiet by default (no fill until hovered). `btn-icon-outlined` draws a
+   hairline, `btn-icon-filled` the resting look of a toolbar button, `btn-icon-primary` the
+   button blue, and `btn-icon-danger` a red icon that fills red on hover (it combines with the
+   others). `btn-icon-sm` sits inside a row of text or chips. Pages position icon buttons; they
+   do not restyle them. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn-icon svg {
+  flex-shrink: 0;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-icon-sm {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.btn-icon-outlined {
+  border-color: var(--color-border-strong);
+}
+
+.btn-icon-filled {
+  background: var(--color-surface-raised);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.btn-icon-filled:hover:not(:disabled) {
+  background: var(--color-border);
+}
+
+.btn-icon-primary {
+  background: var(--color-button-primary);
+  color: var(--color-text);
+}
+
+.btn-icon-primary:hover:not(:disabled) {
+  background: var(--color-button-primary-hover);
+}
+
+.btn-icon-danger {
+  color: var(--color-danger-soft);
+}
+
+.btn-icon-danger:hover:not(:disabled) {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-text);
+}

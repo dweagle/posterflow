@@ -1,61 +1,44 @@
 .drive-search-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--scrim-strong);
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  z-index: 1100;
-  padding: 4vh 1rem;
+  z-index: var(--z-modal-2);
+  padding: 4vh var(--sp-16);
   overflow-y: auto;
 }
 
 .drive-search-modal {
-  background: #1a1a1a;
-  border: 1px solid #404040;
-  border-radius: 8px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
   width: 100%;
   max-width: 720px;
   max-height: 92vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 8px 32px var(--shadow-color);
 }
 
 .drive-search-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid #333;
+  padding: var(--sp-16) var(--sp-20);
+  border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
 .drive-search-modal-header h2 {
   margin: 0;
-  font-size: 1.15rem;
-  color: #64b5f6;
-}
-
-.drive-search-modal-close {
-  background: none;
-  color: #ccc;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.drive-search-modal-close:hover {
-  background: #2a2a2a;
-  color: #fff;
+  font-size: var(--text-lg);
+  color: var(--color-title);
 }
 
 .drive-search-modal-body {
-  padding: 1.25rem;
+  padding: var(--sp-20);
   overflow-y: auto;
 }
 
@@ -69,7 +52,7 @@
 
 /* Opened on top of another modal (Drive Usage compare sits at 1100). */
 .drive-search-modal-overlay--stacked {
-  z-index: 1150;
+  z-index: var(--z-modal-3);
 }
 
 /* Targeted picker: who the pick is for on one line, season chips always on the line below
@@ -78,40 +61,40 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.65rem 1.25rem;
-  border-bottom: 1px solid #333;
-  color: #ccc;
-  font-size: 0.88rem;
+  gap: var(--sp-8);
+  padding: var(--sp-12) var(--sp-20);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
   flex-shrink: 0;
 }
 
 .drive-search-modal-target-line {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--sp-8);
   min-width: 0;
 }
 
 .drive-search-modal-target svg {
-  color: #64b5f6;
+  color: var(--color-accent);
   flex-shrink: 0;
 }
 
 .drive-search-modal-target strong {
-  color: #fff;
+  color: var(--color-text);
 }
 
 .drive-search-modal-seasons {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: var(--sp-6);
 }
 
 .season-slot-chips-note {
-  color: #888;
-  font-size: 0.8rem;
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
 }
 
 /* "Use for…" item picker (Asset Search page). */
@@ -122,26 +105,26 @@
 .override-target-body {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--sp-12);
 }
 
 .override-target-pick {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  background: #252525;
-  border: 1px solid #333;
-  border-radius: 8px;
-  padding: 0.6rem 0.75rem;
+  gap: var(--sp-12);
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-8) var(--sp-12);
 }
 
 .override-target-pick-thumb {
   width: 48px;
   height: 72px;
   object-fit: contain;
-  background: #121212;
-  border: 1px solid #333;
-  border-radius: 4px;
+  background: var(--color-page-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
 
@@ -150,19 +133,19 @@
 }
 
 .override-target-pick-name {
-  color: #fff;
+  color: var(--color-text);
   font-weight: 600;
   word-break: break-word;
 }
 
 .override-target-pick-drive {
-  color: #aaa;
-  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 
 .override-target-hint {
-  color: #aaa;
-  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
   margin: 0;
 }
 
@@ -174,48 +157,48 @@
 .override-target-results {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--sp-4);
   max-height: 38vh;
   overflow-y: auto;
-  border: 1px solid #333;
-  border-radius: 8px;
-  padding: 0.4rem;
-  background: #1e1e1e;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-6);
+  background: var(--color-surface);
 }
 
 .override-target-row {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--sp-8);
   width: 100%;
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 0.35rem 0.5rem;
-  color: #e5e7eb;
+  border-radius: var(--radius-md);
+  padding: var(--sp-6) var(--sp-8);
+  color: var(--color-text-body);
 }
 
 .override-target-row:hover {
-  background: #252525;
+  background: var(--color-surface-inset);
 }
 
 .override-target-row.active {
-  background: rgba(91, 137, 196, 0.16);
-  border-color: rgba(91, 137, 196, 0.45);
+  background: rgba(var(--rgb-accent-deep), 0.16);
+  border-color: rgba(var(--rgb-accent-deep), 0.45);
 }
 
 .override-target-thumb {
   width: 32px;
   height: 48px;
   object-fit: cover;
-  border-radius: 3px;
-  background: #121212;
+  border-radius: var(--radius-sm);
+  background: var(--color-page-bg);
   flex-shrink: 0;
 }
 
 .override-target-thumb--empty {
-  border: 1px dashed #444;
+  border: 1px dashed var(--color-border-strong);
 }
 
 .override-target-row-title {
@@ -230,14 +213,14 @@
 .override-target-empty {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  color: #888;
+  gap: var(--sp-6);
+  color: var(--color-text-faint);
   font-style: italic;
-  padding: 0.6rem;
+  padding: var(--sp-8);
 }
 
 .override-target-error {
-  color: #ef5350;
+  color: var(--color-danger-soft);
   font-style: normal;
 }
 
@@ -245,52 +228,26 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: var(--sp-6);
 }
 
 .override-target-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 0.6rem;
-  padding: 0.9rem 1.25rem;
-  border-top: 1px solid #333;
+  gap: var(--sp-8);
+  padding: var(--sp-16) var(--sp-20);
+  border-top: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
-.override-target-footer .poster-search-button:disabled {
-  opacity: 0.5;
-}
-
-/* Secondary buttons are only styled inside .poster-manager / .modal-footer elsewhere. */
-.override-target-footer .btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 1rem;
-  background: #2a2a2a;
-  border: 1px solid #424242;
-  color: #fff;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  white-space: nowrap;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.override-target-footer .btn-secondary:hover {
-  background: #333;
-  border-color: #555;
-}
-
 .override-target-refresh {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
   margin-left: auto;
 }
 
 .override-target-row-source {
-  color: #888;
+  color: var(--color-text-faint);
   font-weight: 400;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
 }
 
 @keyframes override-target-spin {

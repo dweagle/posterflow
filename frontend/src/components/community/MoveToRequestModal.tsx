@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { AlertCircle, Loader2, Send } from 'lucide-react'
 import { type CommunityListItem } from '../../api/community'
 import { POSTER_STYLES, useVisiblePosterStyles, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from './posterStyles'
+import Modal from '../../components/Modal'
 
 export type MoveToRequestValues = {
   styleTags: string[]
@@ -73,121 +74,114 @@ export default function MoveToRequestModal({ item, submitting, onCancel, onConfi
   }
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !submitting) onCancel() }}>
-      <div className="modal-content schedule-modal community-req-modal">
-        <div className="modal-header">
-          <h2>Move to a Community Request</h2>
-          <button className="modal-close" onClick={onCancel} disabled={submitting}>×</button>
-        </div>
+    <Modal onClose={onCancel} className="community-req-modal" busy={submitting}>
+      <Modal.Header title="Move to a Community Request" />
+      <Modal.Body>
+        <p className="mt-0">
+          <strong>{item.title}{item.year ? ` (${item.year})` : ''}</strong> will be posted as a community poster
+          request — with a Discord thread makers can claim — and removed from this list.
+        </p>
 
-        <div className="modal-body">
-          <p style={{ marginTop: 0 }}>
-            <strong>{item.title}{item.year ? ` (${item.year})` : ''}</strong> will be posted as a community poster
-            request — with a Discord thread makers can claim — and removed from this list.
-          </p>
-
-          {isCollectionRequest && (
-            <label className="creq-custom-request-label">
-              <input
-                type="checkbox"
-                checked={includeCollectionMovies}
-                onChange={(e) => setIncludeCollectionMovies(e.target.checked)}
-              />
-              Also request posters for every movie in this collection
-            </label>
-          )}
-
+        {isCollectionRequest && (
           <label className="creq-custom-request-label">
             <input
               type="checkbox"
-              checked={wantOriginalLanguage}
-              onChange={(e) => setWantOriginalLanguage(e.target.checked)}
+              checked={includeCollectionMovies}
+              onChange={(e) => setIncludeCollectionMovies(e.target.checked)}
             />
-            Also request an original-language poster/logo
+            Also request posters for every movie in this collection
           </label>
+        )}
 
-          {/* Poster style — required, single choice */}
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Poster style <span className="request-required">required</span>
-          </div>
-          <div className="request-style-tags">
-            {visibleStyles.map((s) => (
-              <button
-                key={s.value}
-                type="button"
-                className={`request-style-tag${posterStyle === s.value ? ' selected' : ''}`}
-                onClick={() => setPosterStyle((prev) => (prev === s.value ? null : s.value))}
-              >
-                {s.label}
-              </button>
-            ))}
-            <span className="request-style-tags-sep" aria-hidden="true" />
-            <span className="request-style-tags-hint">Preferences <span className="request-optional">(optional)</span></span>
-            {EXTRA_TAGS.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                className={`request-style-tag${extraTags.includes(tag) ? ' selected' : ''}`}
-                onClick={() => toggleExtra(tag)}
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-
-          {alreadyMade && (
-            <div className="tmdb-candidates-warning" role="alert" style={{ marginTop: '0.5rem' }}>
-              <AlertCircle size={14} />
-              <span>{alreadyMade}</span>
-            </div>
-          )}
-
-          {/* Ping a user — optional */}
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Ping a Discord user <span className="request-optional">(optional)</span>
-          </div>
+        <label className="creq-custom-request-label">
           <input
-            type="text"
-            className="request-notes-textarea request-single-input"
-            placeholder="Discord username (e.g. dweagle79)"
-            value={pingDiscordId}
-            onChange={(e) => setPingDiscordId(e.target.value.slice(0, 32))}
-            maxLength={32}
+            type="checkbox"
+            checked={wantOriginalLanguage}
+            onChange={(e) => setWantOriginalLanguage(e.target.checked)}
           />
-          {pingDiscordId.length > 0 && !isValidDiscordUsername(pingDiscordId) && (
-            <div className="creq-field-hint" style={{ color: '#ff9800' }}>
-              Must be 2–32 characters. @everyone and @here are not allowed.
-            </div>
-          )}
+          Also request an original-language poster/logo
+        </label>
 
-          {/* Notes — optional */}
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Notes <span className="request-optional">(optional)</span>
+        {/* Poster style — required, single choice */}
+        <div className="creq-section-label mt-md">
+          Poster style <span className="request-required">required</span>
+        </div>
+        <div className="request-style-tags">
+          {visibleStyles.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              className={`request-style-tag${posterStyle === s.value ? ' selected' : ''}`}
+              onClick={() => setPosterStyle((prev) => (prev === s.value ? null : s.value))}
+            >
+              {s.label}
+            </button>
+          ))}
+          <span className="request-style-tags-sep" aria-hidden="true" />
+          <span className="request-style-tags-hint">Preferences <span className="request-optional">(optional)</span></span>
+          {EXTRA_TAGS.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className={`request-style-tag${extraTags.includes(tag) ? ' selected' : ''}`}
+              onClick={() => toggleExtra(tag)}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+
+        {alreadyMade && (
+          <div className="tmdb-candidates-warning mt-sm" role="alert">
+            <AlertCircle size={14} />
+            <span>{alreadyMade}</span>
           </div>
-          {seasonLine && <div className="creq-field-hint">{seasonLine} — kept automatically</div>}
-          <textarea
-            className="request-notes-textarea"
-            placeholder="Any special instructions, extra context…"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={3}
-            maxLength={500}
-          />
-        </div>
+        )}
 
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onCancel} disabled={submitting}>Cancel</button>
-          <button
-            className="btn-primary"
-            onClick={handleConfirm}
-            disabled={!canSubmit}
-            title={!posterStyle ? 'Select a poster style (CL2K or MM2K)' : undefined}
-          >
-            {submitting ? <Loader2 size={13} className="spin-icon" /> : <Send size={13} />}
-            {' '}Move to Request
-          </button>
+        {/* Ping a user — optional */}
+        <div className="creq-section-label mt-md">
+          Ping a Discord user <span className="request-optional">(optional)</span>
         </div>
-      </div>
-    </div>
+        <input
+          type="text"
+          className="request-notes-textarea request-single-input"
+          placeholder="Discord username (e.g. dweagle79)"
+          value={pingDiscordId}
+          onChange={(e) => setPingDiscordId(e.target.value.slice(0, 32))}
+          maxLength={32}
+        />
+        {pingDiscordId.length > 0 && !isValidDiscordUsername(pingDiscordId) && (
+          <div className="creq-field-hint text-warning-strong">
+            Must be 2–32 characters. @everyone and @here are not allowed.
+          </div>
+        )}
+
+        {/* Notes — optional */}
+        <div className="creq-section-label mt-md">
+          Notes <span className="request-optional">(optional)</span>
+        </div>
+        {seasonLine && <div className="creq-field-hint">{seasonLine} — kept automatically</div>}
+        <textarea
+          className="request-notes-textarea"
+          placeholder="Any special instructions, extra context…"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+          maxLength={500}
+        />
+      </Modal.Body>
+      <Modal.Footer>
+        <button className="btn-secondary" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button
+          className="btn-primary"
+          onClick={handleConfirm}
+          disabled={!canSubmit}
+          title={!posterStyle ? 'Select a poster style (CL2K or MM2K)' : undefined}
+        >
+          {submitting ? <Loader2 size={13} className="spinning" /> : <Send size={13} />}
+          {' '}Move to Request
+        </button>
+      </Modal.Footer>
+    </Modal>
   )
 }

@@ -1,12 +1,14 @@
-import { Save } from 'lucide-react'
+
 import { DEFAULT_POSTER_DESTINATION, PosterConfig } from '../../api/client'
 import Toolbar from '../Toolbar'
+import SaveActions from '../../components/SaveActions'
 
 type SettingsTabProps = {
   config: PosterConfig | null
   hasUnsavedChanges: boolean
   saving: boolean
   onSaveConfig: () => void
+  onCancelConfig: () => void
   onConfigChange: (updatedConfig: PosterConfig) => void
 }
 
@@ -24,21 +26,14 @@ function SettingsTab({
   hasUnsavedChanges,
   saving,
   onSaveConfig,
+  onCancelConfig,
   onConfigChange,
 }: SettingsTabProps) {
   const defaultDestination = config?.default_destination || DEFAULT_POSTER_DESTINATION
   return (
     <>
       <Toolbar title="Asset Manager Settings" description="Configure how PosterFlow organizes and renames your poster and artwork files">
-        <button
-          className={`btn-toolbar ${hasUnsavedChanges ? 'btn-unsaved' : ''}`}
-          onClick={onSaveConfig}
-          disabled={!hasUnsavedChanges || saving}
-          title={hasUnsavedChanges ? 'Save changes' : 'No changes to save'}
-        >
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
+        <SaveActions dirty={hasUnsavedChanges} saving={saving} disabled={!hasUnsavedChanges || saving} onSave={onSaveConfig} onCancel={onCancelConfig} />
       </Toolbar>
 
       {config && (
@@ -92,7 +87,7 @@ function SettingsTab({
             </div>
 
             <div className="field-group checkbox-row">
-              <label className="checkbox-label">
+              <label className="checkbox-label checkbox-card">
                 <input type="checkbox" checked={config.asset_folders} onChange={(e) => onConfigChange({ ...config, asset_folders: e.target.checked })} />
                 <span>
                   <strong>Use Asset Folders</strong>

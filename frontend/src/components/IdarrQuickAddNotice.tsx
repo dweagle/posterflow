@@ -101,7 +101,7 @@ function IdarrQuickAddNoticeHost() {
         <div className="idarr-notice-header">
           <AlertTriangle size={22} />
           <h3 id="idarr-notice-title">{heading}</h3>
-          <button className="idarr-notice-close" onClick={close} aria-label="Close">×</button>
+          <button className="btn-icon idarr-notice-close" onClick={close} aria-label="Close">×</button>
         </div>
 
         <div className="idarr-notice-body">
@@ -125,7 +125,7 @@ function IdarrQuickAddNoticeHost() {
                     {canIgnore && (
                       <div className="idarr-notice-item-actions">
                         <button
-                          className="idarr-notice-btn-row"
+                          className="btn-secondary btn-sm"
                           onClick={() => { void ignoreRow(row) }}
                           disabled={action?.state === 'working'}
                           title={ignoreHint}
@@ -154,9 +154,9 @@ function IdarrQuickAddNoticeHost() {
         </div>
 
         <div className="idarr-notice-footer">
-          <button className="idarr-notice-btn-secondary" onClick={close}>Got it</button>
+          <button className="btn-secondary" onClick={close}>Got it</button>
           <button
-            className="idarr-notice-btn-primary"
+            className="btn-primary"
             onClick={() => { close(); navigate('/IDarr') }}
           >
             Open IDarr

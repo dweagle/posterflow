@@ -29,6 +29,7 @@ type UnmatchedTabProps = {
   /** Asset noun used in card labels ("Posters", "Logos", …). */
   typeNoun?: string
   onSaveSettings: () => void
+  onCancelSettings: () => void
   onDetectUnmatched: () => void
   onDownloadReport: () => void
   onToggleLibrarySelection: (instanceName: string, libraryKey: string) => void
@@ -57,6 +58,7 @@ function UnmatchedTab({
   onShowSettings,
   typeNoun = 'Posters',
   onSaveSettings,
+  onCancelSettings,
   onDetectUnmatched,
   onDownloadReport,
   onToggleLibrarySelection,
@@ -97,6 +99,7 @@ function UnmatchedTab({
         detecting={detectingUnmatched}
         hasResults={Boolean(unmatchedStats && unmatchedStats.last_run)}
         onSaveSettings={onSaveSettings}
+        onCancelSettings={onCancelSettings}
         onDetect={onDetectUnmatched}
         onViewSearch={() => onOpenModal('all')}
         onDownloadReport={onDownloadReport}
@@ -149,7 +152,7 @@ function UnmatchedTab({
                   </div>
                 )}
                 {unmatchedStats.unmatched.movies && unmatchedStats.unmatched.movies.length > 0 && (
-                  <button className="card-view-all-btn" onClick={() => onOpenModal('movies')}>
+                  <button className="btn-secondary btn-sm btn-block card-view-all-btn" onClick={() => onOpenModal('movies')}>
                     <List size={14} />
                     View All {unmatchedStats.unmatched.movies.length} Missing
                   </button>
@@ -204,7 +207,7 @@ function UnmatchedTab({
                   </div>
                 )}
                 {unmatchedStats.unmatched.series && unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length > 0 && (
-                  <button className="card-view-all-btn" onClick={() => onOpenModal('series')}>
+                  <button className="btn-secondary btn-sm btn-block card-view-all-btn" onClick={() => onOpenModal('series')}>
                     <List size={14} />
                     View All {unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length} Missing
                   </button>
@@ -262,7 +265,7 @@ function UnmatchedTab({
                   </div>
                 )}
                 {unmatchedStats.unmatched.series && unmatchedStats.unmatched.series.filter((s) => s.missing_seasons?.length > 0).length > 0 && (
-                  <button className="card-view-all-btn" onClick={() => onOpenModal('seasons')}>
+                  <button className="btn-secondary btn-sm btn-block card-view-all-btn" onClick={() => onOpenModal('seasons')}>
                     <List size={14} />
                     View All {unmatchedStats.unmatched.series.filter((s) => s.missing_seasons?.length > 0).length} Missing
                   </button>
@@ -313,7 +316,7 @@ function UnmatchedTab({
                   </div>
                 )}
                 {unmatchedStats.unmatched.collections && unmatchedStats.unmatched.collections.length > 0 && (
-                  <button className="card-view-all-btn" onClick={() => onOpenModal('collections')}>
+                  <button className="btn-secondary btn-sm btn-block card-view-all-btn" onClick={() => onOpenModal('collections')}>
                     <List size={14} />
                     View All {unmatchedStats.unmatched.collections.length} Missing
                   </button>
@@ -337,19 +340,18 @@ function UnmatchedTab({
           <p className="section-description">Configure which items to include or exclude from unmatched detection. Shared across all asset types.</p>
 
           <div className="field-group">
-            <label style={{ display: 'block', fontWeight: 500 }}>TMDB API Key</label>
-            <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
+            <label className="field-label">TMDB API Key</label>
+            <p className="field-hint">
               Configured globally in{' '}
               <a
                 href="/settings"
-                style={{ color: '#64b5f6' }}
                 onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
               >Settings → General → API Keys</a>.
             </p>
 
             <UnmatchedIgnoreList onChanged={onIgnoreListChanged} />
 
-            <label style={{ marginTop: '1rem', display: 'block', fontWeight: 500 }}>Ignore Root Folders</label>
+            <label className="field-label mt-lg">Ignore Root Folders</label>
             <small>
               Excludes every movie and series stored under a matching Radarr/Sonarr root folder — use it to
               skip whole locations, like a 4K or kids library. Enter folder names (movies, tv) or full paths
@@ -385,7 +387,7 @@ function UnmatchedTab({
           <div className="field-group">
             {libraryConfigs.length === 0 ? (
               <div className="empty-state">
-                <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No media server instances configured. Configure in Settings → Media Servers.</p>
+                <p className="empty-note">No media server instances configured. Configure in Settings → Media Servers.</p>
               </div>
             ) : (
               <LibrarySelectGrid

@@ -391,12 +391,12 @@ function Dashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'running': return '#2196f3'
-      case 'pending': return '#ff9800'
-      case 'completed': return '#4caf50'
-      case 'failed': return '#f44336'
-      case 'cancelled': return '#9e9e9e'
-      default: return '#ccc'
+      case 'running': return 'var(--color-accent)'
+      case 'pending': return 'var(--color-warning-strong)'
+      case 'completed': return 'var(--color-success)'
+      case 'failed': return 'var(--color-danger)'
+      case 'cancelled': return 'var(--color-text-dim)'
+      default: return 'var(--color-text-secondary)'
     }
   }
 
@@ -567,22 +567,22 @@ function Dashboard() {
 
   return (
     <div className="page-container dashboard">
-      <div className="dashboard-header">
+      <div className="page-header dashboard-header">
         <h1>Dashboard</h1>
         <div className="dashboard-header-actions">
-          <button className="quick-action-btn" onClick={handleRunFlow} disabled={flowRunning}>
+          <button className="btn-toolbar quick-action-btn" onClick={handleRunFlow} disabled={flowRunning}>
             <Waves size={18} className="icon-workflow" />
             <span className="action-title">Run Workflow</span>
           </button>
-          <button className="quick-action-btn" onClick={handleRunPosterRename} disabled={renameRunning}>
+          <button className="btn-toolbar quick-action-btn" onClick={handleRunPosterRename} disabled={renameRunning}>
             <FolderSync size={18} className="icon-rename" />
             <span className="action-title">Asset Renamer</span>
           </button>
-          <button className="quick-action-btn" onClick={handleRunBorderReplacer} disabled={borderRunning}>
+          <button className="btn-toolbar quick-action-btn" onClick={handleRunBorderReplacer} disabled={borderRunning}>
             <Play size={18} className="icon-border" />
             <span className="action-title">Border Replacer</span>
           </button>
-          <button className="quick-action-btn" onClick={handleRunUnmatched} disabled={unmatchedRunning}>
+          <button className="btn-toolbar quick-action-btn" onClick={handleRunUnmatched} disabled={unmatchedRunning}>
             <AlertCircle size={18} className="icon-unmatched" />
             <span className="action-title">Detect Unmatched</span>
           </button>
@@ -628,7 +628,8 @@ function Dashboard() {
             </div>
             <div className="coverage-header-right">
               <button
-                className="view-details-link"
+                type="button"
+                className="btn-secondary btn-sm view-details-link"
                 onClick={() => navigate('/poster-manager', { state: { activeTab: 'unmatched', unmatchedScope: coverageScope } })}
               >
                 View Details →
@@ -691,12 +692,12 @@ function Dashboard() {
         <div className="poster-carousel-header">
           <h3>{`Recently Synced ${activeScope.label}`}</h3>
           <div className="poster-carousel-header-right">
-            <div className="poster-filter-bar">
+            <div className="poster-filter-bar pf-subtabs">
               {(['all', 'movie', 'season', 'collection'] as const).map(f => (
                 <button
                   key={f}
                   type="button"
-                  className={`poster-filter-btn${posterFilter === f ? ' active' : ''}`}
+                  className={posterFilter === f ? 'active' : ''}
                   onClick={() => { setPosterFilter(f); setCarouselPage(0) }}
                 >
                   {f === 'all' ? 'All' : f === 'movie' ? 'Movie / Show' : f === 'season' ? 'Season' : 'Collection'}
@@ -959,7 +960,7 @@ function Dashboard() {
               <h3>Scheduled Tasks:</h3>
               <span className="schedule-count-inline">{schedules.length}</span>
             </div>
-            <button type="button" className="schedule-settings-link" onClick={openSchedulingSettings}>
+            <button type="button" className="btn-secondary btn-sm schedule-settings-link" onClick={openSchedulingSettings}>
               Manage
             </button>
           </div>
@@ -1000,7 +1001,7 @@ function Dashboard() {
                 ))
               ) : (
                 <div className="stat-item">
-                  <span style={{ color: '#888', fontStyle: 'italic' }}>No schedules configured</span>
+                  <span className="text-faint text-italic">No schedules configured</span>
                 </div>
               )}
             </div>

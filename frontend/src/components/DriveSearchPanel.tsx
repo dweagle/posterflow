@@ -1,12 +1,13 @@
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
-import { Check, Search } from 'lucide-react'
+import { Check, Image, Layers, Search } from 'lucide-react'
 import { API_URL } from '../api/http'
 import { ArtworkSearchType, searchArtwork, searchPosters } from '../api/client'
 import type { DrivePosterPick, FileBadge } from '../utils/posterOverrideTarget'
 import { useFloatTip } from './FloatTip'
 import { useToast } from './Toast'
 import '../pages/AssetSearch.css'
+import Tabs from './Tabs'
 
 export type AssetKind = 'posters' | 'artwork'
 
@@ -398,26 +399,15 @@ export default function DriveSearchPanel({
   return (
     <div className="poster-search">
       {!fixedKind && (
-        <div className="asset-kind-toggle" role="tablist" aria-label="Asset kind">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={kind === 'posters'}
-            className={`asset-kind-tab${kind === 'posters' ? ' active' : ''}`}
-            onClick={() => switchKind('posters')}
-          >
-            Posters
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={kind === 'artwork'}
-            className={`asset-kind-tab${kind === 'artwork' ? ' active' : ''}`}
-            onClick={() => switchKind('artwork')}
-          >
-            Artwork
-          </button>
-        </div>
+        <Tabs
+          ariaLabel="Asset kind"
+          value={kind}
+          onChange={switchKind}
+          items={[
+            { key: 'posters', label: 'Posters', icon: <Image size={16} /> },
+            { key: 'artwork', label: 'Artwork', icon: <Layers size={16} /> },
+          ]}
+        />
       )}
 
       <form className="poster-search-toolbar" onSubmit={handleSubmit}>
@@ -432,18 +422,18 @@ export default function DriveSearchPanel({
             aria-label={kind === 'posters' ? 'Search poster name' : 'Search artwork name'}
           />
         </div>
-        <button type="submit" className="poster-search-button" disabled={loading}>
+        <button type="submit" className="btn-primary" disabled={loading}>
           {loading ? 'Searching...' : 'Search'}
         </button>
       </form>
 
       {kind === 'posters' ? (
-        <div className="poster-search-filter-row">
+        <div className="poster-search-filter-row pf-subtabs">
           <span className="poster-search-filter-label">Filter drives:</span>
           {!hiddenStyles.has('CL2K') && (
             <button
               type="button"
-              className={`poster-filter-btn ${driveFilters.cl2k ? 'active' : ''}`}
+              className={driveFilters.cl2k ? 'active' : ''}
               onClick={() => toggleDriveFilter('cl2k')}
             >
               CL2K
@@ -452,7 +442,7 @@ export default function DriveSearchPanel({
           {!hiddenStyles.has('MM2K') && (
             <button
               type="button"
-              className={`poster-filter-btn ${driveFilters.mm2k ? 'active' : ''}`}
+              className={driveFilters.mm2k ? 'active' : ''}
               onClick={() => toggleDriveFilter('mm2k')}
             >
               MM2K
@@ -460,20 +450,20 @@ export default function DriveSearchPanel({
           )}
           <button
             type="button"
-            className={`poster-filter-btn ${driveFilters.custom ? 'active' : ''}`}
+            className={driveFilters.custom ? 'active' : ''}
             onClick={() => toggleDriveFilter('custom')}
           >
             Custom
           </button>
         </div>
       ) : (
-        <div className="poster-search-filter-row">
+        <div className="poster-search-filter-row pf-subtabs">
           <span className="poster-search-filter-label">Filter types:</span>
           {ARTWORK_TYPES.map((type) => (
             <button
               key={type}
               type="button"
-              className={`poster-filter-btn ${typeFilters[type] ? 'active' : ''}`}
+              className={typeFilters[type] ? 'active' : ''}
               onClick={() => toggleTypeFilter(type)}
             >
               {ARTWORK_TYPE_LABELS[type][1]}
@@ -527,7 +517,7 @@ export default function DriveSearchPanel({
                           ))}
                           <button
                             type="button"
-                            className="result-copy-btn"
+                            className="btn-secondary btn-sm result-copy-btn"
                             onClick={() => { hideTip(); handleCopyName(item.name) }}
                             aria-label={`Copy title ${item.name}`}
                             onPointerEnter={(e) => showTip(e, kind === 'posters' ? 'Copy the poster title' : 'Copy the artwork name')}
@@ -551,7 +541,7 @@ export default function DriveSearchPanel({
                             return (
                               <button
                                 type="button"
-                                className={`result-copy-btn result-use-btn${picked ? ' active' : ''}`}
+                                className={`btn-secondary btn-sm result-copy-btn result-use-btn${picked ? ' active' : ''}`}
                                 onClick={() => {
                                   hideTip()
                                   onUse({
@@ -589,8 +579,7 @@ export default function DriveSearchPanel({
       {hoverPreview && (
         <div
           ref={popupRef}
-          className={`hover-preview-popup${hoverPreview.type ? ` preview-${hoverPreview.type}` : ''}`}
-          style={{ left: '-9999px', top: '-9999px' }}
+          className={`hover-preview-popup offscreen${hoverPreview.type ? ` preview-${hoverPreview.type}` : ''}`}
         >
           <img src={`${API_URL}${hoverPreview.imageUrl}`} alt={hoverPreview.name} className="hover-preview-image" />
           <div className="hover-preview-title">

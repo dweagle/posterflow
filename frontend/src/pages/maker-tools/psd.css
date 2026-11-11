@@ -1,0 +1,304 @@
+/* PSD export: thumb select buttons, export settings modal, style folders, not-found and upload states, info popovers. */
+
+/* The row's gap already spaces the icon from its label. */
+
+.maker-setting-row > div:first-child > .psd-info-wrap {
+  margin-left: 0;
+}
+
+/* The plugin download link follows the Default Editor row on its own line. */
+
+.psd-ccx-link--row {
+  display: block;
+  margin: 0 0 var(--sp-4);
+}
+
+.tmdb-psd-select-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--hairline-strong);
+  background: var(--scrim);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  opacity: 0;
+}
+
+.tmdb-gallery-item:hover .tmdb-psd-select-btn,
+.tmdb-psd-select-btn.selected {
+  opacity: 1;
+}
+
+.tmdb-psd-select-btn.selected {
+  background: var(--color-button-primary);
+  border-color: var(--color-button-primary);
+  color: var(--color-text);
+}
+
+.tmdb-psd-select-btn:hover:not(.selected) {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+/* T (tag) button — shows the tag when set */
+
+.tmdb-psd-tag-btn {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--hairline-strong);
+  background: var(--scrim);
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  opacity: 0;
+}
+
+.tmdb-gallery-item:hover .tmdb-psd-tag-btn,
+.tmdb-psd-tag-btn.tagged {
+  opacity: 1;
+}
+
+.tmdb-psd-tag-btn.tagged {
+  background: var(--color-purple-strong);
+  border-color: var(--color-purple-strong);
+  color: var(--color-text);
+}
+
+.tmdb-psd-tag-btn:hover:not(.tagged) {
+  border-color: var(--color-purple-strong);
+  color: var(--color-text);
+}
+
+/* Trash — one-click untag, rendered only when a tag is set (so always visible then) */
+
+.tmdb-psd-untag-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--hairline-strong);
+  background: var(--scrim);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.tmdb-psd-untag-btn:hover {
+  border-color: var(--color-danger-soft);
+  color: var(--color-danger-soft);
+}
+
+.tmdb-psd-export-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-left: auto;
+}
+
+/* Standalone variant on the card body when there's no TMDB match (no image gallery to sit in):
+   pinned to the card bottom and kept on one line. */
+
+.tmdb-psd-export-group--standalone {
+  margin-left: 0;
+  margin-top: auto;
+  align-self: flex-start;
+  flex-wrap: nowrap;
+}
+
+/* Mobile is too narrow for one line — wrap rather than overflow the card. */
+
+@media (max-width: 550px) {
+  .tmdb-psd-export-group--standalone {
+    flex-wrap: wrap;
+  }
+}
+
+/* Export style picker (CL2K / MM2K) — defaults to the request's style, overridable per export */
+
+.tmdb-psd-style-toggle {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.tmdb-psd-style-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  background: var(--color-surface-inset);
+  border: none;
+  color: var(--color-text-faint);
+  padding: var(--sp-4) var(--sp-8);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.tmdb-psd-style-opt + .tmdb-psd-style-opt {
+  border-left: 1px solid var(--color-border);
+}
+
+.tmdb-psd-style-opt:hover:not(:disabled) {
+  color: var(--color-text-secondary);
+}
+
+.tmdb-psd-style-opt.active {
+  background: rgba(var(--rgb-accent), 0.14);
+  color: var(--color-accent);
+}
+
+.tmdb-psd-style-opt:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Small dot marking which style the request actually asked for (stays visible when overridden) */
+
+.tmdb-psd-style-req {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* PSD not-found modal */
+
+.psd-not-found-filename {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-8) var(--sp-16);
+  text-align: center;
+}
+
+.psd-not-found-filename code {
+  font-size: var(--text-md);
+  color: var(--color-accent);
+  word-break: break-all;
+}
+
+.psd-not-found-folder {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+  margin-top: var(--sp-8);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-8) var(--sp-16);
+}
+
+.psd-not-found-folder-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.psd-not-found-folder code {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+.psd-upload-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.psd-upload-label.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* --- PSD settings modal: compact info popovers + two-column style folders --- */
+
+.psd-info-wrap {
+  position: relative;
+  display: inline-flex;
+  margin-left: var(--sp-6);
+  vertical-align: middle;
+}
+
+.psd-info-pop {
+  position: fixed;   /* escapes the scrolling modal body — never clipped; JS sets top/bottom/left */
+  z-index: var(--z-top);
+  width: 280px;
+  max-width: min(320px, calc(100vw - 16px));
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-8) var(--sp-12);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  box-shadow: 0 4px 14px var(--shadow-color);
+  cursor: pointer;   /* clicking the popup (or anywhere else) dismisses it */
+}
+
+.psd-style-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  /* stretch (default) so the middle divider runs the full height of the taller column */
+}
+
+.psd-style-cols > div {
+  min-width: 0;
+}
+
+/* Divider down the middle: the gap lives as padding on each column so the line sits centered. */
+
+.psd-style-cols > div:first-child {
+  padding-right: var(--sp-20);
+}
+
+.psd-style-cols > div + div {
+  border-left: 1px solid var(--color-border-strong);
+  padding-left: var(--sp-20);
+}
+
+@media (max-width: 768px) {
+  .psd-style-cols {
+    grid-template-columns: 1fr;
+  }
+
+  .psd-style-cols > div:first-child {
+    padding-right: 0;
+  }
+
+  .psd-style-cols > div + div {
+    border-left: none;
+    padding-left: 0;
+  }
+}
+
+/* Path examples in the info popovers — blue/bold, matching path styling elsewhere in settings. */
+
+.psd-info-pop code {
+  color: var(--color-accent);
+  font-weight: 600;
+}

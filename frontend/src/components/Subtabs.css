@@ -1,0 +1,66 @@
+/* ── Subtab / scope-toggle buttons ──────────────────────────────────────────
+   The single canonical subtab style. Put class="pf-subtabs" on any row of
+   panel/scope-switching tab buttons and its <button>s get a dark pill at rest
+   and the button blue when active; a lone button outside a row takes `pf-subtab`. Page CSS keeps only
+   per-group layout (widths, gaps, borders). */
+.pf-subtabs button,
+.pf-subtab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-6) var(--sp-16);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pf-subtabs button:hover,
+.pf-subtab:hover {
+  background: var(--color-border);
+  border-color: var(--color-line-soft);
+  color: var(--color-text);
+}
+
+.pf-subtabs button.active,
+.pf-subtab.active {
+  background: var(--color-button-primary);
+  border-color: var(--color-button-primary);
+  color: var(--color-text);
+}
+
+/* Row container for opt-in subtab groups (see note above). */
+.pf-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  align-items: center;
+}
+
+/* Secondary buttons that can share the subtab row: they don't switch panels, they change what the
+   active panel is listing. Amber instead of the tabs' blue so the two roles never read as one set.
+   Same box metrics as .pf-subtabs button, so the row stays on one baseline. */
+.pf-subtabs button.pf-subtab-source.active {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
+  color: var(--color-surface-sunken);
+}
+
+.pf-subtabs button.pf-subtab-source:not(.active):hover {
+  border-color: var(--color-warning);
+  color: var(--color-warning-soft);
+}
+
+/* Separates the panel tabs from the secondary buttons sharing their row. */
+.pf-subtabs-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--sp-2) var(--sp-4);
+  background: var(--color-border-strong);
+}

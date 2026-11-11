@@ -1,0 +1,381 @@
+/* Asset Manager page shell: container, tabs, loading, and the field, checkbox and panel bits every tab shares.
+   The poster-manager sheets load in a fixed order (see App.tsx). */
+
+/* Poster Manager page container (extends .page-container from globals) */
+
+/* No additional padding needed - MainLayout.content already provides padding */
+
+/* Loading state */
+
+/* Icon spacing inside buttons */
+
+.poster-manager .pf-tabs .icon-workflow {
+  color: var(--color-warning-strong);
+}
+
+.poster-manager .pf-tabs .icon-rename {
+  color: var(--color-accent);
+}
+
+.poster-manager .pf-tabs .icon-border {
+  color: var(--color-success-soft);
+}
+
+.poster-manager .pf-tabs .icon-unmatched {
+  color: var(--color-danger-soft);
+}
+
+.poster-manager .pf-tabs .icon-priority {
+  color: var(--color-purple);
+}
+
+.poster-manager .pf-tabs .icon-settings {
+  color: var(--color-text-faint);
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.field-group.small {
+  max-width: 100px;
+}
+
+.field-group.checkbox {
+  justify-content: center;
+}
+
+.field-group label {
+  font-size: var(--text-md);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.field-group.checkbox label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  cursor: pointer;
+}
+
+/* `:where` keeps this at one class of specificity so a width helper on the control wins. */
+.field-group :where(input[type="text"], input[type="number"], input[type="password"], select) {
+  padding: var(--sp-8) var(--sp-12);
+  font-size: var(--text-md);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.field-group .unmatched-settings-textarea {
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--text-md);
+  line-height: 1.4;
+  position: relative;
+  z-index: 1;
+  resize: none;
+  overflow-y: auto;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, min-height 0.2s ease;
+}
+
+.field-group .unmatched-settings-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  min-height: 6.25rem;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(var(--rgb-accent-deep), 0.2);
+  z-index: 10;
+}
+
+.field-group input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.field-group input[type="range"] {
+  width: 100%;
+  cursor: pointer;
+}
+
+.field-group small {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+/* Standalone warning - simple red text for auto-run border setting */
+
+.field-group small.standalone-warning {
+  color: var(--color-danger-soft);
+  display: block;
+  margin-top: var(--sp-8);
+  font-weight: 500;
+}
+
+.field-group small code {
+  color: var(--color-accent-soft);
+  background: var(--color-slate-deep);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-sm);
+  font-size: 0.9em;
+}
+
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-8);
+  flex-shrink: 0;
+  gap: var(--sp-8);
+}
+
+.panel-header-row h3 {
+  margin: 0;
+}
+
+/* Settings | Manual Uploads switch under the Plex Upload toolbar. Same row + button
+   styling as the Unmatched and Drive Priority switches above. */
+
+.plex-upload-scope-toggle {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  margin: 0 0 var(--card-gap);
+}
+
+.section-hint {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+  margin-bottom: var(--sp-12);
+  flex-shrink: 0;
+}
+
+.section-hint strong {
+  color: var(--color-accent);
+}
+
+/* 2-row mode: toolbar title on top, buttons grid at natural 185px size */
+
+/* Mobile: full width single column */
+
+@media (max-width: 550px) {  /* Tooltip doesn't work on touch screens and causes scrollWidth overflow */
+  .poster-manager .toolbar-tooltip {
+    display: none;
+  }
+
+  /* Priority tab: wrap header so bulk buttons don't overflow */
+  .panel-header-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .panel-header-row h3 {
+    flex: 1 1 100%;
+  }
+
+  .bulk-action-btns {
+    flex-wrap: wrap;
+  }
+
+  /* Filter checkboxes: shrink to fit all 3 in one row */
+  .style-checkboxes-inline {
+    flex-wrap: nowrap;
+    gap: var(--sp-4);
+  }
+
+  .style-checkbox-inline {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: var(--sp-4) var(--sp-6);
+    gap: var(--sp-4);
+    justify-content: center;
+  }
+
+  .style-checkbox-inline .style-badge {
+    font-size: var(--text-3xs);
+    padding: var(--sp-2) var(--sp-4);
+  }
+
+  .style-checkbox-inline input[type="checkbox"] {
+    width: 12px;
+    height: 12px;
+  }
+
+}
+
+.success-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-32);
+  flex: 1;
+  text-align: center;
+}
+
+.success-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--sp-16);
+  color: var(--color-success-soft);
+}
+
+.success-message {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  color: var(--color-text-body);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: 0;
+}
+
+.performance-warning {
+  color: var(--color-warning-strong);
+  font-size: var(--text-md);
+  margin: 0 0 var(--sp-12) 0;
+  padding: var(--sp-12);
+  background-color: rgba(var(--rgb-warning-strong), 0.1);
+  border: 1px solid var(--color-warning-strong);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+/* Kometa dimensional_asset_rename footgun: it renames placed logos to background.png. */
+
+.field-group small.kometa-asset-note {
+  color: var(--color-warning-strong);
+  display: block;
+  margin-top: var(--sp-6);
+}
+
+.field-group small.kometa-asset-note code {
+  font-size: 0.95em;
+}
+
+.instance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--sp-4);
+  padding-bottom: var(--sp-6);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-accent);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+}
+
+.radio-label input[type="radio"] {
+  accent-color: var(--color-accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.radio-label span {
+  line-height: 1;
+}
+
+.field-group .unmatched-ignore-add input[type="text"] {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.field-group .unmatched-ignore-add input[type="number"] {
+  width: 4.5rem;
+  flex: 0 0 auto;
+}
+
+.field-group .unmatched-ignore-add select {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+/* One height for every control on the row (selects render taller by default). */
+
+.field-group .unmatched-ignore-add select,
+.field-group .unmatched-ignore-add input[type="text"],
+.field-group .unmatched-ignore-add input[type="number"],
+.unmatched-ignore-add .unmatched-ignore-add-btn {
+  height: 1.9rem;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Ignore Unmonitored as a plain compact row: no boxed card, text inline with the
+   checkbox, and only as wide as its content so the empty row isn't clickable.
+   Capped at the card width so the help text wraps instead of spilling out. */
+
+.poster-manager .checkbox-label.checkbox-label--inline {
+  align-items: flex-start;
+  align-self: flex-start;
+  max-width: 100%;
+  gap: var(--sp-6);
+}
+
+.poster-manager .checkbox-label.checkbox-label--inline span {
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--sp-8);
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.poster-manager .checkbox-label.checkbox-label--inline strong {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.poster-manager .checkbox-label.checkbox-label--inline small {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Section header: title on the left, action buttons (Save / Reset) on the right */
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-20);
+}
+
+.poster-manager .section-header-row h2 {
+  margin-bottom: 0;
+}
+
+/* Label paired with an info-tooltip icon */
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+/* "Nothing configured" line under a section. */
+.empty-note {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--color-text-faint);
+}

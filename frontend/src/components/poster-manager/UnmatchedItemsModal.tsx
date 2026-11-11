@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react'
 import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, EyeOff, FileQuestion, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
-import type { MouseEvent } from 'react'
 import { type UnmatchedAttention,
   type UnmatchedStats, type TmdbCandidate, type UnmatchedIgnoreItem, addUnmatchedIgnoreItem, searchUnmatchedTmdb, tmdbCandidateLink, type ListItemInput } from '../../api/client'
 import { isTmdbKeyMissingError } from '../../api/posterManager'
@@ -21,6 +20,7 @@ import SortControls from './SortControls'
 import { type ItemType, sortItems, useSortPrefs } from './itemSort'
 import { matchedByIdTooltip } from '../../utils/mediaServer'
 import { formatDate } from '../../utils/datetime'
+import Modal from '../../components/Modal'
 
 export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | 'all' | null
 
@@ -285,10 +285,6 @@ function UnmatchedItemsModal({
   // localStorage so the choice sticks across modal opens and reloads.
   const [publishStyle, setPublishStyle] = usePersistedPosterStyle()
 
-  const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) onClose()
-  }
-
   const itemKey = useCallback((item: NormalizedItem) => `${item.category ?? ''}::${item.origIdx}::${item.title}`, [])
 
   const handleIgnore = useCallback(async (item: NormalizedItem) => {
@@ -425,23 +421,18 @@ function UnmatchedItemsModal({
 
   if (allItems.length === 0) {
     return (
-      <div className="modal-overlay" onClick={handleOverlayClick}>
-        <div className="modal-content schedule-modal">
-          <div className="modal-header">
-            <h2>{modalTitle}</h2>
-            <button className="modal-close" onClick={onClose}>×</button>
+      <Modal onClose={onClose}>
+        <Modal.Header title={modalTitle} />
+        <Modal.Body>
+          <div className="success-modal-body">
+            <CheckCircle className="success-icon" size={64} />
+            <p className="success-message">All assets matched!</p>
           </div>
-          <div className="modal-body">
-            <div className="success-modal-body">
-              <CheckCircle className="success-icon" size={64} />
-              <p className="success-message">All assets matched!</p>
-            </div>
-          </div>
-          <div className="modal-footer">
-            <button className="btn-secondary" onClick={onClose}>Close</button>
-          </div>
-        </div>
-      </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <button className="btn-secondary" onClick={onClose}>Close</button>
+        </Modal.Footer>
+      </Modal>
     )
   }
 
@@ -544,16 +535,16 @@ function UnmatchedItemsModal({
           </div>
           <div className="unmatched-item-actions">
           <button
-            className={`tmdb-search-btn${isExpanded ? ' active' : ''}`}
+            className={`btn-secondary btn-sm tmdb-search-btn${isExpanded ? ' active' : ''}`}
             onClick={() => handleTmdbSearch(item)}
             title="Search TMDB for this item"
           >
-            {isLoading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />}
+            {isLoading ? <Loader2 size={13} className="spinning" /> : <Search size={13} />}
             <span>TMDB</span>
           </button>
           <button
             type="button"
-            className="maker-nav-btn"
+            className="btn-secondary btn-sm maker-nav-btn"
             title="Search in Maker Tools (opens in a new tab)"
             onClick={() => {
               const query = item.year ? `${cleanedTitle} ${item.year}` : cleanedTitle
@@ -573,7 +564,7 @@ function UnmatchedItemsModal({
             href={tpdbSearchUrl(cleanedTitle, item.type)}
             target="_blank"
             rel="noopener noreferrer"
-            className="maker-nav-btn"
+            className="btn-secondary btn-sm maker-nav-btn"
             title="Search ThePosterDB (opens in a new tab)"
           >
             <ExternalLink size={13} />
@@ -605,7 +596,7 @@ function UnmatchedItemsModal({
             onClick={() => handleIgnore(item)}
             disabled={ignoringKeys.has(key)}
           >
-            {ignoringKeys.has(key) ? <Loader2 size={13} className="spin-icon" /> : <EyeOff size={13} />}
+            {ignoringKeys.has(key) ? <Loader2 size={13} className="spinning" /> : <EyeOff size={13} />}
           </button>
           </div>
           </div>
@@ -629,7 +620,7 @@ function UnmatchedItemsModal({
               </div>
             ) : isLoading ? (
               <div className="tmdb-candidates-loading">
-                <Loader2 size={16} className="spin-icon" />
+                <Loader2 size={16} className="spinning" />
                 <span>Searching TMDB…</span>
               </div>
             ) : !candidates || candidates.length === 0 ? (
@@ -718,87 +709,80 @@ function UnmatchedItemsModal({
   }
 
   return (
-    <>
-    <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content schedule-modal list-items-modal">
-        <div className="modal-header">
-          <h2>{modalTitle}</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-
-        <div className="modal-body">
-          {/* Search bar */}
-          <div className="unmatched-search-bar">
-            <Search size={15} className="search-bar-icon" />
-            <input
-              type="text"
-              className="unmatched-search-input"
-              placeholder={`Search ${allItems.length} items…`}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            {searchQuery && (
-              <button className="search-clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          <SortControls prefs={prefs} onChange={setPrefs} showGroup={showGroup} showSeasons={hasSeasons} showDates />
-
-          <div className="unmatched-list">
-            <p className="list-count">
-              {sortedItems.length !== allItems.length
-                ? `${sortedItems.length} of ${allItems.length} items`
-                : `${allItems.length} items`}
-            </p>
-
-            {hasMore && (
-              <p className="performance-warning">
-                ⚠️ Showing first {modalDisplayLimit} of {sortedItems.length} items. Use search to find specific items.
-              </p>
-            )}
-
-            {displayItems.map(renderRow)}
-          </div>
-        </div>
-
-        <div className="modal-footer">
-          {isConnected && !hideCommunity && (
-            <PublishStyleToggle value={publishStyle} onChange={setPublishStyle} disabled={publishing} />
+  <>
+    <Modal onClose={onClose} size="lg" className="list-items-modal">
+      <Modal.Header title={modalTitle} />
+      <Modal.Body>
+        {/* Search bar */}
+        <div className="unmatched-search-bar">
+          <Search size={15} className="search-bar-icon" />
+          <input
+            type="text"
+            className="unmatched-search-input"
+            placeholder={`Search ${allItems.length} items…`}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button className="btn-icon btn-icon-sm search-clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
+              <X size={14} />
+            </button>
           )}
-          <div className="modal-footer-actions">
-            <button className="btn-secondary" onClick={onClose}>Close</button>
-            {!hideCommunity && (
-              <>
-                <button
-                  className="btn-secondary"
-                  onClick={handleAddToLists}
-                  disabled={publishing || sortedItems.length === 0 || (isConnected && !publishStyle)}
-                  title={
-                    !isConnected ? 'Connect Discord to publish to Community Lists'
-                    : !publishStyle ? 'Pick a poster style (CL2K or MM2K) first'
-                    : 'Publish these items to the Community Lists tab for makers'
-                  }
-                >
-                  {publishing ? <Loader2 size={16} className="spin-icon" /> : <ListPlus size={16} />}
-                  Add All to List
-                </button>
-                <button
-                  className="btn-secondary"
-                  onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
-                  disabled={publishing || allItems.length === 0}
-                  title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
-                >
-                  <ListChecks size={16} />
-                  Create List
-                </button>
-              </>
-            )}
-          </div>
         </div>
-      </div>
-    </div>
+
+        <SortControls prefs={prefs} onChange={setPrefs} showGroup={showGroup} showSeasons={hasSeasons} showDates />
+
+        <div className="unmatched-list">
+          <p className="list-count">
+            {sortedItems.length !== allItems.length
+              ? `${sortedItems.length} of ${allItems.length} items`
+              : `${allItems.length} items`}
+          </p>
+
+          {hasMore && (
+            <p className="performance-warning">
+              ⚠️ Showing first {modalDisplayLimit} of {sortedItems.length} items. Use search to find specific items.
+            </p>
+          )}
+
+          {displayItems.map(renderRow)}
+        </div>
+      </Modal.Body>
+      <Modal.Footer>
+        {isConnected && !hideCommunity && (
+          <PublishStyleToggle value={publishStyle} onChange={setPublishStyle} disabled={publishing} />
+        )}
+        <div className="modal-footer-actions">
+          <button className="btn-secondary" onClick={onClose}>Close</button>
+          {!hideCommunity && (
+      <>
+              <button
+                className="btn-secondary"
+                onClick={handleAddToLists}
+                disabled={publishing || sortedItems.length === 0 || (isConnected && !publishStyle)}
+                title={
+                  !isConnected ? 'Connect Discord to publish to Community Lists'
+                  : !publishStyle ? 'Pick a poster style (CL2K or MM2K) first'
+                  : 'Publish these items to the Community Lists tab for makers'
+                }
+              >
+                {publishing ? <Loader2 size={16} className="spinning" /> : <ListPlus size={16} />}
+                Add All to List
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
+                disabled={publishing || allItems.length === 0}
+                title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
+              >
+                <ListChecks size={16} />
+                Create List
+              </button>
+            </>
+          )}
+        </div>
+      </Modal.Footer>
+    </Modal>
 
     {previewUrl && (
       <div className="modal-overlay tmdb-poster-preview-overlay" onClick={() => setPreviewUrl(null)}>

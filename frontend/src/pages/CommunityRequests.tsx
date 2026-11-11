@@ -21,6 +21,8 @@ import RequestUploadPickerModal from '../components/community/RequestUploadPicke
 import MatchRequestModal from '../components/community/MatchRequestModal'
 import { useToast } from '../components/Toast'
 import './CommunityRequests.css'
+import Modal from '../components/Modal'
+import Toolbar from '../components/Toolbar'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
 // Any of these set means the panels export finished posters to the server, so Upload can
@@ -458,7 +460,7 @@ export default function CommunityRequests() {
   }
 
   return (
-    <>
+  <>
     <div className="page-container community-requests">
       <div className="community-header">
         <div className="community-header-top">
@@ -478,11 +480,11 @@ export default function CommunityRequests() {
       {/* Maker connect bar */}
       <div className="maker-connect-bar">
         {!isConnected ? (
-          <>
+     <>
             <span className="maker-connect-hint">
               Are you a poster maker or community member?
               <button
-                className="maker-info-btn"
+                className="btn-icon btn-icon-sm maker-info-btn"
                 aria-label="What does this do?"
                 onClick={() => setMakerInfoOpen((o) => !o)}
               >
@@ -490,7 +492,7 @@ export default function CommunityRequests() {
               </button>
             </span>
             <button className="maker-connect-btn" onClick={login} disabled={connecting}>
-              {connecting ? <Loader2 size={13} className="spin-icon" /> : null}
+              {connecting ? <Loader2 size={13} className="spinning" /> : null}
               {connecting ? 'Connecting…' : 'Connect with Discord'}
             </button>
             {makerInfoOpen && (
@@ -522,7 +524,7 @@ export default function CommunityRequests() {
             {connectError && <span className="maker-connect-error">{connectError}</span>}
           </>
         ) : (
-          <>
+     <>
             <span className="maker-connect-status">
               {isMaker ? '🎨 Signed in as' : '👤 Signed in as'}
               {' '}<strong>{username}</strong>
@@ -537,7 +539,7 @@ export default function CommunityRequests() {
       </div>
 
       {/* Page tabs — Requests vs published Lists */}
-      <div className="community-page-tabs">
+      <div className="pf-tabs community-page-tabs">
         <button className={pageTab === 'requests' ? 'active' : ''} onClick={() => setPageTab('requests')}>
           <MessageSquare size={16} />
           Requests
@@ -549,99 +551,101 @@ export default function CommunityRequests() {
       </div>
 
       {pageTab === 'requests' && (
-      <>
+   <>
       {/* Hidden file input shared across all upload buttons */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
         multiple
-        style={{ display: 'none' }}
+        hidden
         onChange={handleFileChange}
       />
 
-      <div className="community-toolbar">
-        <div className="community-type-tabs">
-          {MEDIA_TYPE_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              className={`community-tab-btn${mediaType === tab.key ? ' active' : ''}`}
-              onClick={() => setMediaType(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="community-filters">
-          <div className="community-filter-group">
-            <label>Status</label>
-            <select className="community-status-select" value={status} disabled={claimedByMe} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
-              <option value="active">Active</option>
-              <option value="all">All</option>
-              <option value="pending">Pending</option>
-              <option value="in_progress">In Progress</option>
-              <option value="fulfilled">Fulfilled</option>
-              <option value="rejected">Rejected</option>
-            </select>
-          </div>
+      <Toolbar title="Requests" description="Poster requests from the community, newest first. Filter by type, status and owner. Makers can keep their claims on top and hide styles they do not make.">
+        <button className="btn-toolbar" onClick={fetchRequests} disabled={loading}>
+          <RefreshCw size={14} className={loading ? 'spinning' : ''} />
+          Refresh
+        </button>
+        <button className="btn-toolbar btn-primary" onClick={() => setNewRequestModalOpen(true)}>
+          <Plus size={14} />
+          New Request
+        </button>
+      
+      </Toolbar>
+      <div className="community-filter-row">
+      <div className="community-type-tabs pf-subtabs">
+        {MEDIA_TYPE_TABS.map((tab) => (
           <button
-            className="community-tab-btn community-sort-btn"
-            onClick={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
-            title={sortOrder === 'newest' ? 'Newest first — click to show oldest first' : 'Oldest first — click to show newest first'}
-            aria-label={sortOrder === 'newest' ? 'Sorted newest first' : 'Sorted oldest first'}
+            key={tab.key}
+            className={mediaType === tab.key ? 'active' : ''}
+            onClick={() => setMediaType(tab.key)}
           >
-            {sortOrder === 'newest' ? <CalendarArrowDown size={16} /> : <CalendarArrowUp size={16} />}
+            {tab.label}
           </button>
-          {isMaker && (
-            <button
-              className={`community-tab-btn community-claimed-btn${claimedByMe ? ' active' : ''}`}
-              onClick={() => setClaimedByMe((v) => !v)}
-              title="Show your claims (on top) plus open requests — stays set when you navigate away and back"
-            >
-              Claimed
-            </button>
-          )}
-          {isMaker && (
-            <HideFilterMenu
-              value={hideFilters}
-              onChange={setHideFilters}
-              omit={hiddenStyles.has('MM2K') ? ['mm2k'] : []}
-            />
-          )}
+        ))}
+      </div>
+      <div className="community-filters">
+        <div className="community-filter-group">
+          <label>Status</label>
+          <select className="community-status-select" value={status} disabled={claimedByMe} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
+            <option value="active">Active</option>
+            <option value="all">All</option>
+            <option value="pending">Pending</option>
+            <option value="in_progress">In Progress</option>
+            <option value="fulfilled">Fulfilled</option>
+            <option value="rejected">Rejected</option>
+          </select>
         </div>
-        {isConnected && discordUserId && (
-          <div className="community-owner-toggle">
-            <button
-              className={`community-tab-btn${ownerFilter === 'all' ? ' active' : ''}`}
-              onClick={() => setOwnerFilter('all')}
-            >
-              All Requests
-            </button>
-            <button
-              className={`community-tab-btn${ownerFilter === 'mine' ? ' active' : ''}`}
-              onClick={() => setOwnerFilter('mine')}
-            >
-              My Requests
-            </button>
-          </div>
+        <button
+          className="pf-subtab community-sort-btn"
+          onClick={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
+          title={sortOrder === 'newest' ? 'Newest first — click to show oldest first' : 'Oldest first — click to show newest first'}
+          aria-label={sortOrder === 'newest' ? 'Sorted newest first' : 'Sorted oldest first'}
+        >
+          {sortOrder === 'newest' ? <CalendarArrowDown size={16} /> : <CalendarArrowUp size={16} />}
+        </button>
+        {isMaker && (
+          <button
+            className={`pf-subtab community-claimed-btn${claimedByMe ? ' active' : ''}`}
+            onClick={() => setClaimedByMe((v) => !v)}
+            title="Show your claims (on top) plus open requests — stays set when you navigate away and back"
+          >
+            Claimed
+          </button>
         )}
-        <div className="community-toolbar-actions">
-          <button className="community-refresh-btn" onClick={fetchRequests} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'spin-icon' : ''} />
-            Refresh
+        {isMaker && (
+          <HideFilterMenu
+            value={hideFilters}
+            onChange={setHideFilters}
+            omit={hiddenStyles.has('MM2K') ? ['mm2k'] : []}
+          />
+        )}
+      </div>
+      {isConnected && discordUserId && (
+        <div className="community-owner-toggle pf-subtabs">
+          <button
+            className={ownerFilter === 'all' ? 'active' : ''}
+            onClick={() => setOwnerFilter('all')}
+          >
+            All Requests
           </button>
-          <button className="community-new-request-btn" onClick={() => setNewRequestModalOpen(true)}>
-            <Plus size={14} />
-            New Request
+          <button
+            className={ownerFilter === 'mine' ? 'active' : ''}
+            onClick={() => setOwnerFilter('mine')}
+          >
+            My Requests
           </button>
         </div>
+      )}
+    
       </div>
 
       {error && <div className="community-error">{error}</div>}
 
       {loading && requests.length === 0 ? (
         <div className="community-loading">
-          <RefreshCw size={20} className="spin-icon" />
+          <RefreshCw size={20} className="spinning" />
           <span>Loading requests…</span>
         </div>
       ) : visibleRequests.length === 0 ? (
@@ -670,13 +674,13 @@ export default function CommunityRequests() {
                     When enabled, any image you drop or upload to a request card is also sent to your IDarr quick add folder and processed — identical to dragging files onto the IDarr sidebar icon. Whether it still posts to Discord is set in the Maker Tools PSD settings.
                   </span>
                 </span>
-                <span className="idarr-toggle-control">
+                <span className="toggle-switch">
                   <input
                     type="checkbox"
                     checked={idarrQuickAddEnabled}
                     onChange={(e) => setIdarrQuickAddEnabled(e.target.checked)}
                   />
-                  <span className="idarr-toggle-slider" />
+                  <span className="toggle-slider" />
                 </span>
               </label>
             )}
@@ -701,7 +705,7 @@ export default function CommunityRequests() {
             // Passive overlap: this item also sits on someone's active list.
             const alsoOnList = getOverlap(req).onList
             const infoLines = (
-              <>
+       <>
                 {listCompleted && (
                   <div className="request-list-completed-callout">
                     ✋ A matching poster was completed from a list
@@ -726,7 +730,7 @@ export default function CommunityRequests() {
               </>
             )
             const actions = (
-              <>
+       <>
                 {req.discord_thread_url && (
                   <a
                     className="request-tmdb-link request-discord-link"
@@ -753,7 +757,7 @@ export default function CommunityRequests() {
                       ? (typeof us === 'string' && us.startsWith('uploading-') ? `Uploading ${us.slice('uploading-'.length)}…` : 'Uploading…')
                       : isPosted ? us : us ? 'Retry' : 'Upload'
                     return (
-                      <>
+           <>
                         <button
                           type="button"
                           className={`request-upload-btn${isUploading || isPosted ? (isUploading ? '' : ' upload-done') : us ? ' upload-error' : ''}`}
@@ -761,7 +765,7 @@ export default function CommunityRequests() {
                           disabled={isUploading || isPosted}
                           onClick={() => handleUploadClick(req.id)}
                         >
-                          {isUploading ? <Loader2 size={11} className="spin-icon" /> :
+                          {isUploading ? <Loader2 size={11} className="spinning" /> :
                            isPosted ? <Check size={11} /> :
                            <Upload size={11} />}
                           <span>{uploadLabel}</span>
@@ -776,7 +780,7 @@ export default function CommunityRequests() {
                                 data-tooltip="Claim this request"
                                 onClick={() => handleStatusAction(req.id, 'claim')}
                               >
-                                {actionLoading ? <Loader2 size={11} className="spin-icon" /> : null}
+                                {actionLoading ? <Loader2 size={11} className="spinning" /> : null}
                                 <span>Claim</span>
                               </button>
                             )}
@@ -788,7 +792,7 @@ export default function CommunityRequests() {
                                 data-tooltip="Mark as complete"
                                 onClick={() => handleStatusAction(req.id, 'complete')}
                               >
-                                {actionLoading ? <Loader2 size={11} className="spin-icon" /> : <Check size={11} />}
+                                {actionLoading ? <Loader2 size={11} className="spinning" /> : <Check size={11} />}
                                 <span>Complete</span>
                               </button>
                             )}
@@ -838,7 +842,7 @@ export default function CommunityRequests() {
                           disabled={isLoading || isDone}
                           onClick={() => setArchiveConfirm({ requestId: req.id, message: '' })}
                         >
-                          {isLoading ? <Loader2 size={11} className="spin-icon" /> : isDone ? <Check size={11} /> : null}
+                          {isLoading ? <Loader2 size={11} className="spinning" /> : isDone ? <Check size={11} /> : null}
                           <span>{isDone ? 'Archived' : 'Archive'}</span>
                         </button>
                         {archiveError && (
@@ -861,7 +865,7 @@ export default function CommunityRequests() {
                           data-tooltip="Upgrade to a show request: series + all season posters (moderator)"
                           onClick={() => handleUpgrade(req.id)}
                         >
-                          {upgrading ? <Loader2 size={11} className="spin-icon" /> : <ChevronsUp size={11} />}
+                          {upgrading ? <Loader2 size={11} className="spinning" /> : <ChevronsUp size={11} />}
                           <span>Upgrade</span>
                         </button>
                         {upgradeError && (
@@ -900,7 +904,7 @@ export default function CommunityRequests() {
                           data-tooltip={isRequester ? 'Remove your request' : 'Remove this request (moderator)'}
                           onClick={() => handleStatusAction(req.id, 'remove')}
                         >
-                          {actionLoading ? <Loader2 size={11} className="spin-icon" /> : null}
+                          {actionLoading ? <Loader2 size={11} className="spinning" /> : null}
                           <span>Remove</span>
                         </button>
                         {removeError && (
@@ -990,73 +994,63 @@ export default function CommunityRequests() {
       const isLoading = archiveState === 'loading'
 
       return (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !isLoading) setArchiveConfirm(null) }}>
-          <div className="modal-content schedule-modal close-confirm-modal">
-            <div className="modal-header">
-              <h2>Archive Discord Thread</h2>
-              <button className="modal-close" onClick={() => setArchiveConfirm(null)} disabled={isLoading}>×</button>
+        <Modal onClose={() => setArchiveConfirm(null)} className="close-confirm-modal" busy={isLoading}>
+          <Modal.Header title="Archive Discord Thread" />
+          <Modal.Body>
+            <p className="close-confirm-hint">
+              This will lock and archive the Discord thread. You can optionally leave a message for the maker.
+            </p>
+            <div className="close-confirm-presets">
+              {PRESETS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`close-confirm-preset${archiveConfirm.message === p ? ' selected' : ''}`}
+                  onClick={() => setArchiveConfirm((s) => s ? { ...s, message: s.message === p ? '' : p } : s)}
+                >
+                  {p}
+                </button>
+              ))}
             </div>
-            <div className="modal-body">
-              <p className="close-confirm-hint">
-                This will lock and archive the Discord thread. You can optionally leave a message for the maker.
-              </p>
-              <div className="close-confirm-presets">
-                {PRESETS.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className={`close-confirm-preset${archiveConfirm.message === p ? ' selected' : ''}`}
-                    onClick={() => setArchiveConfirm((s) => s ? { ...s, message: s.message === p ? '' : p } : s)}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-              <textarea
-                className="request-notes-textarea"
-                placeholder="Or type a custom message… (optional)"
-                rows={3}
-                maxLength={300}
-                value={PRESETS.includes(archiveConfirm.message) ? '' : archiveConfirm.message}
-                onChange={(e) => setArchiveConfirm((s) => s ? { ...s, message: e.target.value } : s)}
-              />
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setArchiveConfirm(null)} disabled={isLoading}>
-                Cancel
-              </button>
-              <button
-                className="btn-primary"
-                disabled={isLoading}
-                onClick={() => handleArchiveThread(archiveConfirm.requestId, archiveConfirm.message.trim() || undefined)}
-              >
-                {isLoading ? <Loader2 size={13} className="spin-icon" /> : '🔒'}
-                {' '}Archive Thread
-              </button>
-            </div>
-          </div>
-        </div>
+            <textarea
+              className="request-notes-textarea"
+              placeholder="Or type a custom message… (optional)"
+              rows={3}
+              maxLength={300}
+              value={PRESETS.includes(archiveConfirm.message) ? '' : archiveConfirm.message}
+              onChange={(e) => setArchiveConfirm((s) => s ? { ...s, message: e.target.value } : s)}
+            />
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={() => setArchiveConfirm(null)} disabled={isLoading}>
+              Cancel
+            </button>
+            <button
+              className="btn-primary"
+              disabled={isLoading}
+              onClick={() => handleArchiveThread(archiveConfirm.requestId, archiveConfirm.message.trim() || undefined)}
+            >
+              {isLoading ? <Loader2 size={13} className="spinning" /> : '🔒'}
+              {' '}Archive Thread
+            </button>
+          </Modal.Footer>
+        </Modal>
       )
     })()}
     {/* ── Already-claimed popup ───────────────────────────────────────────── */}
     {claimConflict && (
-      <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setClaimConflict(null) }}>
-        <div className="modal-content schedule-modal" style={{ maxWidth: '380px' }}>
-          <div className="modal-header">
-            <h2>Already claimed</h2>
-            <button className="modal-close" onClick={() => setClaimConflict(null)}>×</button>
-          </div>
-          <div className="modal-body">
-            <p style={{ margin: 0 }}>{claimConflict}</p>
-            <p className="muted" style={{ marginTop: '0.75rem' }}>
-              The list has been refreshed to show its current status.
-            </p>
-          </div>
-          <div className="modal-footer">
-            <button className="btn-primary" onClick={() => setClaimConflict(null)}>Got it</button>
-          </div>
-        </div>
-      </div>
+      <Modal onClose={() => setClaimConflict(null)} size="sm">
+        <Modal.Header title="Already claimed" />
+        <Modal.Body>
+          <p className="m-0">{claimConflict}</p>
+          <p className="text-dim mt-md">
+            The list has been refreshed to show its current status.
+          </p>
+        </Modal.Body>
+        <Modal.Footer>
+          <button className="btn-primary" onClick={() => setClaimConflict(null)}>Got it</button>
+        </Modal.Footer>
+      </Modal>
     )}
     {/* ── New Community Request modal ─────────────────────────────────────── */}
     {newRequestModalOpen && (

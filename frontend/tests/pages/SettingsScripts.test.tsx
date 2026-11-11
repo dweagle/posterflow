@@ -89,6 +89,8 @@ describe('SettingsScriptsSection', () => {
     // Wait for load
     await waitFor(() => screen.getByText('Sync (Single Drive)'))
 
+    // Save is quiet until something changed: flip a hook first.
+    await user.click(screen.getAllByRole('checkbox')[1])
     await user.click(screen.getByRole('button', { name: /save/i }))
 
     await waitFor(() => {
@@ -106,6 +108,8 @@ describe('SettingsScriptsSection', () => {
     render(<SettingsScriptsSection showToast={mockShowToast} />)
 
     await waitFor(() => screen.getByText('Sync (Single Drive)'))
+    // Save is quiet until something changed: flip a hook first.
+    await user.click(screen.getAllByRole('checkbox')[1])
     await user.click(screen.getByRole('button', { name: /save/i }))
 
     await waitFor(() => {
@@ -119,6 +123,8 @@ describe('SettingsScriptsSection', () => {
     render(<SettingsScriptsSection showToast={mockShowToast} />)
 
     await waitFor(() => screen.getByText('Sync (Single Drive)'))
+    // Save is quiet until something changed: flip a hook first.
+    await user.click(screen.getAllByRole('checkbox')[1])
     await user.click(screen.getByRole('button', { name: /save/i }))
 
     await waitFor(() => {
@@ -146,6 +152,8 @@ describe('SettingsScriptsSection', () => {
     render(<SettingsScriptsSection showToast={mockShowToast} />)
 
     await waitFor(() => screen.getByText('Sync (Single Drive)'))
+    // Save is quiet until something changed: flip a hook first.
+    await user.click(screen.getAllByRole('checkbox')[1])
     await user.click(screen.getByRole('button', { name: /save/i }))
 
     await waitFor(() => {

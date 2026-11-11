@@ -123,7 +123,7 @@ export default function ArtworkFinderPanel() {
         <button type="button" className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch Pull</button>
         <button type="button" className={mode === 'drive' ? 'active' : ''} onClick={() => setMode('drive')}>My Drive</button>
 
-        {/* My Drive's item sources ride in the same row, in their own colour: they don't switch
+        {/* My Drive's item sources ride in the same row, in their own color: they don't switch
             panels like the tabs to their left, they switch what that one panel is listing. */}
         {mode === 'drive' && (
           <>
@@ -179,12 +179,12 @@ export default function ArtworkFinderPanel() {
           </button>
         </div>
 
-        <div className="tmdb-filter-bar">
+        <div className="tmdb-filter-bar pf-subtabs">
           {(['all', 'movie', 'tv', 'collection'] as TmdbSearchFilter[]).map((f) => (
             <button
               key={f}
               type="button"
-              className={`tmdb-filter-btn${filter === f ? ' active' : ''}`}
+              className={filter === f ? 'active' : ''}
               onClick={() => { setFilter(f); if (query.trim()) void doSearch(query, f) }}
             >
               {f === 'all' && 'All'}
@@ -201,7 +201,7 @@ export default function ArtworkFinderPanel() {
           results.length === 0
             ? <p className="tmdb-empty">No results found.</p>
             : (
-              <div style={{ marginTop: 8 }}>
+              <div className="mt-sm">
                 {results.map((item) => (
                   <ArtworkFinderCard
                     key={`${item.media_type}-${item.tmdb_id}`}

@@ -1,0 +1,212 @@
+/* Unmatched tab: controls, result tabs, items, resolve cards. */
+
+/* ---------------------------------------------------------------------------
+   Unmatched maker tab — library items missing posters, rendered as the same
+   poster-maker cards the TMDB search tab uses.
+   --------------------------------------------------------------------------- */
+
+.unmatched-maker-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 var(--sp-6);
+  margin-left: var(--sp-2);
+  border-radius: var(--radius-pill);
+  background: var(--tint-strong);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.maker-result-tabs button.active .unmatched-maker-tab-count {
+  background: rgba(var(--rgb-accent-deep), 0.4);
+}
+
+/* Category filter tabs + search share one row, with the search bar kept short. */
+
+.unmatched-maker-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-12);
+  }
+
+/* Shorten the search bar only inside the shared controls row, where it sits beside the filter
+   tabs. The My Drive panel's standalone bar keeps its default full-width block layout. */
+
+.unmatched-maker-controls .unmatched-maker-search {
+  margin-top: 0;
+  flex: 0 1 300px;
+  min-width: 200px;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  border-radius: var(--radius-md);
+}
+
+.unmatched-maker-search {
+  margin-top: var(--sp-12);
+}
+
+.unmatched-maker-count {
+  margin: 0 0 var(--sp-6);
+  font-size: var(--text-sm);
+}
+
+.unmatched-maker-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-16);
+}
+
+.unmatched-maker-seasons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.unmatched-maker-seasons-label {
+  color: var(--color-text-dim);
+  font-size: var(--text-sm);
+}
+
+/* Resolve card — shown until an item without a TMDB id is matched to one. */
+
+.unmatched-maker-resolve {
+  display: flex;
+  gap: var(--sp-16);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-12);
+  align-items: flex-start;
+}
+
+.unmatched-maker-resolve-poster {
+  flex-shrink: 0;
+  width: 64px;
+  height: 96px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-surface-raised);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-disabled);
+}
+
+.unmatched-maker-resolve-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.unmatched-maker-resolve-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  min-width: 0;
+  flex: 1;
+}
+
+.unmatched-maker-resolve-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.unmatched-maker-resolve-note {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.unmatched-maker-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+}
+
+.unmatched-maker-candidate {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-6) var(--sp-8) var(--sp-6) var(--sp-6);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.unmatched-maker-candidate:hover {
+  border-color: var(--color-accent);
+  background: rgba(var(--rgb-accent), 0.1);
+}
+
+.unmatched-maker-candidate img,
+.unmatched-maker-candidate-placeholder {
+  width: 32px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--color-surface-raised);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-disabled);
+}
+
+.unmatched-maker-candidate-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.unmatched-maker-candidate-title {
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.unmatched-maker-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--sp-8);
+  padding: var(--sp-48) var(--sp-16);
+  color: var(--color-text-faint);
+}
+
+.unmatched-maker-empty svg {
+  color: var(--color-line-soft);
+}
+
+.unmatched-maker-empty h3 {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.unmatched-maker-empty p {
+  margin: 0;
+  max-width: 32rem;
+  font-size: var(--text-md);
+}
+
+/* Resolve prompt slotted into an id-less collection's finder card (info column). */
+
+.unmatched-maker-inline-resolve {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  margin-top: var(--sp-4);
+}
+
+.unmatched-maker-resolve-btn { align-self: flex-start; min-width: 0; height: auto; padding: 0.35rem 0.9rem; font-size: 0.8rem; line-height: 1.2; }

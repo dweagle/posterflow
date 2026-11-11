@@ -1,0 +1,1603 @@
+/* Drive Priority tab: priority lists, drag and drop, style usage and the drive usage modals.
+   The poster-manager sheets load in a fixed order (see App.tsx). */
+
+/* Drive Priority Tab Styles */
+
+.priority-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+/* Style usage panel */
+
+.style-usage-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-16);
+}
+
+.style-usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.style-usage-title {
+  color: var(--color-title);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.style-usage-total {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+}
+
+.style-usage-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.style-usage-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+}
+
+.style-usage-row .style-badge {
+  width: 5rem;
+  flex-shrink: 0;
+}
+
+/* Same look as the priority cards' .drive-badge (GDrives.css sizes those). */
+
+.style-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-3xs);
+  letter-spacing: 0.02em;
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--radius-sm);
+  min-width: 2.6rem;
+  text-align: center;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+
+/* App-wide style colors (MM2K green, CL2K blue, Custom purple), opaque so they match on any surface. */
+
+.style-mm2k {
+  background: rgba(var(--rgb-success), 0.15);
+  color: var(--color-text-body);
+  border: 1px solid rgba(var(--rgb-success), 0.45);
+}
+
+.style-cl2k {
+  background: var(--color-slate);
+  color: var(--color-text-body);
+  border: 1px solid var(--color-button-primary);
+}
+
+.style-custom {
+  background: rgba(var(--rgb-purple), 0.25);
+  color: var(--color-text-body);
+  border: 1px solid rgba(var(--rgb-purple), 0.45);
+}
+
+.style-unknown {
+  background: var(--color-surface-raised);
+  color: var(--color-text-faint);
+  border: 1px solid var(--color-border-strong);
+}
+
+.style-usage-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* Bar fills keep their original colors — the badge next to each bar carries the style. */
+
+.style-usage-row.style-usage-mm2k .style-usage-bar-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+
+.style-usage-row.style-usage-cl2k .style-usage-bar-fill {
+  height: 100%;
+  background: var(--color-success);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+
+.style-usage-row.style-usage-custom .style-usage-bar-fill {
+  height: 100%;
+  background: var(--color-warning);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+
+.style-usage-row.style-usage-unknown .style-usage-bar-fill {
+  height: 100%;
+  background: var(--color-text-disabled);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+
+.style-usage-count {
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+  min-width: 2.5rem;
+  text-align: right;
+}
+
+.drive-usage-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.drive-usage-toggle .style-usage-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.drive-usage-chevron {
+  transition: transform 0.15s ease;
+}
+
+.drive-usage-chevron.open {
+  transform: rotate(90deg);
+}
+
+.drive-usage-hint {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+  margin: 0;
+}
+
+.drive-usage-hint-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-12);
+}
+
+.drive-usage-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-16) var(--sp-24);
+}
+
+.drive-usage-intro-title {
+  color: var(--color-title);
+  font-size: var(--text-base);
+  font-weight: 600;
+  margin: 0 0 var(--sp-6);
+}
+
+.drive-usage-intro-text {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  margin: 0;
+  max-width: 60rem;
+}
+
+.drive-usage-overrides-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-16);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+  font-weight: 500;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.drive-usage-overrides-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.drive-usage-overrides-count {
+  background: var(--color-slate-deep);
+  color: var(--color-accent);
+  border: 1px solid var(--color-button-primary);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  padding: var(--sp-2) var(--sp-8);
+}
+
+/* Poster and artwork reports side by side, stacking when narrow; no internal scrolling. */
+
+.drive-usage-tab-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-12);
+}
+
+/* A single report (e.g. no artwork drives) takes the full width. */
+
+.drive-usage-tab-grid > :only-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1200px) {
+  .drive-usage-tab-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.drive-usage-hint-row .style-usage-download-btn {
+  flex-shrink: 0;
+}
+
+.drive-usage-row .drive-usage-name {
+  /* --name-col is set inline per panel; the name shrinks first, with ellipsis. */
+  flex: 0 4 var(--name-col, 11rem);
+  min-width: 4.5rem;
+  max-width: 16rem;
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drive-usage-row {
+  gap: var(--sp-8);
+}
+
+.drive-usage-row .style-badge,
+.drive-usage-row .style-usage-count,
+.drive-usage-row .drive-usage-outranked-count,
+.drive-usage-row .style-usage-download-btn {
+  flex-shrink: 0;
+}
+
+.drive-usage-row .style-badge {
+  width: auto;
+  min-width: 3rem;
+}
+
+.drive-usage-row .style-usage-bar-track {
+  display: flex;
+  min-width: 4rem;
+}
+
+/* Off-scale (dominant) drive: axis-break slashes near the bar's right end. */
+
+.drive-usage-row .style-usage-bar-track.drive-usage-bar-capped {
+  position: relative;
+}
+
+.drive-usage-row .style-usage-bar-track.drive-usage-bar-capped::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 9px;
+  width: 10px;
+  background: repeating-linear-gradient(115deg, var(--color-surface) 0 3px, transparent 3px 6px);
+}
+
+@media (max-width: 768px) {
+  .drive-usage-row {
+    flex-wrap: wrap;
+    row-gap: var(--sp-6);
+    padding-bottom: var(--sp-8);
+    border-bottom: 1px solid var(--color-surface-raised);
+  }
+
+  .drive-usage-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .drive-usage-row .drive-usage-name {
+    /* Natural width so the badge hugs the name instead of drifting across the line. */
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .drive-usage-row .style-usage-bar-track {
+    min-width: 100%;
+  }
+
+  .drive-usage-row .style-usage-count {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .drive-usage-row .drive-usage-outranked-count {
+    min-width: 0;
+  }
+
+  .drive-usage-row .style-usage-download-btn:first-of-type {
+    margin-left: auto;
+  }
+}
+
+.drive-usage-row .style-usage-bar-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+
+.drive-usage-row .has-extension .style-usage-bar-fill {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.drive-usage-outranked-fill {
+  height: 100%;
+  background: var(--color-slate-raised);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transition: width 0.3s ease;
+}
+
+.drive-usage-outranked-count {
+  color: var(--color-text-dim);
+  font-size: var(--text-sm);
+  min-width: 2.6rem;
+}
+
+.drive-usage-modal .unmatched-list {
+  gap: var(--sp-8);
+}
+
+.drive-usage-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* Buttons in their own centered column so they sit in the same spot on every card. */
+
+.drive-usage-item-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-shrink: 0;
+}
+
+.drive-usage-thumb-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.drive-usage-thumb {
+  width: 36px;
+  height: 54px;
+  object-fit: contain;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.drive-usage-thumb-btn:hover .drive-usage-thumb {
+  transform: scale(1.05);
+  border-color: var(--color-accent);
+}
+
+.drive-usage-preview-nav {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim-strong);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  color: var(--color-text-body);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.drive-usage-preview-nav:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.drive-usage-preview-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* One centered row under the modal, so width changes never move the arrows sideways. */
+
+.drive-usage-preview-nav-row {
+  display: flex;
+  gap: var(--sp-16);
+  justify-content: center;
+  align-items: center;
+  margin-top: var(--sp-12);
+  flex-shrink: 0;
+}
+
+/* Artwork type filter chips between the arrows. */
+
+.drive-usage-preview-filter {
+  display: flex;
+  gap: var(--sp-6);
+  align-items: center;
+}
+
+/* Top-anchored: the preview's top edge stays put across slot shapes. */
+
+.modal-overlay.drive-usage-preview-overlay {
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 6vh;
+}
+
+/* Centered in the region above the pinned arrows (bottom padding mirrors them). */
+
+.modal-overlay.drive-usage-preview-overlay--art {
+  justify-content: center;
+  /* Top padding biases the centering downward. */
+  padding-top: 10vh;
+  padding-bottom: calc(85vh - min(440px, 60vh) - 4.4rem);
+}
+
+/* Arrows pinned just under the tallest preview of each type (lightbox only).
+   Posters: 6vh top + (90vh - 8rem) image + ~4.15rem caption/actions. */
+
+.drive-usage-preview-overlay .drive-usage-preview-nav-row {
+  position: fixed;
+  top: calc(96vh - 3.6rem);
+  left: 0;
+  right: 0;
+  margin-top: 0;
+  /* Filter chips stack above the arrow pair. */
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.drive-usage-preview-nav-arrows {
+  display: flex;
+  gap: var(--sp-16);
+  justify-content: center;
+}
+
+/* Artwork: 15vh top + square cap (the tallest artwork shape) + caption/actions. */
+
+.drive-usage-preview-overlay--art .drive-usage-preview-nav-row {
+  top: calc(15vh + min(440px, 60vh) + 4.4rem);
+}
+
+/* Cap so a tall poster plus its caption clears the pinned arrows. */
+
+.drive-usage-preview .tmdb-poster-preview-image {
+  max-height: calc(90vh - 8rem);
+  margin-inline: auto;
+}
+
+/* Artwork previews at standard sizes instead of filling the screen. */
+
+.drive-usage-preview .tmdb-poster-preview-image.drive-usage-preview-logo {
+  max-width: min(600px, calc(100vw - 8rem));
+  max-height: 300px;
+  padding: var(--sp-24);
+}
+
+.drive-usage-preview .tmdb-poster-preview-image.drive-usage-preview-background {
+  max-width: min(760px, calc(100vw - 8rem));
+  max-height: 55vh;
+}
+
+.drive-usage-preview .tmdb-poster-preview-image.drive-usage-preview-square {
+  max-width: min(440px, calc(100vw - 8rem));
+  max-height: min(440px, 60vh);
+}
+
+/* One line, zero intrinsic width: the image alone sizes the modal; a wider caption
+   spills evenly past both sides. */
+
+.drive-usage-preview-caption {
+  margin-top: var(--sp-8);
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: var(--sp-12);
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+  white-space: nowrap;
+  width: 0;
+  min-width: 100%;
+}
+
+.drive-usage-preview-caption > * {
+  flex-shrink: 0;
+}
+
+.drive-usage-preview-pos {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
+
+.drive-usage-preview-actions {
+  margin-top: var(--sp-8);
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+
+/* Compound so the compact sizing wins regardless of source order. */
+
+.drive-usage-view-tab.drive-usage-row-use,
+.drive-usage-row-use {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* An active override button hovers red: clicking it REMOVES the override. */
+
+.drive-usage-override-btn.active:hover {
+  background-color: var(--color-danger-soft);
+  border-color: var(--color-danger-soft);
+  color: var(--color-text);
+}
+
+.drive-usage-source-badge {
+  font-size: var(--text-3xs);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text-body);
+  border: 1px solid var(--color-border-strong);
+  max-width: 10rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+/* Source badge tinted by the drive's style. */
+
+.drive-usage-source-badge--mm2k {
+  background: rgba(var(--rgb-success), 0.15);
+  border-color: rgba(var(--rgb-success), 0.45);
+  color: var(--color-success-text);
+}
+
+.drive-usage-source-badge--cl2k {
+  background: var(--color-slate);
+  border-color: var(--color-button-primary);
+  color: var(--color-accent-soft);
+}
+
+.drive-usage-source-badge--custom {
+  background: rgba(var(--rgb-purple), 0.25);
+  border-color: rgba(var(--rgb-purple), 0.45);
+  color: var(--color-purple);
+}
+
+.drive-usage-compare-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-8);
+  line-height: 1;
+}
+
+/* Top-anchored so chip switches only move the bottom edge. Compound: the base
+   .modal-overlay center rule sits later in this file. */
+
+.modal-overlay.drive-usage-compare-overlay {
+  z-index: var(--z-modal-2);
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 7vh;
+}
+
+/* Hugs its content; views are tuned to near-equal heights so chips don't jump. */
+
+.drive-usage-compare-modal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-16) var(--sp-20);
+  width: fit-content;
+  min-width: min(30rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  height: fit-content;
+  /* 80vh, shrunk when needed so the nav row below still fits on screen. */
+  max-height: min(80vh, calc(93vh - 4.5rem));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.drive-usage-compare-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  /* Zero intrinsic width: the columns alone size the fit-content modal. */
+  width: 0;
+  min-width: 100%;
+}
+
+/* Shrinks and ellipses but doesn't grow, keeping the type badge next to the title. */
+
+.drive-usage-compare-title {
+  color: var(--color-title);
+  font-size: var(--text-base);
+  font-weight: 600;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drive-usage-compare-header .modal-close {
+  margin-left: auto;
+}
+
+.drive-usage-compare-slots {
+  display: flex;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+  /* Sit closer to the title than the modal's 0.75rem flex gap. */
+  margin-top: -0.35rem;
+}
+
+/* Invisible chips row for movies so posters start at the same height as shows. */
+
+.drive-usage-compare-slots-ghost {
+  visibility: hidden;
+}
+
+/* Fixed-width cards that wrap; the modal hugs however many fit. */
+
+.drive-usage-compare-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: flex-start;
+  gap: var(--sp-16);
+  overflow-y: auto;
+  padding-bottom: var(--sp-4);
+  min-height: 0;
+}
+
+/* Fixed dimensions so the modal lays out fully before images load. */
+
+.drive-usage-compare-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-shrink: 0;
+  /* One height-aware width for BOTH views, so every chip keeps the same modal width. */
+  width: min(280px, calc(52vh - 190px), calc(100vw - 4rem));
+}
+
+/* Compare images open the big preview on click; placeholders (divs) stay inert. */
+
+img.drive-usage-compare-img,
+img.drive-usage-compare-piece-img {
+  cursor: zoom-in;
+}
+
+.modal-overlay.drive-usage-compare-preview-overlay {
+  z-index: var(--z-modal-3);
+}
+
+.drive-usage-compare-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-line-soft);
+  font-size: var(--text-xs);
+  border-style: dashed;
+}
+
+/* Box aspect matches the slot's shape — no letterbox bars, size known before load. */
+
+.drive-usage-compare-img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-page-bg);
+}
+
+.drive-usage-compare-img.compare-img-background {
+  aspect-ratio: 16 / 9;
+}
+
+.drive-usage-compare-img.compare-img-square {
+  aspect-ratio: 1 / 1;
+}
+
+.drive-usage-compare-img.compare-img-logo {
+  aspect-ratio: 5 / 2;
+  padding: var(--sp-8);
+}
+
+.drive-usage-compare-label {
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drive-usage-compare-actions {
+  display: flex;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Whole-set compare: one column per drive; height-aware width fits 80vh unscrolled. */
+
+.drive-usage-compare-setcol {
+  align-items: stretch;
+}
+
+.drive-usage-compare-setcol .drive-usage-compare-label {
+  text-align: center;
+  max-width: none;
+}
+
+.drive-usage-compare-piece {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.drive-usage-compare-piece-label {
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  /* Same height with or without the per-piece Use button, so columns stay aligned. */
+  min-height: 1.7rem;
+}
+
+/* One size for every Use / Use set button here; placed after .drive-usage-row-use to win the tie. */
+
+.drive-usage-compare-modal .drive-usage-override-btn {
+  box-sizing: border-box;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--sp-12);
+  font-size: var(--text-xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.drive-usage-compare-piece-used {
+  color: var(--color-success);
+  text-transform: none;
+}
+
+.drive-usage-compare-piece-img {
+  width: 100%;
+  object-fit: contain;
+  background: var(--color-page-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+/* Width-driven + known aspect: boxes hug their images and scale with the column. */
+
+.drive-usage-compare-piece-img.piece-logo {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 5 / 2;
+  padding: var(--sp-8);
+}
+
+.drive-usage-compare-piece-img.piece-background {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+/* Full-width backing like the logo's; the 1/1 image letterboxes to ~62% inside. */
+
+.drive-usage-compare-piece-img.piece-square {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 8 / 5;
+}
+
+.drive-usage-compare-piece-img.in-use {
+  border-color: rgba(var(--rgb-success), 0.45);
+}
+
+.drive-usage-compare-used {
+  background: rgba(var(--rgb-success), 0.15);
+  color: var(--color-success);
+  border: 1px solid rgba(var(--rgb-success), 0.45);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  padding: var(--sp-4) var(--sp-8);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.drive-usage-modal .modal-header h2 {
+  flex-wrap: nowrap;
+  gap: var(--sp-8);
+}
+
+.drive-usage-modal .modal-header h2 > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Styled wrapping hover hints, right-anchored; --below flips them inside scroll areas. */
+
+.drive-usage-tip {
+  position: relative;
+}
+
+.drive-usage-tip[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: 240px;
+  padding: var(--sp-6) var(--sp-8);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-body);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+/* Hover-delayed, and only on devices with a real hover (no popup on touch). */
+
+@media (hover: hover) {
+  .drive-usage-tip[data-tooltip]:hover::after {
+    opacity: 1;
+    transition-delay: 0.6s;
+  }
+}
+
+.drive-usage-season-badge {
+  cursor: zoom-in;
+  transition: filter 0.15s ease;
+}
+
+.drive-usage-season-badge:hover {
+  filter: brightness(1.3);
+}
+
+.drive-usage-drive-nav-group {
+  display: inline-flex;
+  gap: var(--sp-4);
+  flex-shrink: 0;
+}
+
+.drive-usage-drive-nav {
+  flex-shrink: 0;
+}
+
+.drive-usage-drive-nav:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.drive-usage-view-tabs {
+  display: flex;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+}
+
+.drive-usage-modal .style-badge,
+.drive-usage-modal .drive-usage-source-badge {
+  font-weight: 700;
+}
+
+/* Compact the chrome above the list so short windows still show the cards. */
+
+.drive-usage-modal .modal-body {
+  padding: var(--sp-16) var(--sp-24);
+}
+
+.drive-usage-modal .drive-usage-view-tabs {
+  margin-bottom: var(--sp-8);
+}
+
+.drive-usage-modal .style-fallback-modal-subtitle {
+  margin: 0 0 var(--sp-8);
+  font-size: var(--text-sm);
+}
+
+.drive-usage-modal .unmatched-search-bar {
+  margin-bottom: var(--sp-8);
+  padding: var(--sp-4) var(--sp-8);
+}
+
+.drive-usage-modal .unmatched-search-input {
+  font-size: var(--text-md);
+}
+
+.drive-usage-modal .sort-controls {
+  margin-bottom: var(--sp-8);
+}
+
+.drive-usage-modal .list-count {
+  margin-bottom: var(--sp-6);
+  padding-bottom: var(--sp-8);
+}
+
+.style-usage-download-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+.style-usage-fallback-note {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--sp-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.style-usage-fallback-card {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-12) var(--sp-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.style-usage-fallback-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+}
+
+.style-usage-fallback-label {
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+
+.style-usage-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4) 0;
+}
+
+.style-usage-preview-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--color-surface-raised);
+}
+
+.style-usage-preview-item:last-child {
+  border-bottom: none;
+}
+
+.style-usage-preview-more {
+  font-size: var(--text-sm);
+  color: var(--color-text-disabled);
+  padding: var(--sp-2) 0;
+}
+
+.style-usage-download-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-faint);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.style-usage-download-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.style-fallback-modal-subtitle {
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+  margin: 0 0 var(--sp-16);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+
+.style-selector {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-24);
+}
+
+.style-selector h3 {
+  color: var(--color-title);
+  margin-bottom: var(--sp-16);
+  font-size: var(--text-lg);
+}
+
+.style-checkboxes {
+  display: flex;
+  gap: var(--sp-24);
+  flex-wrap: wrap;
+}
+
+.style-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  cursor: pointer;
+  padding: var(--sp-12) var(--sp-16);
+  background: var(--color-surface-raised);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all 0.2s;
+}
+
+.style-checkbox:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-border);
+}
+
+.style-checkbox input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+/* Opaque drive-badge tints (see .style-mm2k above) — consistent on any background. */
+
+.style-badge.style-mm2k {
+  background: rgba(var(--rgb-success), 0.15);
+  color: var(--color-text-body);
+  border: 1px solid rgba(var(--rgb-success), 0.45);
+}
+
+.style-badge.style-cl2k {
+  background: var(--color-slate);
+  color: var(--color-text-body);
+  border: 1px solid var(--color-button-primary);
+}
+
+.style-badge.style-custom {
+  background: rgba(var(--rgb-purple), 0.25);
+  color: var(--color-text-body);
+  border: 1px solid rgba(var(--rgb-purple), 0.45);
+}
+
+/* "+ MM2K" style bulk buttons: tiny chips colored by the drive style they act on. */
+.bulk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: background 0.15s, color 0.15s;
+}
+
+.bulk-btn span { font-size: 0.68rem; }
+.bulk-btn.mm2k { color: var(--color-success); border-color: rgba(var(--rgb-success), 0.45); }
+.bulk-btn.mm2k:hover { background: rgba(var(--rgb-success), 0.18); border-color: var(--color-success); }
+.bulk-btn.cl2k { color: var(--color-accent); border-color: rgba(var(--rgb-accent), 0.45); }
+.bulk-btn.cl2k:hover { background: rgba(var(--rgb-accent), 0.18); border-color: var(--color-accent); }
+.bulk-btn.custom { color: var(--color-purple-strong); border-color: rgba(var(--rgb-purple), 0.45); }
+.bulk-btn.custom:hover { background: rgba(var(--rgb-purple), 0.18); border-color: var(--color-purple-strong); }
+.bulk-btn.artwork { color: var(--color-warning-strong); border-color: rgba(var(--rgb-warning-strong), 0.45); }
+.bulk-btn.artwork:hover { background: rgba(var(--rgb-warning-strong), 0.18); border-color: var(--color-warning-strong); }
+
+.priority-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--card-gap);
+}
+
+.available-drives,
+.priority-list-container {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 280px);
+  min-height: 420px;
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.bulk-action-btns {
+  display: flex;
+  gap: var(--sp-4);
+  flex-shrink: 0;
+}
+
+/* :hover and .active states for these toggles come from the shared subtab style
+   in globals.css (dark-pill hover, solid bright-blue active). */
+
+/* Poster Drives | Artwork Drives switcher — its own row under the Drive Priority
+   toolbar, matching the Unmatched asset-type row above (button styling is shared). */
+
+.priority-scope-toggle {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  margin: 0 0 var(--card-gap);
+}
+
+/* Both labels are wider than the shared 120px floor; widen so the pair stays even. */
+
+.available-drives h3,
+.priority-list-container h3 {
+  color: var(--color-title);
+  margin-bottom: var(--sp-8);
+  font-size: var(--text-lg);
+}
+
+.style-checkboxes-inline {
+  display: flex;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-16);
+  flex-shrink: 0;
+}
+
+.style-checkbox-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  cursor: pointer;
+  padding: var(--sp-6) var(--sp-8);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.style-checkbox-inline:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-border);
+}
+
+.style-checkbox-inline input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.style-checkbox-inline .style-badge {
+  padding: var(--sp-4) var(--sp-8);
+  font-size: var(--text-xs);
+}
+
+.drive-type-section {
+  margin-bottom: var(--sp-24);
+}
+
+.drive-type-section:last-child {
+  margin-bottom: 0;
+}
+
+.drive-type-header {
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--sp-12);
+  padding-bottom: var(--sp-8);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.drive-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 140px));
+  gap: var(--sp-8);
+}
+
+.drive-card-small {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--sp-8);
+  background: var(--color-surface-raised);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: grab;
+  transition: all 0.2s;
+  width: 140px;
+}
+
+.drive-card-small:hover {
+  background: var(--color-border);
+  border-color: var(--color-border-strong);
+}
+
+.drive-card-small:active {
+  cursor: grabbing;
+}
+
+.drive-card-small.mm2k {
+  border-left: 3px solid var(--color-success);
+}
+
+.drive-card-small.cl2k {
+  border-left: 3px solid var(--color-accent-hover);
+}
+
+.drive-card-small.custom {
+  border-left: 3px solid var(--color-purple-strong);
+}
+
+.drag-handle {
+  color: var(--color-text-disabled);
+  flex-shrink: 0;
+  /* Let a touch drag start on the handle without the page scrolling (no effect on mouse). */
+  touch-action: none;
+}
+
+/* ---- Touch drag styles (only active during a touch drag; desktop is unaffected) ---- */
+
+/* Floating clone that follows the finger; moved via transform for smoothness. */
+
+.drag-ghost {
+  opacity: 0.92;
+  box-shadow: 0 8px 24px var(--shadow-color);
+  will-change: transform;
+}
+
+/* The original card dims while its ghost is being dragged. */
+
+.touch-source-dragging {
+  opacity: 0.4;
+}
+
+/* During a touch drag, draw the drop bar as an overlay so it never reflows the
+   list (an in-flow bar would shift cards and make the hit-test jitter). The
+   desktop native-drag indicator keeps its original in-flow style. */
+
+.touch-dragging .drop-indicator {
+  position: absolute;
+  top: -4px;
+  left: 10px;
+  right: 10px;
+  width: auto;
+  margin: 0;
+  z-index: 2;
+}
+
+.drive-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.drive-name {
+  color: var(--color-text);
+  font-weight: 500;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.drive-count {
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+}
+
+.priority-list-container h3 {
+  color: var(--color-title);
+  margin-bottom: var(--sp-8);
+  font-size: var(--text-lg);
+}
+
+.available-drives-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: var(--sp-2);
+}
+
+.priority-drop-zone {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-surface-raised);
+  border: 2px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.priority-drop-zone.empty {
+  justify-content: center;
+  align-items: center;
+}
+
+.drop-indicator {
+  height: 4px;
+  background: var(--color-accent);
+  border-radius: var(--radius-xs);
+  margin: var(--sp-12) 0;
+  box-shadow: 0 0 10px rgba(var(--rgb-accent), 0.8);
+  pointer-events: none;
+  width: 100%;
+}
+
+.drop-zone-end {
+  position: relative;
+  min-height: 24px;
+  flex-shrink: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-left: var(--sp-8);
+  padding-right: var(--sp-8);
+  box-sizing: border-box;
+}
+
+.drop-zone-start {
+  position: relative;
+  min-height: 24px;
+  flex-shrink: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-left: var(--sp-8);
+  padding-right: var(--sp-8);
+  box-sizing: border-box;
+}
+
+.priority-item-wrapper {
+  position: relative;
+  width: 100%;
+  padding-left: var(--sp-8);
+  padding-right: var(--sp-8);
+  box-sizing: border-box;
+}
+
+.priority-drive-card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-6) var(--sp-12);
+  background: var(--color-border);
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: grab;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.drop-side-indicator {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 30px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  box-shadow: 0 0 10px rgba(var(--rgb-accent), 0.9);
+  pointer-events: none;
+}
+
+.priority-drive-card:hover {
+  background: var(--color-border);
+  border-color: var(--color-line-soft);
+}
+
+.priority-drive-card.drop-target-before {
+  box-shadow: inset 0 3px 0 var(--color-accent);
+  border-top-color: var(--color-accent);
+}
+
+.priority-drive-card.drop-target-after {
+  box-shadow: inset 0 -3px 0 var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+.priority-drive-card:active {
+  cursor: grabbing;
+}
+
+.priority-drive-card.mm2k {
+  border-left: 4px solid var(--color-success);
+}
+
+.priority-drive-card.cl2k {
+  border-left: 4px solid var(--color-accent-hover);
+}
+
+.priority-drive-card.custom {
+  border-left: 4px solid var(--color-purple-strong);
+}
+
+.priority-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: var(--color-accent);
+  color: var(--color-text);
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: var(--text-2xs);
+  flex-shrink: 0;
+}
+
+.priority-drive-card .drive-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.priority-drive-card .drive-name {
+  font-size: var(--text-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drive-poster-count {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  margin-right: var(--sp-4);
+  flex-shrink: 0;
+}
+
+/* Hide poster count before drive name gets squeezed */
+
+@container (max-width: 520px) {
+  .drive-poster-count {
+    display: none;
+  }
+}
+
+/* Artwork drive accents (priority tab, artwork view) */
+
+.drive-card-small.artwork {
+  border-left: 3px solid var(--color-warning-strong);
+}
+
+.priority-drive-card.artwork {
+  border-left: 4px solid var(--color-warning-strong);
+}
+
+@media (max-width: 1000px) {
+  .priority-content {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 550px) {
+  /* Drive cards: force 2 columns, override the 768px auto-fill rule */
+  .drive-cards {
+    grid-template-columns: repeat(2, 1fr);
+    min-width: 0;
+  }
+
+  .drive-card-small {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+}
+
+/* Compare view: the file the user pinned by search, shown beside the drives' candidates. */
+
+.drive-usage-compare-pinned .drive-usage-compare-img {
+  border-color: rgba(var(--rgb-success), 0.45);
+}
+
+.drive-usage-compare-pinned .drive-usage-compare-label {
+  color: var(--color-success);
+}
+
+/* Overrides list: the pinned file's name (full path in the tooltip). */
+
+.override-file-badge {
+  display: inline-block;
+  max-width: 16rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}

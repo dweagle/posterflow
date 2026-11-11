@@ -90,7 +90,7 @@ export default function CollectionMoviesPanel({ tmdbId, psdConfig, posterStyle, 
             </div>
           ) : state !== 'loaded' ? (
             <div className="request-collection-status">
-              <Loader2 size={14} className="spin-icon" />
+              <Loader2 size={14} className="spinning" />
               <span>Loading movies from TMDB…</span>
             </div>
           ) : movies.length === 0 ? (

@@ -427,25 +427,25 @@ function ArtworkDrivesPanel() {
         <div className="deprecated-overlay">
           <div className="deprecated-badge">⚠️ DEPRECATED</div>
           <p className="deprecated-message">This drive has been removed from the community list</p>
-          <button className="btn-delete-icon" onClick={() => confirmDeleteDrive(drive.id, drive.name, drive.is_deprecated)} title="Delete drive">
+          <button className="btn-icon btn-icon-sm btn-icon-danger btn-delete-icon" onClick={() => confirmDeleteDrive(drive.id, drive.name, drive.is_deprecated)} title="Delete drive">
             <Trash2 size={18} />
           </button>
         </div>
       )}
       {drive.is_custom && !drive.is_deprecated && (
-        <button className="btn-delete-icon" onClick={() => confirmDeleteDrive(drive.id, drive.name, drive.is_deprecated)} title="Delete drive">
+        <button className="btn-icon btn-icon-sm btn-icon-danger btn-delete-icon" onClick={() => confirmDeleteDrive(drive.id, drive.name, drive.is_deprecated)} title="Delete drive">
           <Trash2 size={18} />
         </button>
       )}
       <div className="drive-header">
-        <div className="drive-icon"><HardDriveDownload size={18} color="#f59e0b" /></div>
+        <div className="drive-icon"><HardDriveDownload size={18} color="var(--color-warning-strong)" /></div>
         <div className="drive-badge drive-badge-artwork">Artwork</div>
         <div
           className="drive-id-wrapper"
           onMouseEnter={(e) => openIdTooltip(drive.id, e)}
           onMouseLeave={hideIdTooltip}
         >
-          <button className="btn-drive-id-info">
+          <button className="btn-icon btn-icon-sm">
             <Info size={13} />
           </button>
           {idTooltip === drive.id && (
@@ -461,7 +461,7 @@ function ArtworkDrivesPanel() {
               <div className="drive-id-tooltip-row">
                 <span className="drive-id-tooltip-text">{drive.drive_id}</span>
                 <button
-                  className="btn-copy-id"
+                  className="btn-icon btn-icon-sm btn-icon-outlined btn-copy-id"
                   onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
                   title="Copy to clipboard"
                 >
@@ -518,22 +518,22 @@ function ArtworkDrivesPanel() {
       <div className="drive-actions">
         {drive.subscribed ? (
           <>
-            <button className="btn-icon btn-sync" onClick={() => handleSync(drive.id)} disabled={syncingDrive === drive.id} title={syncingDrive === drive.id ? 'Starting sync...' : 'Sync drive'}>
+            <button className="btn-icon btn-icon-primary" onClick={() => handleSync(drive.id)} disabled={syncingDrive === drive.id} title={syncingDrive === drive.id ? 'Starting sync...' : 'Sync drive'}>
               <RefreshCw size={16} />
             </button>
-            <button className="btn-icon btn-edit" onClick={() => setEditingDrive(drive)} title="Drive settings">
+            <button className="btn-icon btn-icon-filled" onClick={() => setEditingDrive(drive)} title="Drive settings">
               <SettingsIcon size={16} />
             </button>
-            <button className="btn-icon btn-subscribed" onClick={() => handleUnsubscribe(drive.id)} title="Unsubscribe from drive">
+            <button className="btn-icon btn-icon-filled btn-icon-danger" onClick={() => handleUnsubscribe(drive.id)} title="Unsubscribe from drive">
               <BookmarkMinus size={16} />
             </button>
           </>
         ) : (
           <>
-            <button className="btn-icon btn-edit" onClick={() => setEditingDrive(drive)} title="Drive settings">
+            <button className="btn-icon btn-icon-filled" onClick={() => setEditingDrive(drive)} title="Drive settings">
               <SettingsIcon size={16} />
             </button>
-            <button className="btn-subscribe" onClick={() => handleSubscribe(drive.id)} title="Subscribe to drive">
+            <button className="btn-primary" onClick={() => handleSubscribe(drive.id)} title="Subscribe to drive">
               Subscribe
             </button>
           </>
@@ -567,13 +567,13 @@ function ArtworkDrivesPanel() {
           <button className="btn-toolbar btn-toolbar-link" onClick={() => setShowStorageModal(true)} title="Configure asset storage location">
             <Settings2 size={16} /> Configure
           </button>
-          <button className="btn-toolbar btn-reload" onClick={handleReload} disabled={reloading} title="Reload artwork drive list from remote source">
+          <button className="btn-toolbar" onClick={handleReload} disabled={reloading} title="Reload artwork drive list from remote source">
             {reloading ? (<><RotateCw size={16} className="spinning" /> Reloading...</>) : (<><RotateCw size={16} /> Reload</>)}
           </button>
-          <button className="btn-toolbar btn-add-custom" onClick={() => setShowAddModal(true)} title="Add a custom artwork drive">
+          <button className="btn-toolbar" onClick={() => setShowAddModal(true)} title="Add a custom artwork drive">
             <Plus size={16} /> Custom
           </button>
-          <button className="btn-toolbar btn-sync-all" onClick={handleSyncAll} disabled={syncingAll || subscribedCount === 0} title={subscribedCount > 0 ? `Sync all ${subscribedCount} subscribed artwork drives` : 'No subscribed artwork drives to sync'}>
+          <button className="btn-toolbar btn-primary" onClick={handleSyncAll} disabled={syncingAll || subscribedCount === 0} title={subscribedCount > 0 ? `Sync all ${subscribedCount} subscribed artwork drives` : 'No subscribed artwork drives to sync'}>
             {syncingAll ? 'Syncing...' : (<><RefreshCw size={16} /> Sync All{subscribedCount > 0 ? ` (${subscribedCount})` : ''}</>)}
           </button>
       </Toolbar>
@@ -582,14 +582,14 @@ function ArtworkDrivesPanel() {
       <div className="bulk-actions">
         <div className="bulk-action-group">
           <span className="bulk-label">All Artwork Drives:</span>
-          <button className="btn-bulk" onClick={handleBulkSubscribe}>Subscribe All</button>
-          <button className="btn-bulk" onClick={handleBulkUnsubscribe}>Unsubscribe All</button>
+          <button className="btn-secondary" onClick={handleBulkSubscribe}>Subscribe All</button>
+          <button className="btn-secondary" onClick={handleBulkUnsubscribe}>Unsubscribe All</button>
         </div>
       </div>
 
       {/* Drives controls: filter + sort */}
       <div className="drives-controls">
-        <div className="filter-buttons">
+        <div className="filter-buttons pf-subtabs">
           <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All</button>
           <button className={filter === 'preset' ? 'active' : ''} onClick={() => setFilter('preset')}>Preset</button>
           <button className={filter === 'custom' ? 'active' : ''} onClick={() => setFilter('custom')}>Custom</button>

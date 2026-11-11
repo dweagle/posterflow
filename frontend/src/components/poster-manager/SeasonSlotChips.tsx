@@ -13,7 +13,7 @@ export default function SeasonSlotChips({ seasons, value, onChange, loading = fa
     <>
       <button
         type="button"
-        className={`poster-filter-btn${value == null ? ' active' : ''}`}
+        className={value == null ? 'pf-subtab active' : 'pf-subtab'}
         onClick={() => onChange(null)}
       >
         {posterLabel}
@@ -22,7 +22,7 @@ export default function SeasonSlotChips({ seasons, value, onChange, loading = fa
         <button
           key={n}
           type="button"
-          className={`poster-filter-btn${value === n ? ' active' : ''}`}
+          className={value === n ? 'pf-subtab active' : 'pf-subtab'}
           onClick={() => onChange(n)}
         >
           {n === 0 ? 'Specials' : `Season ${n}`}

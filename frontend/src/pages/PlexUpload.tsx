@@ -1,5 +1,5 @@
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, Save, UploadCloud, RefreshCw, Webhook, Search } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { BookOpen, UploadCloud, RefreshCw, Webhook, Search } from 'lucide-react'
 import {
   getApiErrorMessage,
   getJob,
@@ -38,7 +38,8 @@ import { useToast } from '../components/Toast'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
 import Toolbar from '../components/Toolbar'
 import './PlexUpload.css'
-
+import Modal from '../components/Modal'
+import SaveActions from '../components/SaveActions'
 
 // 'webhook' names what that tab actually configures; manual run options stay beside the
 // run buttons. 'activity' holds monitoring (stats + cache), which isn't configuration.
@@ -1250,31 +1251,40 @@ function PlexUpload() {
     setActiveTab(nextTab)
   }
 
+  // Drop the unsaved edits on a tab and go back to what was last saved.
+  const revertManualSettings = () => {
+    const baseline = manualBaselineRef.current
+    setDryRun(baseline.dry_run)
+    setReapply(baseline.reapply)
+    setRemoveOverlayLabel(baseline.remove_overlay_label)
+    setSyncBeforeUpload(baseline.sync_before_upload)
+    setRenameBeforeUpload(baseline.rename_before_upload)
+    setBorderBeforeUpload(baseline.border_before_upload)
+    setManualUploadDelayMs(baseline.upload_delay_ms)
+    setUploadArtwork(baseline.upload_artwork)
+    setHasUnsavedManualSettings(false)
+  }
+
+  const revertAutomationSettings = () => {
+    const baseline = automationBaselineRef.current
+    setWebhookEnabled(baseline.webhook_enabled)
+    setWebhookRemoveOverlayLabel(baseline.webhook_remove_overlay_label)
+    setWebhookArtwork(baseline.webhook_artwork)
+    setWebhookRenameThenUpload(baseline.webhook_rename_then_upload)
+    setWebhookAdoptExistingProcessed(baseline.webhook_adopt_existing_processed)
+    setWebhookRetryAttempts(baseline.webhook_retry_attempts)
+    setWebhookRetryDelaySeconds(baseline.webhook_retry_delay_seconds)
+    setWebhookUploadDelayMs(baseline.webhook_upload_delay_ms)
+    setOverrideEnabled(baseline.override_enabled)
+    setOverrideConfigs(normalizeOverrideConfigs(baseline.override_configs))
+    setHasUnsavedAutomationSettings(false)
+  }
+
   const handleDiscardChanges = () => {
     if (activeTab === 'manual') {
-      const baseline = manualBaselineRef.current
-      setDryRun(baseline.dry_run)
-      setReapply(baseline.reapply)
-      setRemoveOverlayLabel(baseline.remove_overlay_label)
-      setSyncBeforeUpload(baseline.sync_before_upload)
-      setRenameBeforeUpload(baseline.rename_before_upload)
-      setBorderBeforeUpload(baseline.border_before_upload)
-      setManualUploadDelayMs(baseline.upload_delay_ms)
-      setUploadArtwork(baseline.upload_artwork)
-      setHasUnsavedManualSettings(false)
+      revertManualSettings()
     } else if (activeTab === 'webhook') {
-      const baseline = automationBaselineRef.current
-      setWebhookEnabled(baseline.webhook_enabled)
-      setWebhookRemoveOverlayLabel(baseline.webhook_remove_overlay_label)
-      setWebhookArtwork(baseline.webhook_artwork)
-      setWebhookRenameThenUpload(baseline.webhook_rename_then_upload)
-      setWebhookAdoptExistingProcessed(baseline.webhook_adopt_existing_processed)
-      setWebhookRetryAttempts(baseline.webhook_retry_attempts)
-      setWebhookRetryDelaySeconds(baseline.webhook_retry_delay_seconds)
-      setWebhookUploadDelayMs(baseline.webhook_upload_delay_ms)
-      setOverrideEnabled(baseline.override_enabled)
-      setOverrideConfigs(normalizeOverrideConfigs(baseline.override_configs))
-      setHasUnsavedAutomationSettings(false)
+      revertAutomationSettings()
     }
 
     if (pendingTabChange) {
@@ -1342,12 +1352,6 @@ function PlexUpload() {
     return () => clearTimeout(timeoutId)
   }, [cacheBrowserQuery, showCacheBrowser])
 
-  const handleCacheBrowserOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) {
-      closeCacheBrowser()
-    }
-  }
-
   const selectWebhookDedupeSearchResult = (item: PlexWebhookDedupeEntry) => {
     suppressNextWebhookDedupeSearchRef.current = true
     const mediaType = item.media_type === 'series' ? 'series' : 'movie'
@@ -1360,7 +1364,7 @@ function PlexUpload() {
 
   return (
     <div className="page-container plex-upload-page">
-      <div className="plex-upload-header">
+      <div className="page-header plex-upload-header">
         <h1>Asset Upload</h1>
         <p>Upload posters and artwork to your media servers — automatically via webhooks, or manually on demand.</p>
       </div>
@@ -1385,26 +1389,10 @@ function PlexUpload() {
         {/* One Save per sub-tab, in the toolbar like every other tab. Activity is
             monitoring, so it has nothing to save. */}
         {activeTab === 'webhook' && (
-          <button
-            className={`btn-toolbar ${hasUnsavedAutomationSettings ? 'btn-unsaved' : ''}`}
-            onClick={saveWebhookSettings}
-            disabled={!toggleSettingsReady || webhookLoading || webhookSaving || !hasUnsavedAutomationSettings}
-            title={hasUnsavedAutomationSettings ? 'Save changes' : 'No changes to save'}
-          >
-            <Save size={16} />
-            {webhookSaving ? 'Saving...' : 'Save Settings'}
-          </button>
+          <SaveActions dirty={hasUnsavedAutomationSettings} saving={webhookSaving} disabled={!toggleSettingsReady || webhookLoading || webhookSaving || !hasUnsavedAutomationSettings} onSave={saveWebhookSettings} onCancel={revertAutomationSettings} />
         )}
         {activeTab === 'manual' && (
-          <button
-            className={`btn-toolbar ${hasUnsavedManualSettings ? 'btn-unsaved' : ''}`}
-            onClick={saveManualSettings}
-            disabled={!manualSettingsReady || manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive || !hasUnsavedManualSettings}
-            title={hasUnsavedManualSettings ? 'Save changes' : 'No changes to save'}
-          >
-            <Save size={16} />
-            {manualSettingsSaving ? 'Saving...' : 'Save Settings'}
-          </button>
+          <SaveActions dirty={hasUnsavedManualSettings} saving={manualSettingsSaving} disabled={!manualSettingsReady || manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive || !hasUnsavedManualSettings} onSave={saveManualSettings} onCancel={revertManualSettings} />
         )}
       </Toolbar>
 
@@ -1430,7 +1418,7 @@ function PlexUpload() {
                       <code className="webhook-url-value">{effectiveWebhookUrl}</code>
                       <button
                         type="button"
-                        className="plex-refresh-btn webhook-copy-btn"
+                        className="btn-secondary webhook-copy-btn"
                         onClick={() => copyWebhookUrl(effectiveWebhookUrl)}
                       >
                         Copy
@@ -1446,7 +1434,7 @@ function PlexUpload() {
                         <div className="webhook-token-actions">
                           <button
                             type="button"
-                            className="plex-refresh-btn"
+                            className="btn-secondary"
                             onClick={handleRegenerateToken}
                             disabled={regeneratingToken}
                           >
@@ -1511,7 +1499,7 @@ function PlexUpload() {
                           <code className="webhook-url-value">{plexWebhookUrl}</code>
                           <button
                             type="button"
-                            className="plex-refresh-btn webhook-copy-btn"
+                            className="btn-secondary webhook-copy-btn"
                             onClick={() => copyWebhookUrl(plexWebhookUrl)}
                           >
                             Copy
@@ -1527,7 +1515,7 @@ function PlexUpload() {
                           <code className="webhook-url-value">{jellyfinWebhookUrl}</code>
                           <button
                             type="button"
-                            className="plex-refresh-btn webhook-copy-btn"
+                            className="btn-secondary webhook-copy-btn"
                             onClick={() => copyWebhookUrl(jellyfinWebhookUrl)}
                           >
                             Copy
@@ -1646,22 +1634,28 @@ function PlexUpload() {
                 </div>
 
                 <label className="plex-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={removeOverlayLabel}
-                    onChange={(event) => setRemoveOverlayLabel(event.target.checked)}
-                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                  />
+                  <span className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={removeOverlayLabel}
+                      onChange={(event) => setRemoveOverlayLabel(event.target.checked)}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                    <span className="toggle-slider" />
+                  </span>
                   <span>Remove Overlay label after upload (Kometa-compatible)</span>
                 </label>
 
                 <label className="plex-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={uploadArtwork}
-                    onChange={(event) => setUploadArtwork(event.target.checked)}
-                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                  />
+                  <span className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={uploadArtwork}
+                      onChange={(event) => setUploadArtwork(event.target.checked)}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                    <span className="toggle-slider" />
+                  </span>
                   <span>Upload artwork (logos, backgrounds, square art) alongside posters</span>
                 </label>
 
@@ -1691,59 +1685,73 @@ function PlexUpload() {
                 </div>
 
                 <label className="plex-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={dryRun}
-                    onChange={(event) => setDryRun(event.target.checked)}
-                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                  />
+                  <span className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={dryRun}
+                      onChange={(event) => setDryRun(event.target.checked)}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                    <span className="toggle-slider" />
+                  </span>
                   <span>Dry run (no posters are uploaded)</span>
                 </label>
 
                 <label className="plex-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={reapply}
-                    onChange={(event) => setReapply(event.target.checked)}
-                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                  />
+                  <span className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={reapply}
+                      onChange={(event) => setReapply(event.target.checked)}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                    <span className="toggle-slider" />
+                  </span>
                   <span>Reapply (clear upload cache before run; ignored during dry run)</span>
                 </label>
 
                 <label className="plex-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={syncBeforeUpload}
-                    onChange={(event) => setSyncBeforeUpload(event.target.checked)}
-                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                  />
+                  <span className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={syncBeforeUpload}
+                      onChange={(event) => setSyncBeforeUpload(event.target.checked)}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                    <span className="toggle-slider" />
+                  </span>
                   <span>Sync drives before upload (Full upload only)</span>
                 </label>
 
                 <label className="plex-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={renameBeforeUpload}
-                    onChange={(event) => setRenameBeforeUpload(event.target.checked)}
-                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                  />
+                  <span className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={renameBeforeUpload}
+                      onChange={(event) => setRenameBeforeUpload(event.target.checked)}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                    <span className="toggle-slider" />
+                  </span>
                   <span>Rename posters before upload</span>
                 </label>
 
                 <label className="plex-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={borderBeforeUpload}
-                    onChange={(event) => setBorderBeforeUpload(event.target.checked)}
-                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                  />
+                  <span className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={borderBeforeUpload}
+                      onChange={(event) => setBorderBeforeUpload(event.target.checked)}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                    <span className="toggle-slider" />
+                  </span>
                   <span>Replace borders before upload</span>
                 </label>
                 </div>
               </div>
             )}
           </section>
-
 
           <div className="plex-upload-grid">
             <section className="plex-upload-card upload-cache-card">
@@ -1752,7 +1760,7 @@ function PlexUpload() {
 
               {!manualSettingsReady && <p className="card-description">Loading run options…</p>}
 
-              <button type="button" className="plex-run-btn" onClick={runUpload} disabled={!manualSettingsReady || loading || isJobActive}>
+              <button type="button" className="btn-primary plex-run-btn" onClick={runUpload} disabled={!manualSettingsReady || loading || isJobActive}>
                 <UploadCloud size={18} />
                 {loading ? 'Starting…' : isJobActive ? 'Job Running…' : 'Run All Posters Upload'}
               </button>
@@ -1761,7 +1769,7 @@ function PlexUpload() {
             <section className="plex-upload-card">
               <div className="plex-card-header-row">
                 <h2>Latest Job</h2>
-                <button type="button" className="plex-refresh-btn" onClick={() => fetchLatestPlexJob()} disabled={refreshing}>
+                <button type="button" className="btn-secondary" onClick={() => fetchLatestPlexJob()} disabled={refreshing}>
                   <RefreshCw size={16} className={refreshing ? 'spinning' : ''} />
                   Refresh
                 </button>
@@ -1807,7 +1815,7 @@ function PlexUpload() {
               </div>
               <button
                 type="button"
-                className="plex-refresh-btn"
+                className="btn-primary"
                 onClick={() => runSourceSearch(sourceQuery)}
                 disabled={sourceSearching || singleUploadLoading || isJobActive}
               >
@@ -1838,7 +1846,7 @@ function PlexUpload() {
                         </span>
                         <button
                           type="button"
-                          className="result-copy-btn"
+                          className="btn-secondary btn-sm result-copy-btn"
                           onClick={() => setSelectedSourcePoster(selected ? null : item)}
                           disabled={singleUploadLoading || isJobActive}
                           aria-label={`Select ${displayTitle}`}
@@ -1864,7 +1872,7 @@ function PlexUpload() {
 
             <button
               type="button"
-              className="plex-run-btn"
+              className="btn-primary plex-run-btn"
               onClick={runSingleUpload}
               disabled={!manualSettingsReady || !selectedSourcePoster || singleUploadLoading || isJobActive}
             >
@@ -1876,7 +1884,7 @@ function PlexUpload() {
       )}
 
       {activeTab === 'webhook' && (
-        <>
+    <>
           <section className="plex-upload-section">
             <div className="plex-upload-section-header">
               <h2>Webhook Automation</h2>
@@ -1905,56 +1913,71 @@ function PlexUpload() {
                 {!toggleSettingsReady ? (
                   <p className="card-description">Loading webhook settings…</p>
                 ) : (
-                  <>
+         <>
                     <label className="plex-checkbox-row webhook-enable-row">
-                      <input
-                        type="checkbox"
-                        checked={webhookEnabled}
-                        onChange={(event) => setWebhookEnabled(event.target.checked)}
-                        disabled={webhookLoading || webhookSaving}
-                      />
+                      <span className="toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={webhookEnabled}
+                          onChange={(event) => setWebhookEnabled(event.target.checked)}
+                          disabled={webhookLoading || webhookSaving}
+                        />
+                        <span className="toggle-slider" />
+                      </span>
                       <span>Enable webhook processing</span>
                     </label>
 
                     {webhookEnabled ? (
                       <div className="webhook-settings-grid">
                         <label className="plex-checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={webhookRemoveOverlayLabel}
-                            onChange={(event) => setWebhookRemoveOverlayLabel(event.target.checked)}
-                            disabled={webhookLoading || webhookSaving}
-                          />
+                          <span className="toggle-switch">
+                            <input
+                              type="checkbox"
+                              checked={webhookRemoveOverlayLabel}
+                              onChange={(event) => setWebhookRemoveOverlayLabel(event.target.checked)}
+                              disabled={webhookLoading || webhookSaving}
+                            />
+                            <span className="toggle-slider" />
+                          </span>
                           <span>Remove Overlay label after upload (Kometa-compatible)</span>
                         </label>
 
                         <label className="plex-checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={webhookArtwork}
-                            onChange={(event) => setWebhookArtwork(event.target.checked)}
-                            disabled={webhookLoading || webhookSaving}
-                          />
+                          <span className="toggle-switch">
+                            <input
+                              type="checkbox"
+                              checked={webhookArtwork}
+                              onChange={(event) => setWebhookArtwork(event.target.checked)}
+                              disabled={webhookLoading || webhookSaving}
+                            />
+                            <span className="toggle-slider" />
+                          </span>
                           <span>Upload artwork (logos, backgrounds, square art) alongside posters</span>
                         </label>
 
                         <label className="plex-checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={webhookRenameThenUpload}
-                            onChange={(event) => setWebhookRenameThenUpload(event.target.checked)}
-                            disabled={webhookLoading || webhookSaving}
-                          />
+                          <span className="toggle-switch">
+                            <input
+                              type="checkbox"
+                              checked={webhookRenameThenUpload}
+                              onChange={(event) => setWebhookRenameThenUpload(event.target.checked)}
+                              disabled={webhookLoading || webhookSaving}
+                            />
+                            <span className="toggle-slider" />
+                          </span>
                           <span>Rename posters before upload (improves first-hit matching)</span>
                         </label>
 
                         <label className="plex-checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={webhookAdoptExistingProcessed}
-                            onChange={(event) => setWebhookAdoptExistingProcessed(event.target.checked)}
-                            disabled={webhookLoading || webhookSaving}
-                          />
+                          <span className="toggle-switch">
+                            <input
+                              type="checkbox"
+                              checked={webhookAdoptExistingProcessed}
+                              onChange={(event) => setWebhookAdoptExistingProcessed(event.target.checked)}
+                              disabled={webhookLoading || webhookSaving}
+                            />
+                            <span className="toggle-slider" />
+                          </span>
                           <span>Adopt existing processed posters (skip pre-upload rename when destination already has target poster)</span>
                         </label>
 
@@ -2012,7 +2035,7 @@ function PlexUpload() {
                   <h2>Library Targeting</h2>
                   <button
                     type="button"
-                    className={`plex-refresh-btn ${hasUnsavedAutomationSettings ? 'btn-unsaved' : ''}`}
+                    className={`btn-secondary ${hasUnsavedAutomationSettings ? 'btn-unsaved' : ''}`}
                     onClick={openLibraryModal}
                     disabled={!toggleSettingsReady}
                   >
@@ -2075,7 +2098,7 @@ function PlexUpload() {
             <div className="webhook-stats-actions">
               <button
                 type="button"
-                className="plex-refresh-btn"
+                className="btn-secondary"
                 onClick={resetWebhookStats}
                 disabled={webhookStatsResetting}
               >
@@ -2083,7 +2106,7 @@ function PlexUpload() {
               </button>
               <button
                 type="button"
-                className="plex-refresh-btn"
+                className="btn-secondary"
                 onClick={() => fetchWebhookStats()}
                 disabled={webhookStatsLoading}
               >
@@ -2094,7 +2117,7 @@ function PlexUpload() {
           </div>
 
           {webhookStats ? (
-            <>
+      <>
               <div className="webhook-stat-chips">
                 <div className="webhook-stat-chip chip-received"><span>Received</span><strong>{webhookStats.received}</strong></div>
                 <div className="webhook-stat-chip chip-queued"><span>Queued</span><strong>{webhookStats.queued}</strong></div>
@@ -2186,7 +2209,7 @@ function PlexUpload() {
             )}
             <button
               type="button"
-              className="plex-refresh-btn"
+              className="btn-secondary"
               onClick={clearWebhookDedupeForItem}
               disabled={webhookDedupeClearing || !webhookDedupeMediaType}
             >
@@ -2200,7 +2223,7 @@ function PlexUpload() {
             <h2>Upload Cache</h2>
             <button
               type="button"
-              className="plex-refresh-btn"
+              className="btn-secondary"
               onClick={() => fetchUploadCache()}
               disabled={cacheLoading}
             >
@@ -2215,7 +2238,7 @@ function PlexUpload() {
           {!uploadCache ? (
             <p className="card-description">No upload cache data loaded.</p>
           ) : (
-            <>
+      <>
               <div className="webhook-stats-grid upload-cache-summary">
                 <div><span>Files cached:</span> <strong>{uploadCache.entries_count}</strong></div>
                 <div><span>Library refs:</span> <strong>{uploadCache.total_library_refs}</strong></div>
@@ -2225,7 +2248,7 @@ function PlexUpload() {
               <div className="upload-cache-actions">
                 <button
                   type="button"
-                  className="plex-refresh-btn"
+                  className="btn-secondary"
                   onClick={exportUploadCache}
                   disabled={uploadCache.entries_count === 0}
                 >
@@ -2233,7 +2256,7 @@ function PlexUpload() {
                 </button>
                 <button
                   type="button"
-                  className="plex-refresh-btn"
+                  className="btn-secondary"
                   onClick={openCacheBrowser}
                   disabled={uploadCache.entries_count === 0}
                 >
@@ -2241,7 +2264,7 @@ function PlexUpload() {
                 </button>
                 <button
                   type="button"
-                  className="plex-refresh-btn"
+                  className="btn-danger"
                   onClick={() => clearUploadCacheEntries()}
                   disabled={cacheClearing || uploadCache.entries_count === 0}
                 >
@@ -2252,7 +2275,7 @@ function PlexUpload() {
               {uploadCache.entries.length === 0 ? (
                 <p className="card-description">Upload cache is empty.</p>
               ) : (
-                <>
+        <>
                   <p className="card-description upload-cache-note">
                     Showing latest 10 cache entries. Use <strong>Clear All Cache</strong> to remove all entries, including older items not shown here.
                   </p>
@@ -2275,7 +2298,7 @@ function PlexUpload() {
                       </div>
                       <button
                         type="button"
-                        className="plex-refresh-btn"
+                        className="btn-secondary"
                         onClick={() => clearUploadCacheEntries(entry.file_path)}
                         disabled={cacheClearing}
                       >
@@ -2299,113 +2322,108 @@ function PlexUpload() {
       />
 
       {showLibraryModal && (
-        <div
-          className="modal-overlay"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              cancelLibraryModal()
-            }
-          }}
-        >
-          <div className="modal-content schedule-modal library-targeting-modal">
-            <div className="modal-header">
-              <h2>Library Targeting</h2>
-              <button className="modal-close" onClick={cancelLibraryModal}>×</button>
-            </div>
+        <Modal onClose={cancelLibraryModal} className="library-targeting-modal">
+          <Modal.Header title="Library Targeting" />
+          <Modal.Body className="library-targeting-modal-body">
+            {/* Global override */}
+            <div className="library-targeting-block">
+              <div className="plex-card-header-row">
+                <h3>Library Override</h3>
+              </div>
+              <p className="card-description">
+                Override the Media-tab library selection for Asset Upload only — handy for testing on a
+                smaller or separate library. Applies to all uploads unless an instance below routes elsewhere.
+              </p>
 
-            <div className="modal-body library-targeting-modal-body">
-              {/* Global override */}
-              <div className="library-targeting-block">
-                <div className="plex-card-header-row">
-                  <h3>Library Override</h3>
-                </div>
-                <p className="card-description">
-                  Override the Media-tab library selection for Asset Upload only — handy for testing on a
-                  smaller or separate library. Applies to all uploads unless an instance below routes elsewhere.
-                </p>
-
-                <label className="plex-checkbox-row">
+              <label className="plex-checkbox-row">
+                <span className="toggle-switch">
                   <input
                     type="checkbox"
                     checked={overrideEnabled}
                     onChange={(event) => setOverrideEnabled(event.target.checked)}
                     disabled={overrideLoading || overrideSaving}
                   />
-                  <span>Enable Asset Upload-only library override</span>
-                </label>
+                  <span className="toggle-slider" />
+                </span>
+                <span>Enable Asset Upload-only library override</span>
+              </label>
 
-                <p className="card-description override-count">
-                  Selected override libraries: <strong>{getEnabledOverrideCount()}</strong>
-                </p>
+              <p className="card-description override-count">
+                Selected override libraries: <strong>{getEnabledOverrideCount()}</strong>
+              </p>
 
-                {overrideLoading ? (
-                  <p className="card-description">Loading library selections…</p>
-                ) : globalLibraryConfigs.length === 0 ? (
-                  <p className="card-description">No global media server library configuration found. Configure libraries in Settings → Media first.</p>
-                ) : (
-                  <div className="override-library-groups">
-                    {globalLibraryConfigs.map((instanceConfig) => (
-                      <div key={instanceConfig.instance_name} className="override-library-instance">
-                        <h4>{instanceConfig.instance_name}</h4>
-                        <div className="override-library-list">
-                          {(instanceConfig.libraries || []).map((library) => (
-                            <label key={`${instanceConfig.instance_name}-${library.key}`} className="plex-checkbox-row">
+              {overrideLoading ? (
+                <p className="card-description">Loading library selections…</p>
+              ) : globalLibraryConfigs.length === 0 ? (
+                <p className="card-description">No global media server library configuration found. Configure libraries in Settings → Media first.</p>
+              ) : (
+                <div className="override-library-groups">
+                  {globalLibraryConfigs.map((instanceConfig) => (
+                    <div key={instanceConfig.instance_name} className="override-library-instance">
+                      <h4>{instanceConfig.instance_name}</h4>
+                      <div className="override-library-list">
+                        {(instanceConfig.libraries || []).map((library) => (
+                          <label key={`${instanceConfig.instance_name}-${library.key}`} className="plex-checkbox-row">
+                            <span className="toggle-switch">
                               <input
                                 type="checkbox"
                                 checked={isOverrideLibraryChecked(instanceConfig.instance_name, library.key)}
                                 onChange={(event) => toggleOverrideLibrary(instanceConfig.instance_name, library.key, event.target.checked)}
                                 disabled={overrideLoading || overrideSaving}
                               />
-                              <span>{library.title} <em>({library.type})</em></span>
-                            </label>
-                          ))}
-                        </div>
+                              <span className="toggle-slider" />
+                            </span>
+                            <span>{library.title} <em>({library.type})</em></span>
+                          </label>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Per-instance routing */}
-              <div className="library-targeting-block">
-                <div className="plex-card-header-row">
-                  <h3>Instance → Library Routing</h3>
+                    </div>
+                  ))}
                 </div>
-                <p className="card-description">
-                  If you use Radarr/Sonarr: send each arr instance's imports to specific media server libraries. Instances left unmapped
-                  upload to <strong>all</strong> selected libraries. Paste each instance's dedicated webhook URL
-                  (below) into its connector so events are attributed even when the payload's instance name
-                  doesn't match.
-                </p>
+              )}
+            </div>
 
-                {instanceMapLoading ? (
-                  <p className="card-description">Loading instance routing…</p>
-                ) : arrInstanceNames.length === 0 ? (
-                  <p className="card-description">No Radarr/Sonarr instances configured — per-instance routing only applies to arr webhooks. Plex and Jellyfin webhook uploads use the Media-tab library selection.</p>
-                ) : globalLibraryConfigs.length === 0 ? (
-                  <p className="card-description">No global media server library configuration found. Configure libraries in Settings → Media first.</p>
-                ) : (
-                  <div className="instance-routing-groups">
-                    {arrInstanceNames.map((instanceName) => (
-                      <div key={instanceName} className="instance-routing-instance" data-testid={`instance-routing-${instanceName}`}>
-                        <h4>{instanceName}</h4>
-                        <div className="walkthrough-endpoint webhook-url-block instance-routing-url">
-                          <code className="webhook-url-value">{instanceWebhookUrl(instanceName)}</code>
-                          <button
-                            type="button"
-                            className="plex-refresh-btn webhook-copy-btn"
-                            onClick={() => copyWebhookUrl(instanceWebhookUrl(instanceName))}
-                          >
-                            Copy
-                          </button>
-                        </div>
-                        <div className="override-library-groups">
-                          {globalLibraryConfigs.map((instanceConfig) => (
-                            <div key={`${instanceName}-${instanceConfig.instance_name}`} className="override-library-instance">
-                              <h5>{instanceConfig.instance_name}</h5>
-                              <div className="override-library-list">
-                                {(instanceConfig.libraries || []).map((library) => (
-                                  <label key={`${instanceName}-${instanceConfig.instance_name}-${library.key}`} className="plex-checkbox-row">
+            {/* Per-instance routing */}
+            <div className="library-targeting-block">
+              <div className="plex-card-header-row">
+                <h3>Instance → Library Routing</h3>
+              </div>
+              <p className="card-description">
+                If you use Radarr/Sonarr: send each arr instance's imports to specific media server libraries. Instances left unmapped
+                upload to <strong>all</strong> selected libraries. Paste each instance's dedicated webhook URL
+                (below) into its connector so events are attributed even when the payload's instance name
+                doesn't match.
+              </p>
+
+              {instanceMapLoading ? (
+                <p className="card-description">Loading instance routing…</p>
+              ) : arrInstanceNames.length === 0 ? (
+                <p className="card-description">No Radarr/Sonarr instances configured — per-instance routing only applies to arr webhooks. Plex and Jellyfin webhook uploads use the Media-tab library selection.</p>
+              ) : globalLibraryConfigs.length === 0 ? (
+                <p className="card-description">No global media server library configuration found. Configure libraries in Settings → Media first.</p>
+              ) : (
+                <div className="instance-routing-groups">
+                  {arrInstanceNames.map((instanceName) => (
+                    <div key={instanceName} className="instance-routing-instance" data-testid={`instance-routing-${instanceName}`}>
+                      <h4>{instanceName}</h4>
+                      <div className="walkthrough-endpoint webhook-url-block instance-routing-url">
+                        <code className="webhook-url-value">{instanceWebhookUrl(instanceName)}</code>
+                        <button
+                          type="button"
+                          className="btn-secondary webhook-copy-btn"
+                          onClick={() => copyWebhookUrl(instanceWebhookUrl(instanceName))}
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <div className="override-library-groups">
+                        {globalLibraryConfigs.map((instanceConfig) => (
+                          <div key={`${instanceName}-${instanceConfig.instance_name}`} className="override-library-instance">
+                            <h5>{instanceConfig.instance_name}</h5>
+                            <div className="override-library-list">
+                              {(instanceConfig.libraries || []).map((library) => (
+                                <label key={`${instanceName}-${instanceConfig.instance_name}-${library.key}`} className="plex-checkbox-row">
+                                  <span className="toggle-switch">
                                     <input
                                       type="checkbox"
                                       checked={isInstanceLibraryChecked(instanceName, instanceConfig.instance_name, library.key)}
@@ -2414,123 +2432,116 @@ function PlexUpload() {
                                       }
                                       disabled={instanceMapLoading || instanceMapSaving}
                                     />
-                                    <span>{library.title} <em>({library.type})</em></span>
-                                  </label>
-                                ))}
-                              </div>
+                                    <span className="toggle-slider" />
+                                  </span>
+                                  <span>{library.title} <em>({library.type})</em></span>
+                                </label>
+                              ))}
                             </div>
-                          ))}
-                        </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={cancelLibraryModal} disabled={overrideSaving || instanceMapSaving}>
-                Cancel
-              </button>
-              <button
-                className="btn-primary"
-                onClick={saveLibraryTargeting}
-                disabled={!toggleSettingsReady || overrideSaving || instanceMapSaving}
-              >
-                {overrideSaving || instanceMapSaving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showCacheBrowser && (
-        <div className="modal-overlay" onClick={handleCacheBrowserOverlayClick}>
-          <div className="modal-content schedule-modal cache-browser-modal">
-            <div className="modal-header">
-              <h2>Upload Cache Browser</h2>
-              <button className="modal-close" onClick={closeCacheBrowser}>×</button>
-            </div>
-
-            <div className="modal-body cache-browser-modal-body">
-              <p className="card-description cache-browser-meta">
-                Showing <strong>{cacheBrowserEntries.length}</strong> of <strong>{cacheBrowserTotal}</strong> matching cache entries.
-              </p>
-              <div className="upload-cache-browser-controls">
-                <div className="plex-single-search-input-wrap">
-                  <Search size={14} />
-                  <input
-                    type="text"
-                    placeholder="Search file path, library, edition, or type"
-                    value={cacheBrowserQuery}
-                    onChange={(event) => setCacheBrowserQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        fetchUploadCacheEntries(true, cacheBrowserQuery)
-                      }
-                    }}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="plex-refresh-btn"
-                  onClick={() => fetchUploadCacheEntries(true, cacheBrowserQuery)}
-                  disabled={cacheBrowserLoading}
-                >
-                  Search
-                </button>
-              </div>
-
-              {cacheBrowserEntries.length === 0 ? (
-                <p className="card-description upload-cache-note">No cache entries match this filter.</p>
-              ) : (
-                <div className="upload-cache-list cache-browser-list">
-                  {cacheBrowserEntries.map((entry) => (
-                    <div key={`browser-${entry.file_path}`} className="upload-cache-item">
-                      <div className="upload-cache-item-main">
-                        <strong>{entry.file_path}</strong>
-                        <span className="upload-cache-meta-row">
-                          <span className="upload-cache-meta-label">Libraries ({(entry.server_libraries?.length || entry.uploaded_to_libraries.length)}):</span>
-                          <span className="upload-cache-meta-value">
-                            {(entry.server_libraries?.length ?? 0) > 0
-                              ? entry.server_libraries!.join(', ')
-                              : entry.uploaded_to_libraries.length > 0 ? entry.uploaded_to_libraries.join(', ') : <em>none</em>}
-                          </span>
-                          <span className="upload-cache-meta-sep">•</span>
-                          <span className="upload-cache-meta-label">Editions:</span>
-                          <span className="upload-cache-meta-value">{entry.uploaded_editions.length > 0 ? entry.uploaded_editions.join(', ') : <em>none</em>}</span>
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className="plex-refresh-btn"
-                        onClick={() => clearUploadCacheEntries(entry.file_path)}
-                        disabled={cacheClearing}
-                      >
-                        Clear Entry
-                      </button>
                     </div>
                   ))}
                 </div>
               )}
+            </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={cancelLibraryModal} disabled={overrideSaving || instanceMapSaving}>
+              Cancel
+            </button>
+            <button
+              className="btn-primary"
+              onClick={saveLibraryTargeting}
+              disabled={!toggleSettingsReady || overrideSaving || instanceMapSaving}
+            >
+              {overrideSaving || instanceMapSaving ? 'Saving…' : 'Save'}
+            </button>
+          </Modal.Footer>
+        </Modal>
+      )}
 
-              {cacheBrowserHasMore && (
-                <button
-                  type="button"
-                  className="plex-refresh-btn cache-browser-load-more"
-                  onClick={() => fetchUploadCacheEntries(false)}
-                  disabled={cacheBrowserLoading}
-                >
-                  {cacheBrowserLoading ? 'Loading…' : 'Load More'}
-                </button>
-              )}
+      {showCacheBrowser && (
+        <Modal onClose={closeCacheBrowser} className="cache-browser-modal">
+          <Modal.Header title="Upload Cache Browser" />
+          <Modal.Body className="cache-browser-modal-body">
+            <p className="card-description cache-browser-meta">
+              Showing <strong>{cacheBrowserEntries.length}</strong> of <strong>{cacheBrowserTotal}</strong> matching cache entries.
+            </p>
+            <div className="upload-cache-browser-controls">
+              <div className="plex-single-search-input-wrap">
+                <Search size={14} />
+                <input
+                  type="text"
+                  placeholder="Search file path, library, edition, or type"
+                  value={cacheBrowserQuery}
+                  onChange={(event) => setCacheBrowserQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      fetchUploadCacheEntries(true, cacheBrowserQuery)
+                    }
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => fetchUploadCacheEntries(true, cacheBrowserQuery)}
+                disabled={cacheBrowserLoading}
+              >
+                Search
+              </button>
             </div>
 
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={closeCacheBrowser}>Close</button>
-            </div>
-          </div>
-        </div>
+            {cacheBrowserEntries.length === 0 ? (
+              <p className="card-description upload-cache-note">No cache entries match this filter.</p>
+            ) : (
+              <div className="upload-cache-list cache-browser-list">
+                {cacheBrowserEntries.map((entry) => (
+                  <div key={`browser-${entry.file_path}`} className="upload-cache-item">
+                    <div className="upload-cache-item-main">
+                      <strong>{entry.file_path}</strong>
+                      <span className="upload-cache-meta-row">
+                        <span className="upload-cache-meta-label">Libraries ({(entry.server_libraries?.length || entry.uploaded_to_libraries.length)}):</span>
+                        <span className="upload-cache-meta-value">
+                          {(entry.server_libraries?.length ?? 0) > 0
+                            ? entry.server_libraries!.join(', ')
+                            : entry.uploaded_to_libraries.length > 0 ? entry.uploaded_to_libraries.join(', ') : <em>none</em>}
+                        </span>
+                        <span className="upload-cache-meta-sep">•</span>
+                        <span className="upload-cache-meta-label">Editions:</span>
+                        <span className="upload-cache-meta-value">{entry.uploaded_editions.length > 0 ? entry.uploaded_editions.join(', ') : <em>none</em>}</span>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => clearUploadCacheEntries(entry.file_path)}
+                      disabled={cacheClearing}
+                    >
+                      Clear Entry
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {cacheBrowserHasMore && (
+              <button
+                type="button"
+                className="btn-secondary cache-browser-load-more"
+                onClick={() => fetchUploadCacheEntries(false)}
+                disabled={cacheBrowserLoading}
+              >
+                {cacheBrowserLoading ? 'Loading…' : 'Load More'}
+              </button>
+            )}
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={closeCacheBrowser}>Close</button>
+          </Modal.Footer>
+        </Modal>
       )}
     </div>
   )

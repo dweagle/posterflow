@@ -1,0 +1,67 @@
+/* Utilities: single-purpose layout and text classes. They load last, so they
+   win over component rules of the same specificity; a context rule with more specificity still wins, so check the view when adding one in a new place. */
+.text-accent { color: var(--color-accent); }
+.text-secondary { color: var(--color-text-secondary); }
+.text-muted { color: var(--color-text-muted); }
+.text-dim { color: var(--color-text-dim); }
+.text-faint { color: var(--color-text-faint); }
+.text-warning { color: var(--color-warning); }
+.text-warning-strong { color: var(--color-warning-strong); }
+.text-danger { color: var(--color-danger); }
+.text-success { color: var(--color-success); }
+.text-center { text-align: center; }
+.text-italic { font-style: italic; }
+.fw-medium { font-weight: 500; }
+.fw-semibold { font-weight: 600; }
+
+.block { display: block; }
+.offscreen { position: absolute; left: -9999px; top: -9999px; }
+.row { display: flex; align-items: center; gap: var(--sp-8); }
+.row-wrap { flex-wrap: wrap; }
+.row-lg { gap: var(--sp-16); }
+.flex-1 { flex: 1; }
+.no-shrink { flex-shrink: 0; }
+.is-dimmed { opacity: 0.4; }
+.icon-inline { vertical-align: text-bottom; }
+
+.m-0 { margin: 0; }
+.mt-0 { margin-top: 0; }
+.mb-0 { margin-bottom: 0; }
+.mt-xs { margin-top: var(--sp-4); }
+.mt-sm { margin-top: var(--sp-8); }
+.mt-md { margin-top: var(--sp-12); }
+.mt-lg { margin-top: var(--sp-16); }
+.mt-xl { margin-top: var(--sp-24); }
+.mb-xs { margin-bottom: var(--sp-4); }
+.mb-sm { margin-bottom: var(--sp-8); }
+.mb-md { margin-bottom: var(--sp-12); }
+.mb-lg { margin-bottom: var(--sp-16); }
+.ml-sm { margin-left: var(--sp-8); }
+.ml-md { margin-left: var(--sp-12); }
+.mr-xs { margin-right: var(--sp-4); }
+.mr-sm { margin-right: var(--sp-8); }
+
+/* Field widths for short values (a PIN, a pixel count). */
+.field-w-xs { max-width: 120px; }
+.field-w-sm { max-width: 200px; }
+.field-w-md { max-width: 240px; }
+
+/* A card's last child drops its bottom margin so the inset reads the same top and bottom. Lives
+   here, not in Card.css, so it loads after the page rules that give those children a margin. */
+.settings-section > :last-child,
+.flow-job-card > :last-child,
+.unmatched-card > :last-child,
+.plex-upload-card > :last-child,
+.tools-card > :last-child,
+.maker-card > :last-child,
+.stat-card > :last-child,
+.style-usage-panel > :last-child,
+.overlays-editor > :last-child,
+.overlays-libraries > :last-child,
+.rule-setup-card > :last-child,
+.backup-item > :last-child,
+.poster-coverage-card > :last-child,
+.available-drives > :last-child,
+.priority-list-container > :last-child {
+  margin-bottom: 0;
+}

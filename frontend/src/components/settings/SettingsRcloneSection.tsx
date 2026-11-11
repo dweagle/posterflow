@@ -1,5 +1,6 @@
 import { Eye, EyeOff } from 'lucide-react'
 import { GoogleDriveCredentialsGuide, GoogleCredentialsConflictNotice } from './GoogleDriveCredentialsGuide'
+import SaveActions from '../../components/SaveActions'
 
 type RcloneSettings = {
   google_client_id: string
@@ -20,6 +21,7 @@ type SettingsRcloneSectionProps = {
   showToken: boolean
   onToggleTokenVisibility: () => void
   onSave: () => void
+  onCancel: () => void
   onUploadServiceAccount: (file: File) => Promise<void>
   uploadingServiceAccount: boolean
   saving: boolean
@@ -38,6 +40,7 @@ function SettingsRcloneSection({
   showToken,
   onToggleTokenVisibility,
   onSave,
+  onCancel,
   onUploadServiceAccount,
   uploadingServiceAccount,
   saving,
@@ -75,7 +78,7 @@ function SettingsRcloneSection({
             type="file"
             accept="application/json,.json"
             id="settings-service-account-upload"
-            style={{ display: 'none' }}
+            hidden
             onChange={async (e) => {
               const file = e.target.files?.[0]
               if (!file) return
@@ -163,9 +166,7 @@ function SettingsRcloneSection({
           </div>
         </div>
 
-        <button className={`btn-save ${hasUnsaved ? 'btn-unsaved' : ''}`} onClick={onSave} disabled={saving}>
-          {saving ? 'Saving...' : 'Save Rclone Configuration'}
-        </button>
+        <SaveActions dirty={hasUnsaved} saving={saving} disabled={saving} onSave={onSave} onCancel={onCancel} />
       </div>
     </div>
   )

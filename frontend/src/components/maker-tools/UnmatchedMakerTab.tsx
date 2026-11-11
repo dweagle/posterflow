@@ -238,14 +238,14 @@ function UnmatchedAssetCard({ item, psdConfig, posterAvailability, posterAvailab
             {item.year && <span className="tmdb-result-year">{item.year}</span>}
             <span className="badge badge-grey">{CATEGORY_LABEL[item.category]}</span>
           </div>
-          <p className="muted unmatched-maker-resolve-note">No TMDB id on this item — find it to browse images, or export a blank PSD below.</p>
+          <p className="text-dim unmatched-maker-resolve-note">No TMDB id on this item — find it to browse images, or export a blank PSD below.</p>
           {candidates === null ? (
             <button type="button" className="btn-toolbar" onClick={() => void handleResolve()} disabled={loading}>
-              {loading ? <Loader2 size={14} className="spin-icon" /> : <Search size={14} />}
+              {loading ? <Loader2 size={14} className="spinning" /> : <Search size={14} />}
               {loading ? 'Searching…' : 'Find on TMDB'}
             </button>
           ) : candidates.length === 0 ? (
-            <p className="muted">No matches found.</p>
+            <p className="text-dim">No matches found.</p>
           ) : (
             <div className="unmatched-maker-candidates">
               {candidates.map((c) => (
@@ -363,7 +363,7 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
         </select>
       </div>
     ) : scopesLoaded ? (
-      <span style={{ fontSize: '0.82rem', color: '#ffb74d' }}>
+      <span className="text-warning">
         No artwork scope configured — enable "Assets Drive" on an IDarr sync target to add artwork.
       </span>
     ) : null
@@ -413,7 +413,7 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
       ) : (
         <>
           <div className="unmatched-maker-controls">
-            <div className="maker-result-tabs" role="tablist" aria-label="Unmatched category tabs">
+            <div className="maker-result-tabs pf-subtabs" role="tablist" aria-label="Unmatched category tabs">
               {filterTabs.filter((t) => t === 'all' || counts[t] > 0).map((t) => (
                 <button
                   key={t}
@@ -439,14 +439,14 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
                 onChange={(e) => setQuery(e.target.value)}
               />
               {query && (
-                <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
+                <button type="button" className="btn-icon btn-icon-sm unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
                   <X size={15} />
                 </button>
               )}
             </div>
           </div>
 
-          <p className="muted unmatched-maker-count">
+          <p className="text-dim unmatched-maker-count">
             {visibleItems.length === items.length ? `${items.length} items` : `${visibleItems.length} of ${items.length} items`}
           </p>
 

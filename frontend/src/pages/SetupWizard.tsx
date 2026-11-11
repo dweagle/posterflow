@@ -73,7 +73,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showFanartKey, setShowFanartKey] = useState(false)
 
   // What's already stored per instance name, so step 3 only writes configs the user actually
-  // touched — re-running the wizard used to re-save every loaded config unchanged.
+  // touched.
   const savedLibrarySignatures = useRef<Record<string, string>>({})
 
   const MASKED_VALUE = '***masked***'
@@ -740,7 +740,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                       type="file"
                       accept=".zip"
                       id="welcome-restore-input"
-                      style={{ display: 'none' }}
+                      hidden
                       onChange={async (e) => {
                         const file = e.target.files?.[0]
                         if (!file) return
@@ -777,7 +777,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                     <p>Configure later and go straight to the dashboard.</p>
                     <button 
                       type="button"
-                      className="btn-tertiary" 
+                      className="btn-secondary" 
                       onClick={handleSkip}
                     >
                       Skip to Dashboard
@@ -815,7 +815,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   type="file"
                   accept="application/json,.json"
                   id="setup-service-account-upload"
-                  style={{ display: 'none' }}
+                  hidden
                   onChange={async (e) => {
                     const file = e.target.files?.[0]
                     if (!file) return
@@ -919,7 +919,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                     {isSaving ? 'Saving...' : 'Save & Continue'}
                   </button>
                 </div>
-                <small className="btn-subtext">Fill in the service account path, or all three OAuth fields</small>
+                <small className="setup-btn-subtext">Fill in the service account path, or all three OAuth fields</small>
               </div>
             </div>
           )}
@@ -996,7 +996,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               <div className="server-section">
                 <div className="server-header">
                   <h3>Media Server Instances <span className="required">*</span></h3>
-                  <button type="button" className="btn-add" onClick={addPlexInstance}>
+                  <button type="button" className="btn-secondary" onClick={addPlexInstance}>
                     + Add Instance
                   </button>
                 </div>
@@ -1025,7 +1025,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         {formData.plex_instances.length > 1 && (
                           <button 
                             type="button" 
-                            className="btn-remove" 
+                            className="btn-icon btn-icon-outlined btn-icon-danger" 
                             onClick={() => removePlexInstance(index)}
                           >
                             ✕
@@ -1094,7 +1094,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
                       <button 
                         type="button" 
-                        className="btn-test" 
+                        className="btn-secondary btn-block setup-test-btn" 
                         onClick={() => handleTestPlex(index)}
                         disabled={status?.loading}
                       >
@@ -1139,7 +1139,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               <div className="server-section">
                 <div className="server-header">
                   <h3>Sonarr Instances</h3>
-                  <button type="button" className="btn-add" onClick={addSonarrInstance}>
+                  <button type="button" className="btn-secondary" onClick={addSonarrInstance}>
                     + Add Instance
                   </button>
                 </div>
@@ -1166,7 +1166,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         {formData.sonarr_instances.length > 1 && (
                           <button 
                             type="button" 
-                            className="btn-remove" 
+                            className="btn-icon btn-icon-outlined btn-icon-danger" 
                             onClick={() => removeSonarrInstance(index)}
                           >
                             ✕
@@ -1221,7 +1221,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
                       <button 
                         type="button" 
-                        className="btn-test" 
+                        className="btn-secondary btn-block setup-test-btn" 
                         onClick={() => handleTestSonarr(index)}
                         disabled={status?.loading}
                       >
@@ -1241,7 +1241,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               <div className="server-section">
                 <div className="server-header">
                   <h3>Radarr Instances</h3>
-                  <button type="button" className="btn-add" onClick={addRadarrInstance}>
+                  <button type="button" className="btn-secondary" onClick={addRadarrInstance}>
                     + Add Instance
                   </button>
                 </div>
@@ -1268,7 +1268,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         {formData.radarr_instances.length > 1 && (
                           <button 
                             type="button" 
-                            className="btn-remove" 
+                            className="btn-icon btn-icon-outlined btn-icon-danger" 
                             onClick={() => removeRadarrInstance(index)}
                           >
                             ✕
@@ -1323,7 +1323,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
                       <button 
                         type="button" 
-                        className="btn-test" 
+                        className="btn-secondary btn-block setup-test-btn" 
                         onClick={() => handleTestRadarr(index)}
                         disabled={status?.loading}
                       >
@@ -1360,12 +1360,12 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
             <div className="form-section">
               <h2>API Keys</h2>
               <p className="section-description">
-                Metadata sources used for lookups and artwork browsing. Both are optional and can be
-                added or updated later in Settings.
+                Metadata sources used for lookups and artwork browsing. Every key here is optional and
+                can be added or updated later in Settings.
               </p>
 
               <div className="form-group">
-                <label>TMDB API Key</label>
+                <label>TMDB API Key <span className="optional recommended">Recommended</span></label>
                 <div className="input-with-toggle">
                   <input
                     type={showTmdbKey ? 'text' : 'password'}
@@ -1389,7 +1389,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
 
               <div className="form-group">
-                <label>TheTVDB API Key</label>
+                <label>TheTVDB API Key <span className="optional">Optional</span></label>
                 <div className="input-with-toggle">
                   <input
                     type={showTvdbKey ? 'text' : 'password'}
@@ -1413,7 +1413,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
 
               <div className="form-group">
-                <label>TheTVDB PIN</label>
+                <label>TheTVDB PIN <span className="optional">Optional</span></label>
                 <input
                   type="password"
                   name="tvdb_pin"
@@ -1426,7 +1426,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
 
               <div className="form-group">
-                <label>fanart.tv API Key</label>
+                <label>fanart.tv API Key <span className="optional">Optional</span></label>
                 <div className="input-with-toggle">
                   <input
                     type={showFanartKey ? 'text' : 'password'}
@@ -1445,7 +1445,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                     {showFanartKey ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
-                <small>Optional. Adds fanart.tv as a third source in the Maker Tools image browser and the Artwork Finder, alongside TMDB and TheTVDB.</small>
+                <small>Adds fanart.tv as a third source in the Maker Tools image browser and the Artwork Finder, alongside TMDB and TheTVDB.</small>
                 <small>Sign in at <a href="https://fanart.tv/" target="_blank" rel="noopener noreferrer">fanart.tv</a> and copy the personal API key from your profile.</small>
               </div>
 

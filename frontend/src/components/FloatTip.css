@@ -1,14 +1,14 @@
 .float-tip {
   position: fixed;
-  z-index: 1300;
+  z-index: var(--z-tip);
   width: max-content;
   max-width: 240px;
-  padding: 0.35rem 0.55rem;
-  background: #1a1a1a;
-  color: #ddd;
-  border: 1px solid #404040;
-  border-radius: 4px;
-  font-size: 0.72rem;
+  padding: var(--sp-6) var(--sp-8);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-body);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
   font-weight: 400;
   line-height: 1.35;
   text-align: left;

@@ -1,4 +1,4 @@
-import { type MouseEvent } from 'react'
+import Modal from '../../components/Modal'
 
 type UnsavedChangesModalProps = {
   isOpen: boolean
@@ -11,32 +11,21 @@ function UnsavedChangesModal({ isOpen, onCancel, onDiscard }: UnsavedChangesModa
     return null
   }
 
-  const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) {
-      onCancel()
-    }
-  }
-
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content schedule-modal confirmation-modal">
-        <div className="modal-header">
-          <h2>Unsaved Changes</h2>
-          <button className="modal-close" onClick={onCancel}>×</button>
-        </div>
-        <div className="modal-body">
-          <p>You have unsaved changes on this tab. Are you sure you want to leave? Your changes will be lost if you don't save them.</p>
-        </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onCancel}>
-            Cancel
-          </button>
-          <button className="btn-primary unsaved-discard-btn" onClick={onDiscard}>
-            Discard Changes
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal onClose={onCancel} size="sm">
+      <Modal.Header title="Unsaved Changes" />
+      <Modal.Body>
+        <p>You have unsaved changes on this tab. Are you sure you want to leave? Your changes will be lost if you don't save them.</p>
+      </Modal.Body>
+      <Modal.Footer>
+        <button className="btn-secondary" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn-danger" onClick={onDiscard}>
+          Discard Changes
+        </button>
+      </Modal.Footer>
+    </Modal>
   )
 }
 

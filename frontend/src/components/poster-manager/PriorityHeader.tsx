@@ -1,6 +1,7 @@
-import { Save } from 'lucide-react'
+
 import Toolbar from '../Toolbar'
 import PriorityScopeSelector, { type PriorityScope } from './PriorityScopeSelector'
+import SaveActions from '../../components/SaveActions'
 
 // One toolbar for all scopes; only the panels below change. Exported for the Drive Usage view.
 export const TITLE = 'Configure Drive Priority'
@@ -15,6 +16,7 @@ type PriorityHeaderProps = {
   saving: boolean
   hasUnsavedChanges: boolean
   onSave: () => void
+  onCancel: () => void
 }
 
 /**
@@ -22,18 +24,11 @@ type PriorityHeaderProps = {
  * render this, so the header is identical while only the panels below swap. Save state is
  * passed in because each tab tracks its own.
  */
-function PriorityHeader({ scope, onScopeChange, saving, hasUnsavedChanges, onSave }: PriorityHeaderProps) {
+function PriorityHeader({ scope, onScopeChange, saving, hasUnsavedChanges, onSave, onCancel }: PriorityHeaderProps) {
   return (
     <>
       <Toolbar title={TITLE} description={DESCRIPTION}>
-        <button
-          className={`btn-toolbar ${hasUnsavedChanges ? 'btn-unsaved' : ''}`}
-          onClick={onSave}
-          disabled={!hasUnsavedChanges || saving}
-        >
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
+        <SaveActions dirty={hasUnsavedChanges} saving={saving} disabled={!hasUnsavedChanges || saving} onSave={onSave} onCancel={onCancel} />
       </Toolbar>
 
       <PriorityScopeSelector value={scope} onChange={onScopeChange} />

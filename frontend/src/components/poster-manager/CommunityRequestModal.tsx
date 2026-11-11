@@ -6,6 +6,7 @@ import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
 import { useVisiblePosterStyles, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from '../community/posterStyles'
 import { MATCHED_BY_ID_GENERIC } from '../../utils/mediaServer'
+import Modal from '../../components/Modal'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
 
@@ -196,7 +197,7 @@ export default function CommunityRequestModal({
   }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast, tmdbSelectionRequired, isPersonRequest, isSeasonRequest, isCollectionRequest, includeCollectionMovies, canWantOriginalLanguage, wantOriginalLanguage])
 
   // Auto-close shortly after a successful submit. Cleared on unmount so a pending
-  // close can't fire after the modal is gone (which leaked stray onClose calls into tests).
+  // close can't fire after the modal is gone.
   useEffect(() => {
     if (!submitted) return
     const id = setTimeout(onClose, 1200)
@@ -204,268 +205,262 @@ export default function CommunityRequestModal({
   }, [submitted, onClose])
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal-content schedule-modal community-req-modal">
-        <div className="modal-header">
-          <h2>Request Community Poster</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-
-        <div className="creq-rate-limit-notice">
-          Limited to 5 new requests per day.
-        </div>
-
-        <div className="modal-body">
-          {/* Item being requested */}
-          <div className="creq-item-label">
-            Requesting a poster for:
-            <strong className="creq-item-title"> {cleanTitle}</strong>
-            {year && <span className="creq-item-year"> ({year})</span>}
-            {seasonNumbers && seasonNumbers.length > 0 ? (
-              <span className="tmdb-type-badge tmdb-type-badge--season">
-                {seasonNumbers.length === 1
-                  ? `Season ${seasonNumbers[0]}`
-                  : `Seasons: ${seasonNumbers.join(', ')}`}
-              </span>
-            ) : (
-              <span className={`tmdb-type-badge tmdb-type-badge--${tmdbType === 'show' ? 'show' : tmdbType}`}>
-                {tmdbType}
-              </span>
-            )}
-          </div>
-
-          {/* TMDB match picker */}
-          <div className="creq-section-label">Pick the correct TMDB match:</div>
-
-          {showPickWarning && (
-            <div className="creq-pick-warning" role="alert">
-              <AlertCircle size={14} />
-              <span>Pick the correct TMDB match below, or check <strong>“This is a custom request.”</strong></span>
-            </div>
-          )}
-
-          {!tmdbApiKeyConfigured ? (
-            <div className="tmdb-candidates-warning">
-              <AlertCircle size={14} />
-              <span>No TMDB API key configured. Add it in <strong>Settings → General → API Keys</strong>.</span>
-            </div>
-          ) : loading ? (
-            <div className="creq-loading">
-              <Loader2 size={16} className="spin-icon" />
-              <span>Searching TMDB…</span>
-            </div>
-          ) : allCandidates.length === 0 ? (
-            <div className="creq-no-results">
-              No TMDB results found.
-            </div>
-          ) : (
-            <div className={`creq-candidates${allCandidates.length <= 1 ? ' creq-candidates--single' : ''}${showPickWarning ? ' creq-candidates--warn' : ''}`} ref={candidatesRef}>
-              {allCandidates.map((c, i) => {
-                const isSelected = selected != null && tmdbCandidateKey(selected) === tmdbCandidateKey(c)
-                const isPerson = c.media_type === 'person'
-                const link = tmdbCandidateLink(c)
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    className={`creq-candidate${isSelected ? ' selected' : ''}`}
-                    onClick={() => { setSelected(isSelected ? null : c); setIsCustomRequest(false) }}
-                  >
-                    {c.poster_url ? (
-                      <img src={c.poster_url} alt="" className="creq-candidate-poster" loading="lazy" />
-                    ) : (
-                      <div className={`creq-candidate-poster creq-candidate-poster--empty${isPerson ? ' creq-candidate-poster--person' : ''}`}>
-                        {isPerson && <User size={22} style={{ opacity: 0.4 }} />}
-                      </div>
-                    )}
-                    <div className="creq-candidate-info">
-                      <div className="creq-candidate-title">
-                        {c.title}
-                        {c.year && <span className="creq-candidate-year"> ({c.year})</span>}
-                        {c.auto_matched && (
-                          <span className="tmdb-matched-badge" title={MATCHED_BY_ID_GENERIC}>
-                            <Check size={11} /> Matched
-                          </span>
-                        )}
-                      </div>
-                      {isPerson && (
-                        <span className="tmdb-type-badge tmdb-type-badge--person">Person</span>
-                      )}
-                      <a
-                        href={link.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="creq-tmdb-link"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <ExternalLink size={11} />
-                        {link.label}
-                      </a>
-                    </div>
-                    {isSelected && <Check size={16} className="creq-selected-check" />}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Custom request checkbox — shown when there are results but nothing selected, or always when no results */}
-          {tmdbApiKeyConfigured && !loading && !selected && (
-            <label className="creq-custom-request-label">
-              <input
-                type="checkbox"
-                checked={isCustomRequest || allCandidates.length === 0}
-                disabled={allCandidates.length === 0}
-                onChange={(e) => setIsCustomRequest(e.target.checked)}
-              />
-              This is a custom request — no matching TMDB item available
-            </label>
-          )}
-
-          {isCollectionRequest && (
-            <label className="creq-custom-request-label">
-              <input
-                type="checkbox"
-                checked={includeCollectionMovies}
-                onChange={(e) => setIncludeCollectionMovies(e.target.checked)}
-              />
-              Also request posters for every movie in this collection
-            </label>
-          )}
-
-          {canWantOriginalLanguage && (
-            <label className="creq-custom-request-label">
-              <input
-                type="checkbox"
-                checked={wantOriginalLanguage}
-                onChange={(e) => setWantOriginalLanguage(e.target.checked)}
-              />
-              Also request an original-language poster/logo
-            </label>
-          )}
-
-          {/* Poster style — required, single choice */}
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Poster style <span className="request-required">required</span>
-          </div>
-          <div className="request-style-tags">
-            {visibleStyles.map((s) => (
-              <button
-                key={s.value}
-                type="button"
-                className={`request-style-tag${posterStyle === s.value ? ' selected' : ''}`}
-                onClick={() => setPosterStyle((prev) => {
-                  const next = prev === s.value ? null : s.value
-                  if (next) setStoredPosterStyle(next)
-                  return next
-                })}
-              >
-                {s.label}
-              </button>
-            ))}
-            <span className="request-style-tags-sep" aria-hidden="true" />
-            <span className="request-style-tags-hint">Preferences <span className="request-optional">(optional)</span></span>
-            {EXTRA_TAGS.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                className={`request-style-tag${extraTags.includes(tag) ? ' selected' : ''}`}
-                onClick={() => toggleExtraTag(tag)}
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-
-          {alreadyMade && (
-            <div className="tmdb-candidates-warning" role="alert" style={{ marginTop: '0.5rem' }}>
-              <AlertCircle size={14} />
-              <span>{alreadyMade}</span>
-            </div>
-          )}
-
-          {/* Discord identity */}
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Discord account <span className="request-required">required</span>
-          </div>
-          {isConnected && username ? (
-            <div className="creq-discord-connected">
-              <span className="creq-discord-username">✓ {username}</span>
-              <button type="button" className="creq-discord-logout" onClick={logout} title="Disconnect Discord">
-                <LogOut size={12} />
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <div className="creq-discord-connect-row">
-              <button
-                type="button"
-                className="creq-discord-btn"
-                onClick={login}
-                disabled={connecting}
-              >
-                {connecting ? <Loader2 size={13} className="spin-icon" /> : null}
-                {connecting ? 'Connecting…' : 'Connect with Discord'}
-              </button>
-            </div>
-          )}
-          {connectError && <div className="creq-discord-error">{connectError}</div>}
-
-          {/* Ping a user */}
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Ping a Discord user <span className="request-optional">(optional)</span>
-          </div>
-          <input
-            type="text"
-            className="request-notes-textarea request-single-input"
-            placeholder="Discord username (e.g. dweagle79)"
-            value={pingDiscordId}
-            onChange={(e) => setPingDiscordId(e.target.value.slice(0, 32))}
-            maxLength={32}
-          />
-          {pingDiscordId.length > 0 && !isValidDiscordUsername(pingDiscordId) && (
-            <div className="creq-field-hint" style={{ color: '#ff9800' }}>
-              Must be 2–32 characters. @everyone and @here are not allowed.
-            </div>
-          )}
-
-          {/* Notes */}
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Notes <span className="request-optional">(optional)</span>
-          </div>
-          <textarea
-            className="request-notes-textarea"
-            placeholder="Any special instructions, season numbers, extra context…"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={3}
-            maxLength={500}
-          />
-        </div>
-
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button
-            className="btn-primary"
-            onClick={handleSubmit}
-            disabled={submitting || submitted || !isConnected || !effectiveName.trim() || !posterStyle}
-            title={
-              !posterStyle ? 'Select a poster style (CL2K or MM2K)' :
-              tmdbSelectionRequired ? 'Pick a TMDB match or check "custom request"' :
-              undefined
-            }
-          >
-            {submitting ? (
-              <Loader2 size={14} className="spin-icon" />
-            ) : submitted ? (
-              <Check size={14} />
-            ) : (
-              <Star size={14} />
-            )}
-            {submitted ? 'Submitted!' : 'Request Poster'}
-          </button>
-        </div>
+    <Modal onClose={onClose} className="community-req-modal">
+      <Modal.Header title="Request Community Poster" />
+      <div className="creq-rate-limit-notice">
+        Limited to 5 new requests per day.
       </div>
-    </div>
+
+      
+      <Modal.Body>
+        {/* Item being requested */}
+        <div className="creq-item-label">
+          Requesting a poster for:
+          <strong className="creq-item-title"> {cleanTitle}</strong>
+          {year && <span className="creq-item-year"> ({year})</span>}
+          {seasonNumbers && seasonNumbers.length > 0 ? (
+            <span className="tmdb-type-badge tmdb-type-badge--season">
+              {seasonNumbers.length === 1
+                ? `Season ${seasonNumbers[0]}`
+                : `Seasons: ${seasonNumbers.join(', ')}`}
+            </span>
+          ) : (
+            <span className={`tmdb-type-badge tmdb-type-badge--${tmdbType === 'show' ? 'show' : tmdbType}`}>
+              {tmdbType}
+            </span>
+          )}
+        </div>
+
+        {/* TMDB match picker */}
+        <div className="creq-section-label">Pick the correct TMDB match:</div>
+
+        {showPickWarning && (
+          <div className="creq-pick-warning" role="alert">
+            <AlertCircle size={14} />
+            <span>Pick the correct TMDB match below, or check <strong>“This is a custom request.”</strong></span>
+          </div>
+        )}
+
+        {!tmdbApiKeyConfigured ? (
+          <div className="tmdb-candidates-warning">
+            <AlertCircle size={14} />
+            <span>No TMDB API key configured. Add it in <strong>Settings → General → API Keys</strong>.</span>
+          </div>
+        ) : loading ? (
+          <div className="creq-loading">
+            <Loader2 size={16} className="spinning" />
+            <span>Searching TMDB…</span>
+          </div>
+        ) : allCandidates.length === 0 ? (
+          <div className="creq-no-results">
+            No TMDB results found.
+          </div>
+        ) : (
+          <div className={`creq-candidates${allCandidates.length <= 1 ? ' creq-candidates--single' : ''}${showPickWarning ? ' creq-candidates--warn' : ''}`} ref={candidatesRef}>
+            {allCandidates.map((c, i) => {
+              const isSelected = selected != null && tmdbCandidateKey(selected) === tmdbCandidateKey(c)
+              const isPerson = c.media_type === 'person'
+              const link = tmdbCandidateLink(c)
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  className={`creq-candidate${isSelected ? ' selected' : ''}`}
+                  onClick={() => { setSelected(isSelected ? null : c); setIsCustomRequest(false) }}
+                >
+                  {c.poster_url ? (
+                    <img src={c.poster_url} alt="" className="creq-candidate-poster" loading="lazy" />
+                  ) : (
+                    <div className={`creq-candidate-poster creq-candidate-poster--empty${isPerson ? ' creq-candidate-poster--person' : ''}`}>
+                      {isPerson && <User size={22} className="is-dimmed" />}
+                    </div>
+                  )}
+                  <div className="creq-candidate-info">
+                    <div className="creq-candidate-title">
+                      {c.title}
+                      {c.year && <span className="creq-candidate-year"> ({c.year})</span>}
+                      {c.auto_matched && (
+                        <span className="tmdb-matched-badge" title={MATCHED_BY_ID_GENERIC}>
+                          <Check size={11} /> Matched
+                        </span>
+                      )}
+                    </div>
+                    {isPerson && (
+                      <span className="tmdb-type-badge tmdb-type-badge--person">Person</span>
+                    )}
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="creq-tmdb-link"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ExternalLink size={11} />
+                      {link.label}
+                    </a>
+                  </div>
+                  {isSelected && <Check size={16} className="creq-selected-check" />}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Custom request checkbox — shown when there are results but nothing selected, or always when no results */}
+        {tmdbApiKeyConfigured && !loading && !selected && (
+          <label className="creq-custom-request-label">
+            <input
+              type="checkbox"
+              checked={isCustomRequest || allCandidates.length === 0}
+              disabled={allCandidates.length === 0}
+              onChange={(e) => setIsCustomRequest(e.target.checked)}
+            />
+            This is a custom request — no matching TMDB item available
+          </label>
+        )}
+
+        {isCollectionRequest && (
+          <label className="creq-custom-request-label">
+            <input
+              type="checkbox"
+              checked={includeCollectionMovies}
+              onChange={(e) => setIncludeCollectionMovies(e.target.checked)}
+            />
+            Also request posters for every movie in this collection
+          </label>
+        )}
+
+        {canWantOriginalLanguage && (
+          <label className="creq-custom-request-label">
+            <input
+              type="checkbox"
+              checked={wantOriginalLanguage}
+              onChange={(e) => setWantOriginalLanguage(e.target.checked)}
+            />
+            Also request an original-language poster/logo
+          </label>
+        )}
+
+        {/* Poster style — required, single choice */}
+        <div className="creq-section-label mt-md">
+          Poster style <span className="request-required">required</span>
+        </div>
+        <div className="request-style-tags">
+          {visibleStyles.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              className={`request-style-tag${posterStyle === s.value ? ' selected' : ''}`}
+              onClick={() => setPosterStyle((prev) => {
+                const next = prev === s.value ? null : s.value
+                if (next) setStoredPosterStyle(next)
+                return next
+              })}
+            >
+              {s.label}
+            </button>
+          ))}
+          <span className="request-style-tags-sep" aria-hidden="true" />
+          <span className="request-style-tags-hint">Preferences <span className="request-optional">(optional)</span></span>
+          {EXTRA_TAGS.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className={`request-style-tag${extraTags.includes(tag) ? ' selected' : ''}`}
+              onClick={() => toggleExtraTag(tag)}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+
+        {alreadyMade && (
+          <div className="tmdb-candidates-warning mt-sm" role="alert">
+            <AlertCircle size={14} />
+            <span>{alreadyMade}</span>
+          </div>
+        )}
+
+        {/* Discord identity */}
+        <div className="creq-section-label mt-md">
+          Discord account <span className="request-required">required</span>
+        </div>
+        {isConnected && username ? (
+          <div className="creq-discord-connected">
+            <span className="creq-discord-username">✓ {username}</span>
+            <button type="button" className="creq-discord-logout" onClick={logout} title="Disconnect Discord">
+              <LogOut size={12} />
+              Disconnect
+            </button>
+          </div>
+        ) : (
+          <div className="creq-discord-connect-row">
+            <button
+              type="button"
+              className="creq-discord-btn"
+              onClick={login}
+              disabled={connecting}
+            >
+              {connecting ? <Loader2 size={13} className="spinning" /> : null}
+              {connecting ? 'Connecting…' : 'Connect with Discord'}
+            </button>
+          </div>
+        )}
+        {connectError && <div className="creq-discord-error">{connectError}</div>}
+
+        {/* Ping a user */}
+        <div className="creq-section-label mt-md">
+          Ping a Discord user <span className="request-optional">(optional)</span>
+        </div>
+        <input
+          type="text"
+          className="request-notes-textarea request-single-input"
+          placeholder="Discord username (e.g. dweagle79)"
+          value={pingDiscordId}
+          onChange={(e) => setPingDiscordId(e.target.value.slice(0, 32))}
+          maxLength={32}
+        />
+        {pingDiscordId.length > 0 && !isValidDiscordUsername(pingDiscordId) && (
+          <div className="creq-field-hint text-warning-strong">
+            Must be 2–32 characters. @everyone and @here are not allowed.
+          </div>
+        )}
+
+        {/* Notes */}
+        <div className="creq-section-label mt-md">
+          Notes <span className="request-optional">(optional)</span>
+        </div>
+        <textarea
+          className="request-notes-textarea"
+          placeholder="Any special instructions, season numbers, extra context…"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+          maxLength={500}
+        />
+      </Modal.Body>
+      <Modal.Footer>
+        <button className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button
+          className="btn-primary"
+          onClick={handleSubmit}
+          disabled={submitting || submitted || !isConnected || !effectiveName.trim() || !posterStyle}
+          title={
+            !posterStyle ? 'Select a poster style (CL2K or MM2K)' :
+            tmdbSelectionRequired ? 'Pick a TMDB match or check "custom request"' :
+            undefined
+          }
+        >
+          {submitting ? (
+            <Loader2 size={14} className="spinning" />
+          ) : submitted ? (
+            <Check size={14} />
+          ) : (
+            <Star size={14} />
+          )}
+          {submitted ? 'Submitted!' : 'Request Poster'}
+        </button>
+      </Modal.Footer>
+    </Modal>
   )
 }

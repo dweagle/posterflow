@@ -536,7 +536,7 @@ describe('CommunityRequestModal', () => {
     it('calls onClose when X button is clicked', async () => {
       const user = userEvent.setup()
       renderModal()
-      await user.click(screen.getByRole('button', { name: '×' }))
+      await user.click(screen.getByRole('button', { name: 'Close' }))
       expect(mockOnClose).toHaveBeenCalledOnce()
     })
 

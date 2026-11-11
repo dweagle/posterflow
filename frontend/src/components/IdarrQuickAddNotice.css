@@ -1,18 +1,18 @@
 .idarr-notice-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.6);
+  background-color: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1100;
-  padding: 1rem;
+  z-index: var(--z-modal-2);
+  padding: var(--sp-16);
 }
 
 .idarr-notice-dialog {
-  background-color: #2d3748;
-  border-radius: 8px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  background-color: var(--color-slate-deep);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 40px var(--shadow-color);
   width: 100%;
   max-width: 520px;
   display: flex;
@@ -23,70 +23,56 @@
 .idarr-notice-header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1rem 1.25rem;
-  color: #ff9800;
-  border-bottom: 1px solid #3d4556;
+  gap: var(--sp-12);
+  padding: var(--sp-16) var(--sp-20);
+  color: var(--color-warning-strong);
+  border-bottom: 1px solid var(--color-slate);
 }
 
 .idarr-notice-header h3 {
   margin: 0;
   flex: 1;
-  font-size: 1.05rem;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
-.idarr-notice-close {
-  background: none;
-  border: none;
-  color: #9aa5b8;
-  font-size: 1.5rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 0.25rem;
-}
-
-.idarr-notice-close:hover {
-  color: #e8ecef;
-}
-
 .idarr-notice-body {
-  padding: 1.25rem;
+  padding: var(--sp-20);
   overflow-y: auto;
 }
 
 .idarr-notice-summary {
   margin: 0;
-  color: #d1d5db;
+  color: var(--color-text-secondary);
   line-height: 1.6;
 }
 
 .idarr-notice-list {
   list-style: none;
-  margin: 1rem 0 0;
+  margin: var(--sp-16) 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--sp-8);
 }
 
 .idarr-notice-item {
-  background-color: #252d3a;
-  border: 1px solid #3d4556;
-  border-radius: 6px;
-  padding: 0.6rem 0.75rem;
+  background-color: var(--color-slate-deep);
+  border: 1px solid var(--color-slate);
+  border-radius: var(--radius-md);
+  padding: var(--sp-8) var(--sp-12);
 }
 
 .idarr-notice-item-top {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--sp-8);
   justify-content: space-between;
 }
 
 .idarr-notice-filename {
-  color: #e8ecef;
-  font-size: 0.9rem;
+  color: var(--color-text-body);
+  font-size: var(--text-md);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -95,26 +81,26 @@
 
 .idarr-notice-pill {
   flex-shrink: 0;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: 0.15rem 0.45rem;
-  border-radius: 999px;
-  background-color: rgba(255, 152, 0, 0.15);
-  color: #ffb74d;
+  padding: var(--sp-2) var(--sp-8);
+  border-radius: var(--radius-pill);
+  background-color: rgba(var(--rgb-warning-strong), 0.15);
+  color: var(--color-warning);
 }
 
 .idarr-notice-pill-upload_failed,
 .idarr-notice-pill-missing {
-  background-color: rgba(244, 67, 54, 0.15);
-  color: #ef9a9a;
+  background-color: rgba(var(--rgb-danger), 0.15);
+  color: var(--color-danger-text);
 }
 
 .idarr-notice-reason {
-  margin-top: 0.25rem;
-  color: #9aa5b8;
-  font-size: 0.82rem;
+  margin-top: var(--sp-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
   line-height: 1.4;
 }
 
@@ -122,89 +108,40 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-
-.idarr-notice-btn-row {
-  padding: 0.3rem 0.7rem;
-  border-radius: 4px;
-  border: 1px solid #4a5568;
-  background-color: #2d3748;
-  color: #e8ecef;
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.idarr-notice-btn-row:hover:not(:disabled) {
-  background-color: #3d4556;
-}
-
-.idarr-notice-btn-row:disabled {
-  opacity: 0.6;
-  cursor: default;
+  gap: var(--sp-8);
+  margin-top: var(--sp-8);
 }
 
 .idarr-notice-pill-ignored {
-  background-color: rgba(129, 199, 132, 0.15);
-  color: #81c784;
+  background-color: rgba(var(--rgb-success), 0.15);
+  color: var(--color-success-soft);
 }
 
 .idarr-notice-item-status {
-  margin-top: 0.35rem;
-  color: #81c784;
-  font-size: 0.8rem;
+  margin-top: var(--sp-6);
+  color: var(--color-success-soft);
+  font-size: var(--text-sm);
   line-height: 1.4;
 }
 
 .idarr-notice-item-status-error {
   margin-top: 0;
-  color: #ef9a9a;
+  color: var(--color-danger-text);
 }
 
 .idarr-notice-uploaded {
-  margin: 1rem 0 0;
-  color: #81c784;
-  font-size: 0.85rem;
+  margin: var(--sp-16) 0 0;
+  color: var(--color-success-soft);
+  font-size: var(--text-md);
 }
 
 .idarr-notice-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  padding: 0.85rem 1.25rem;
-  background-color: #252d3a;
-  border-top: 1px solid #3d4556;
-  border-radius: 0 0 8px 8px;
+  gap: var(--sp-8);
+  padding: var(--sp-12) var(--sp-20);
+  background-color: var(--color-slate-deep);
+  border-top: 1px solid var(--color-slate);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
-.idarr-notice-btn-secondary,
-.idarr-notice-btn-primary {
-  padding: 0.5rem 1.25rem;
-  border-radius: 6px;
-  border: none;
-  font-weight: 500;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.idarr-notice-btn-secondary {
-  background-color: #4a5568;
-  color: #fff;
-}
-
-.idarr-notice-btn-secondary:hover {
-  background-color: #5a6678;
-}
-
-.idarr-notice-btn-primary {
-  background-color: #ff9800;
-  color: #1f2530;
-}
-
-.idarr-notice-btn-primary:hover {
-  background-color: #fb8c00;
-}

@@ -32,7 +32,7 @@ async function renderSection(appTimezone: string, effectiveTimezone: string, sav
   )
   await screen.findByRole('option', { name: 'Asia/Tokyo' })
   const select = screen.getByLabelText('Schedule Timezone') as HTMLSelectElement
-  const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement
+  const save = screen.getByRole('button', { name: /^Sav/ }) as HTMLButtonElement
   return { onSaveAppTimezone, select, save }
 }
 

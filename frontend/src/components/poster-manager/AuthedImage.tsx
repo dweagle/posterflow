@@ -56,7 +56,10 @@ function AuthedImage({ load, deps, alt, className, expandable = false, debounceM
   useEffect(() => {
     if (!zoomed) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setZoomed(false)
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setZoomed(false)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

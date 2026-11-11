@@ -15,6 +15,8 @@ import { tmdbMetaKey, useTmdbMetaMap } from '../../hooks/useCardOverview'
 import MoveToRequestModal, { type MoveToRequestValues } from './MoveToRequestModal'
 import { useIdarrQuickAdd } from './useIdarrQuickAdd'
 import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
+import Modal from '../../components/Modal'
+import Toolbar from '../../components/Toolbar'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
 type SortOrder = 'newest' | 'oldest'
@@ -470,100 +472,102 @@ export default function ListsView() {
     : items
 
   return (
-    <>
-      <div className="community-toolbar">
-        <div className="community-type-tabs">
-          {MEDIA_TYPE_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              className={`community-tab-btn${mediaType === tab.key ? ' active' : ''}`}
-              onClick={() => setMediaType(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="community-filters">
-          <div className="community-filter-group">
-            <label>Status</label>
-            <select className="community-status-select" value={statusFilter} disabled={claimedByMe} onChange={(e) => setStatusFilter(e.target.value as 'active' | 'in_progress' | 'fulfilled' | 'all')}>
-              <option value="active">Active</option>
-              <option value="in_progress">In Progress</option>
-              <option value="fulfilled">Fulfilled</option>
-              <option value="all">All</option>
-            </select>
-          </div>
-          <div className="community-filter-group">
-            <label>Wanted by</label>
-            <select
-              value={ownerFilter}
-              onChange={(e) => {
-                const id = e.target.value
-                setOwnerFilter(id)
-                setOwnerLabel(id === 'all' ? '' : (owners.find((o) => o.id === id)?.name ?? ownerLabel))
-              }}
-            >
-              <option value="all">Everyone</option>
-              {/* Keep the selected wanter listed even when the current media-type/
-                  status view has none of their items, so switching tabs never
-                  silently drops the filter back to Everyone. */}
-              {ownerFilter !== 'all' && !owners.some((o) => o.id === ownerFilter) && (
-                <option value={ownerFilter}>{ownerLabel || ownerFilter}</option>
-              )}
-              {owners.map((o) => (
-                <option key={o.id} value={o.id}>{o.name} ({o.count})</option>
-              ))}
-            </select>
-          </div>
+  <>
+      <Toolbar title="Lists" description="Items community members want posters for, newest first. Filter by type, status and who wants them. Makers can keep their claims on top and hide styles they do not make.">
+        <button className="btn-toolbar" onClick={() => { void fetchPage(0, false); void fetchOwners() }} disabled={loading}>
+          <RefreshCw size={14} className={loading ? 'spinning' : ''} />
+          Refresh
+        </button>
+        {isConnected && discordUserId && (
           <button
-            className="community-tab-btn community-sort-btn"
-            onClick={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
-            title={sortOrder === 'newest' ? 'Newest first — click to show oldest first' : 'Oldest first — click to show newest first'}
-            aria-label={sortOrder === 'newest' ? 'Sorted newest first' : 'Sorted oldest first'}
+            className="btn-toolbar btn-danger"
+            onClick={() => setConfirmClearMine(true)}
+            disabled={clearingMine}
+            title="Stop wanting every item you've added"
           >
-            {sortOrder === 'newest' ? <CalendarArrowDown size={16} /> : <CalendarArrowUp size={16} />}
+            {clearingMine ? <Loader2 size={14} className="spinning" /> : <Trash2 size={14} />}
+            Remove My Items
           </button>
-          {isMaker && (
-            <button
-              className={`community-tab-btn${claimedByMe ? ' active' : ''}`}
-              onClick={() => setClaimedByMe((v) => !v)}
-              title="Show your claims first, then the open items still up for grabs (hides other makers' claims)"
-            >
-              Claimed
-            </button>
-          )}
-          {isMaker && (
-            <HideFilterMenu
-              value={hideFilters}
-              onChange={setHideFilters}
-              omit={hiddenStyles.has('MM2K') ? ['mm2k'] : []}
-            />
-          )}
-        </div>
-        <div className="community-toolbar-actions">
-          <button className="community-refresh-btn" onClick={() => { void fetchPage(0, false); void fetchOwners() }} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'spin-icon' : ''} />
-            Refresh
+        )}
+      
+      </Toolbar>
+      <div className="community-filter-row">
+      <div className="community-type-tabs pf-subtabs">
+        {MEDIA_TYPE_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            className={mediaType === tab.key ? 'active' : ''}
+            onClick={() => setMediaType(tab.key)}
+          >
+            {tab.label}
           </button>
-          {isConnected && discordUserId && (
-            <button
-              className="community-refresh-btn community-clear-mine-btn"
-              onClick={() => setConfirmClearMine(true)}
-              disabled={clearingMine}
-              title="Stop wanting every item you've added"
-            >
-              {clearingMine ? <Loader2 size={14} className="spin-icon" /> : <Trash2 size={14} />}
-              Remove My Items
-            </button>
-          )}
+        ))}
+      </div>
+      <div className="community-filters">
+        <div className="community-filter-group">
+          <label>Status</label>
+          <select className="community-status-select" value={statusFilter} disabled={claimedByMe} onChange={(e) => setStatusFilter(e.target.value as 'active' | 'in_progress' | 'fulfilled' | 'all')}>
+            <option value="active">Active</option>
+            <option value="in_progress">In Progress</option>
+            <option value="fulfilled">Fulfilled</option>
+            <option value="all">All</option>
+          </select>
         </div>
+        <div className="community-filter-group">
+          <label>Wanted by</label>
+          <select
+            value={ownerFilter}
+            onChange={(e) => {
+              const id = e.target.value
+              setOwnerFilter(id)
+              setOwnerLabel(id === 'all' ? '' : (owners.find((o) => o.id === id)?.name ?? ownerLabel))
+            }}
+          >
+            <option value="all">Everyone</option>
+            {/* Keep the selected wanter listed even when the current media-type/
+                status view has none of their items, so switching tabs never
+                silently drops the filter back to Everyone. */}
+            {ownerFilter !== 'all' && !owners.some((o) => o.id === ownerFilter) && (
+              <option value={ownerFilter}>{ownerLabel || ownerFilter}</option>
+            )}
+            {owners.map((o) => (
+              <option key={o.id} value={o.id}>{o.name} ({o.count})</option>
+            ))}
+          </select>
+        </div>
+        <button
+          className="pf-subtab community-sort-btn"
+          onClick={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
+          title={sortOrder === 'newest' ? 'Newest first — click to show oldest first' : 'Oldest first — click to show newest first'}
+          aria-label={sortOrder === 'newest' ? 'Sorted newest first' : 'Sorted oldest first'}
+        >
+          {sortOrder === 'newest' ? <CalendarArrowDown size={16} /> : <CalendarArrowUp size={16} />}
+        </button>
+        {isMaker && (
+          <button
+            className={`pf-subtab community-claimed-btn${claimedByMe ? ' active' : ''}`}
+            onClick={() => setClaimedByMe((v) => !v)}
+            title="Show your claims first, then the open items still up for grabs (hides other makers' claims)"
+          >
+            Claimed
+          </button>
+        )}
+        {isMaker && (
+          <HideFilterMenu
+            value={hideFilters}
+            onChange={setHideFilters}
+            omit={hiddenStyles.has('MM2K') ? ['mm2k'] : []}
+          />
+        )}
+      </div>
+    
       </div>
 
       {error && <div className="community-error">{error}</div>}
 
       {loading && items.length === 0 && !isFiltered ? (
         <div className="community-loading">
-          <RefreshCw size={20} className="spin-icon" />
+          <RefreshCw size={20} className="spinning" />
           <span>Loading lists…</span>
         </div>
       ) : items.length === 0 && !isFiltered ? (
@@ -604,9 +608,9 @@ export default function ListsView() {
                     When enabled, any image you drop on a list card is sent to your IDarr quick add folder and processed — identical to dragging files onto the IDarr sidebar icon.
                   </span>
                 </span>
-                <span className="idarr-toggle-control">
+                <span className="toggle-switch">
                   <input type="checkbox" checked={idarrEnabled} onChange={(e) => setIdarrEnabled(e.target.checked)} />
-                  <span className="idarr-toggle-slider" />
+                  <span className="toggle-slider" />
                 </span>
               </label>
             )}
@@ -628,13 +632,13 @@ export default function ListsView() {
             type="file"
             accept="image/*"
             multiple
-            style={{ display: 'none' }}
+            hidden
             onChange={handleFileChange}
           />
 
           {loading && items.length === 0 && (
             <div className="community-loading">
-              <RefreshCw size={20} className="spin-icon" />
+              <RefreshCw size={20} className="spinning" />
               <span>Loading lists…</span>
             </div>
           )}
@@ -642,7 +646,7 @@ export default function ListsView() {
             <div className="community-empty">
               <Globe size={48} />
               <p>No items match your search or filters</p>
-              <button type="button" className="community-refresh-btn" onClick={resetFilters}>
+              <button type="button" className="btn-toolbar btn-toolbar-link" onClick={resetFilters}>
                 <RefreshCw size={14} />
                 Reset filters
               </button>
@@ -668,7 +672,7 @@ export default function ListsView() {
             const canMove = canRemove && item.status === 'open'
 
             const infoLines = (
-              <>
+       <>
                 {wanters.length > 0 && (
                   <div className="request-maker-info request-maker-requested">
                     📋 Wanted by <strong>{wanters.map((w) => w.name || w.discord_id).join(', ')}</strong>
@@ -693,7 +697,7 @@ export default function ListsView() {
             )
 
             const actions = (
-              <>
+       <>
                 {isMaker && idarrEnabled && (
                   <button
                     type="button"
@@ -702,7 +706,7 @@ export default function ListsView() {
                     disabled={uploadState === 'uploading'}
                     onClick={() => handleUploadClick(item.id)}
                   >
-                    {uploadState === 'uploading' ? <Loader2 size={11} className="spin-icon" /> :
+                    {uploadState === 'uploading' ? <Loader2 size={11} className="spinning" /> :
                      uploadState === 'done' ? <Check size={11} /> :
                      <Upload size={11} />}
                     <span>{uploadState === 'uploading' ? 'Uploading…' : uploadState === 'done' ? 'Added!' : 'Upload'}</span>
@@ -729,12 +733,12 @@ export default function ListsView() {
                         data-tooltip="Claim this item"
                         onClick={() => handleAction(item, 'claim')}
                       >
-                        {actionLoading ? <Loader2 size={11} className="spin-icon" /> : null}
+                        {actionLoading ? <Loader2 size={11} className="spinning" /> : null}
                         <span>Claim</span>
                       </button>
                     )}
                     {item.status === 'in_progress' && canComplete && (
-                      <>
+           <>
                         <button
                           type="button"
                           className="request-action-btn action-complete"
@@ -742,7 +746,7 @@ export default function ListsView() {
                           data-tooltip="Mark as complete (removes it from the list)"
                           onClick={() => handleAction(item, 'complete')}
                         >
-                          {actionLoading ? <Loader2 size={11} className="spin-icon" /> : <Check size={11} />}
+                          {actionLoading ? <Loader2 size={11} className="spinning" /> : <Check size={11} />}
                           <span>Complete</span>
                         </button>
                         <button
@@ -824,8 +828,8 @@ export default function ListsView() {
 
           {items.length < total && (
             <div className="community-load-more">
-              <button className="community-refresh-btn" onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? <Loader2 size={14} className="spin-icon" /> : <ChevronDown size={14} />}
+              <button className="btn-toolbar" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? <Loader2 size={14} className="spinning" /> : <ChevronDown size={14} />}
                 Load more ({items.length} of {total})
               </button>
             </div>
@@ -834,44 +838,34 @@ export default function ListsView() {
       )}
 
       {claimConflict && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setClaimConflict(null) }}>
-          <div className="modal-content schedule-modal" style={{ maxWidth: '380px' }}>
-            <div className="modal-header">
-              <h2>Already claimed</h2>
-              <button className="modal-close" onClick={() => setClaimConflict(null)}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ margin: 0 }}>{claimConflict}</p>
-              <p className="muted" style={{ marginTop: '0.75rem' }}>The list has been refreshed to show its current status.</p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-primary" onClick={() => setClaimConflict(null)}>Got it</button>
-            </div>
-          </div>
-        </div>
+        <Modal onClose={() => setClaimConflict(null)} size="sm">
+          <Modal.Header title="Already claimed" />
+          <Modal.Body>
+            <p className="m-0">{claimConflict}</p>
+            <p className="text-dim mt-md">The list has been refreshed to show its current status.</p>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-primary" onClick={() => setClaimConflict(null)}>Got it</button>
+          </Modal.Footer>
+        </Modal>
       )}
 
       {confirmClearMine && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !clearingMine) setConfirmClearMine(false) }}>
-          <div className="modal-content schedule-modal" style={{ maxWidth: '420px' }}>
-            <div className="modal-header">
-              <h2>Remove all your items?</h2>
-              <button className="modal-close" onClick={() => setConfirmClearMine(false)} disabled={clearingMine}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ margin: 0 }}>
-                This permanently removes every item you published to the community list. Claimed items are removed too. This can't be undone.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setConfirmClearMine(false)} disabled={clearingMine}>Cancel</button>
-              <button className="btn-primary" onClick={handleClearMine} disabled={clearingMine}>
-                {clearingMine ? <Loader2 size={13} className="spin-icon" /> : <Trash2 size={13} />}
-                {' '}Remove My Items
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal onClose={() => setConfirmClearMine(false)} size="sm" busy={clearingMine}>
+          <Modal.Header title="Remove all your items?" />
+          <Modal.Body>
+            <p className="m-0">
+              This permanently removes every item you published to the community list. Claimed items are removed too. This can't be undone.
+            </p>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={() => setConfirmClearMine(false)} disabled={clearingMine}>Cancel</button>
+            <button className="btn-danger" onClick={handleClearMine} disabled={clearingMine}>
+              {clearingMine ? <Loader2 size={13} className="spinning" /> : <Trash2 size={13} />}
+              {' '}Remove My Items
+            </button>
+          </Modal.Footer>
+        </Modal>
       )}
 
       {moveTarget && (

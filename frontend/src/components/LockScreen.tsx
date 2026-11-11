@@ -54,7 +54,7 @@ function LockScreen() {
           {error && <p className="lock-error">{error}</p>}
           <button
             type="submit"
-            className="lock-btn"
+            className="btn-primary btn-block lock-btn"
             disabled={loading || !password.trim()}
           >
             {loading ? 'Verifying…' : 'Unlock'}

@@ -10,8 +10,17 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #121212;
-  color: #ffffff;
+  background-color: var(--color-page-bg);
+  color: var(--color-text);
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:where(:hover) {
+  text-decoration: underline;
 }
 
 code {
@@ -37,28 +46,29 @@ input[type='number'] {
 }
 
 ::-webkit-scrollbar-track {
-  background: #2a2a2a;
-  border-radius: 5px;
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-md);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #555;
-  border-radius: 5px;
+  background: var(--color-line-soft);
+  border-radius: var(--radius-md);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6a6a6a;
+  background: var(--color-line-soft);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 /* Firefox */
 :root {
-  scrollbar-color: #555 #2a2a2a;
+  scrollbar-color: var(--color-line-soft) var(--color-surface-raised);
+  color-scheme: dark; /* native select lists, date pickers and scrollbars draw dark, not white */
 }
 
 /* Button base styles */
@@ -69,14 +79,16 @@ button {
   font-family: inherit;
 }
 
-button:disabled {
+/* A disabled button dims, like a disabled field (Form.css), but not again inside a disabled
+   fieldset, which dims as one. */
+button:disabled:where(:not(fieldset:disabled *)) {
   cursor: not-allowed;
   opacity: 0.6;
 }
 
-/* Page container for consistent max-width */
+/* Page container: one width on every page. */
 .page-container {
-  max-width: 1400px;
+  max-width: 1500px;
   margin: 0 auto;
 }
 
@@ -91,388 +103,43 @@ input, textarea, select {
   /* Width of the maker card's action box, shared by Maker Tools and the request cards so the
      two pages match by construction. The request panel derives its own width from this. */
   --tmdb-box-width: 28rem;
-  --pf-tab-text: #aaa;
-  --pf-tab-text-hover: #fff;
-  --pf-tab-text-active: #64b5f6;
-  --pf-tab-border: #333;
-  --pf-tab-hover-bg: rgba(100, 181, 246, 0.1);
-  --pf-tab-active-border: #64b5f6;
+  --pf-tab-text: var(--color-text-muted);
+  --pf-tab-text-hover: var(--color-text);
+  --pf-tab-text-active: var(--color-accent);
+  --pf-tab-border: var(--color-border);
+  --pf-tab-hover-bg: rgba(var(--rgb-accent), 0.1);
+  --pf-tab-active-border: var(--color-accent);
   --pf-chip-radius: 6px;
-  --pf-chip-font-size: 0.72rem;
+  --pf-chip-font-size: var(--text-xs);
   --pf-chip-font-weight: 700;
   --pf-chip-padding-y: 0.16rem;
   --pf-chip-padding-x: 0.58rem;
 }
 
-/* Shared top-tab styling across page tab bars */
-.poster-manager-tabs button,
-.settings-tabs button,
-.maker-tools-tabs button,
-.gdrives-tabs button,
-.logs-page .tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.38rem;
-  padding: 0.78rem 1.5rem;
-  background: transparent;
-  color: var(--pf-tab-text);
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  font-size: 0.95rem;
-  font-weight: 500;
-  line-height: 1;
-  transition: all 0.2s;
-}
-
-@media (max-width: 550px) {
-  .poster-manager-tabs button,
-  .settings-tabs button,
-  .maker-tools-tabs button,
-  .gdrives-tabs button,
-  .logs-page .tab {
-    padding: 0.5rem 0.6rem;
-    font-size: 0.78rem;
-    gap: 0.25rem;
-  }
-}
-
-.poster-manager-tabs button:hover,
-.settings-tabs button:hover,
-.maker-tools-tabs button:hover,
-.gdrives-tabs button:hover,
-.logs-page .tab:hover {
-  color: var(--pf-tab-text-hover);
-  background: var(--pf-tab-hover-bg);
-}
-
-.poster-manager-tabs button.active,
-.settings-tabs button.active,
-.maker-tools-tabs button.active,
-.gdrives-tabs button.active,
-.logs-page .tab.active {
-  color: var(--pf-tab-text-active);
-  border-bottom-color: var(--pf-tab-active-border);
-}
-
-/* ── Subtab / scope-toggle buttons ──────────────────────────────────────────
-   The single canonical subtab style. Put class="pf-subtabs" on any row of
-   panel/scope-switching tab buttons and its <button>s get a dark pill at rest
-   and a solid bright-blue (#64b5f6) fill when active. Page CSS keeps only
-   per-group layout (widths, gaps, borders). Deliberately NOT applied to filter
-   buttons (media type, category) — those keep their own filter look. */
-.pf-subtabs button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.34rem;
-  background: #2a2a2a;
-  color: #ccc;
-  border: 1px solid #424242;
-  border-radius: 6px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.pf-subtabs button:hover {
-  background: #333;
-  border-color: #555;
-  color: #fff;
-}
-
-.pf-subtabs button.active {
-  background: #64b5f6;
-  border-color: #64b5f6;
-  color: #1a1a1a;
-}
-
-/* Row container for opt-in subtab groups (see note above). */
-.pf-subtabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-/* Secondary buttons that can share the subtab row: they don't switch panels, they change what the
-   active panel is listing. Amber instead of the tabs' blue so the two roles never read as one set.
-   Same box metrics as .pf-subtabs button, so the row stays on one baseline. */
-.pf-subtabs button.pf-subtab-source.active {
-  background: #d9a441;
-  border-color: #d9a441;
-  color: #1a1a1a;
-}
-
-.pf-subtabs button.pf-subtab-source:not(.active):hover {
-  border-color: #d9a441;
-  color: #f0c273;
-}
-
-/* Separates the panel tabs from the secondary buttons sharing their row. */
-.pf-subtabs-divider {
-  width: 1px;
-  align-self: stretch;
-  margin: 0.1rem 0.25rem;
-  background: #424242;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   Shared toolbar styling across pages.
-
-   The <Toolbar> component (components/Toolbar.tsx) renders this markup, so every
-   page gets the same bar. Previously each page kept its own copy of these rules and
-   they drifted (different padding, gaps, tooltip colours, button radii). Pages should
-   only override what their layout genuinely needs — see .maker-tools-panel .toolbar.
-   ───────────────────────────────────────────────────────────────────────────── */
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1.5rem;
-  padding: 0.75rem;
-  background-color: #3D4556;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-  /* A toolbar with no buttons would otherwise be shorter than its neighbours, since the
-     bar's height comes from the buttons. Matches padding + .btn-toolbar's height. */
-  min-height: 3.6rem;
-}
-
-.toolbar .toolbar-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.toolbar h2 {
-  color: #64b5f6;
-  margin: 0;
-  font-size: 1.25rem;
-  white-space: nowrap;
-}
-
-.toolbar-info {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: help;
-  color: #888;
-  transition: color 0.2s;
-}
-
-.toolbar-info:hover {
-  color: #64b5f6;
-}
-
-.toolbar-info svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.toolbar-tooltip {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  background: #252525;
-  border: 1px solid #424242;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  color: #ccc;
-  font-size: 0.85rem;
-  width: 300px;
-  max-width: 90vw;
-  line-height: 1.4;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 100;
-  white-space: normal;
-}
-
-.toolbar-info:hover .toolbar-tooltip {
-  opacity: 1;
-}
-
-/* Tooltip that carries a picture: sized to the image, caption under it */
-.toolbar-tooltip.tooltip-image {
-  width: max-content;
-  padding: 0.4rem;
-}
-
-.toolbar-tooltip.tooltip-image img {
-  display: block;
-  width: 482px;
-  max-width: 100%;
-  height: auto;
-  border-radius: 4px;
-}
-
-.toolbar-tooltip.tooltip-image small {
-  display: block;
-  margin-top: 0.35rem;
-  color: #aaa;
-}
-
 .action-buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--sp-8);
   align-items: center;
-}
-
-.btn-pair {
-  display: flex;
-  gap: 0.5rem;
-  width: 185px;
-  flex-shrink: 0;
-}
-
-/* cursor: pointer comes from the global button rule above. */
-.btn-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  padding: 0.5rem 1rem;
-  min-width: 185px;
-  background-color: #5c6882;
-  color: #E8ECEF;
-  border: none;
-  border-radius: 4px;
-  transition: all 0.2s;
-  font-size: 0.9rem;
-  white-space: nowrap;
-}
-
-.btn-toolbar svg {
-  flex-shrink: 0;
-}
-
-.btn-toolbar:hover:not(:disabled) {
-  background-color: #6c7892;
-}
-
-.btn-toolbar:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.btn-toolbar.btn-primary {
-  background-color: #5B89C4;
-  color: #fff;
-}
-
-.btn-toolbar.btn-primary:hover:not(:disabled) {
-  background-color: #6c9bd4;
-}
-
-.btn-toolbar.btn-unsaved {
-  background-color: #ef5350;
-  color: #fff;
-}
-
-.btn-toolbar.btn-unsaved:hover:not(:disabled) {
-  background-color: #e53935;
-}
-
-.btn-toolbar.btn-danger {
-  background: #3a2323;
-  border-color: #7c4a4a;
-  color: #e6b0b0;
-}
-
-.btn-toolbar.btn-danger:hover:not(:disabled) {
-  background: #4a2a2a;
-  border-color: #9c5a5a;
-}
-
-.btn-toolbar.btn-toolbar-link {
-  border: 1px solid #4b5563;
-  border-radius: 6px;
-  background: #424242;
-  color: #fff;
-  padding: 0.45rem 0.25rem;
-  font-size: 0.85rem;
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-}
-
-.btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
-  background: #555;
-}
-
-/* Stack the bar once the buttons can't sit beside the title. */
-@media (max-width: 1300px) {
-  .toolbar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .toolbar .toolbar-title {
-    width: 100%;
-  }
-
-  .action-buttons {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, 185px);
-    justify-content: start;
-    width: 100%;
-  }
-
-  .btn-pair {
-    width: 185px;
-  }
-}
-
-@media (max-width: 550px) {
-  .action-buttons {
-    grid-template-columns: 1fr;
-  }
-
-  .btn-pair {
-    width: 100%;
-  }
-
-  /* Prevent the fixed 185px min-width from overflowing at the narrowest screens.
-     Maker Tools and IDarr each discovered this separately; every page wants it. */
-  .btn-toolbar {
-    min-width: 0;
-  }
-
-  /* Tooltip doesn't work on touch screens and causes scrollWidth overflow */
-  .toolbar-tooltip {
-    display: none;
-  }
 }
 
 /* Shared chip/badge baseline across pages */
 .stat-badge,
-.schedule-badge,
 .pending-type-chip,
 .summary-day-chip,
 .drive-badge,
 .style-badge,
 .tab-badge,
-.job-badge,
 .library-badge,
 .sidebar-badge,
 .webhook-stat-chip,
 .maker-tools-page .badge,
 .unmatched-card .badge,
-.tmdb-result-wrapper .badge,
-.priority-badge {
+.tmdb-result-wrapper .badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.25rem;
+  gap: var(--sp-4);
   padding: var(--pf-chip-padding-y) var(--pf-chip-padding-x);
   border-radius: var(--pf-chip-radius);
   font-size: var(--pf-chip-font-size);
@@ -488,9 +155,9 @@ input, textarea, select {
 
 /* Narrower type / seasons / specials badges in the maker card meta row. */
 .tmdb-result-meta .badge {
-  padding-left: 0.25rem;
-  padding-right: 0.25rem;
-  gap: 0.1rem;
+  padding-left: var(--sp-4);
+  padding-right: var(--sp-4);
+  gap: var(--sp-2);
 }
 
 .tmdb-result-wrapper .badge svg {
@@ -498,33 +165,33 @@ input, textarea, select {
 }
 
 .tmdb-result-wrapper .badge-blue {
-  background: rgba(100, 181, 246, 0.2);
-  color: #f3f9ff;
-  border-color: #64b5f6;
+  background: rgba(var(--rgb-accent), 0.2);
+  color: var(--color-text-body);
+  border-color: var(--color-accent);
 }
 
 .tmdb-result-wrapper .badge-grey {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e5e7eb;
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--tint);
+  color: var(--color-text-body);
+  border-color: var(--hairline);
 }
 
 .tmdb-result-wrapper .badge-green {
-  background: rgba(76, 175, 80, 0.14);
-  color: #e5e7eb;
-  border-color: rgba(76, 175, 80, 0.32);
+  background: rgba(var(--rgb-success), 0.14);
+  color: var(--color-text-body);
+  border-color: rgba(var(--rgb-success), 0.32);
 }
 
 .tmdb-result-wrapper .badge-orange {
-  background: rgba(255, 183, 77, 0.12);
-  color: #e5e7eb;
-  border-color: rgba(255, 183, 77, 0.3);
+  background: rgba(var(--rgb-warning), 0.12);
+  color: var(--color-text-body);
+  border-color: rgba(var(--rgb-warning), 0.3);
 }
 
 .tmdb-result-wrapper .badge-purple {
-  background: rgba(156, 39, 176, 0.14);
-  color: #e5e7eb;
-  border-color: rgba(156, 39, 176, 0.32);
+  background: rgba(var(--rgb-purple), 0.14);
+  color: var(--color-text-body);
+  border-color: rgba(var(--rgb-purple), 0.32);
 }
 
 /* Air-date sliver on the seasons badge: red = a listed season has no air dates yet (TBA),
@@ -547,11 +214,11 @@ input, textarea, select {
 }
 
 .tmdb-result-wrapper .badge-air-unaired::after {
-  background: rgba(239, 83, 80, 0.85);
+  background: rgba(var(--rgb-danger), 0.85);
 }
 
 .tmdb-result-wrapper .badge-air-aired::after {
-  background: rgba(76, 175, 80, 0.85);
+  background: rgba(var(--rgb-success), 0.85);
 }
 
 /* Metadata-source attribution — used wherever the TMDB or TheTVDB API is exposed in the UI.
@@ -560,9 +227,9 @@ input, textarea, select {
 .source-attribution {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.75rem;
-  color: #555;
+  gap: var(--sp-8);
+  font-size: var(--text-xs);
+  color: var(--color-line-soft);
   margin: 0;
   line-height: 1.5;
 }
@@ -581,4 +248,24 @@ input, textarea, select {
 
 .source-attribution a:hover img {
   opacity: 1;
+}
+
+/* A spinning icon, for a button whose action is under way: <RefreshCw className="spinning" />. */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+/* Full-window placeholder while the app or a route loads. */
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: var(--color-page-bg);
+  color: var(--color-text);
 }

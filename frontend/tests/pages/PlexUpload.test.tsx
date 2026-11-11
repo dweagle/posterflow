@@ -260,13 +260,13 @@ describe('PlexUpload', () => {
     await waitFor(() => expect(mockGetPlexWebhookSettings).toHaveBeenCalled())
 
     // Nothing edited yet.
-    const save = screen.getByRole('button', { name: /Save Settings/i }) as HTMLButtonElement
+    const save = screen.getByRole('button', { name: /^Saved?$/ }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
     expect(document.querySelector('.toolbar .btn-toolbar')).toBeTruthy()
 
     await user.click(screen.getByLabelText(/Adopt existing processed posters/i))
-    expect((screen.getByRole('button', { name: /Save Settings/i }) as HTMLButtonElement).disabled).toBe(false)
-    expect(screen.getByRole('button', { name: /Save Settings/i }).className).toContain('btn-unsaved')
+    expect((screen.getByRole('button', { name: /^Saved?$/ }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByRole('button', { name: /^Saved?$/ }).className).toContain('btn-unsaved')
   })
 
   // Activity is monitoring, so there is nothing to save there.
@@ -275,7 +275,7 @@ describe('PlexUpload', () => {
     render(<PlexUpload />)
 
     await user.click(screen.getByRole('button', { name: 'Activity / Cache' }))
-    expect(screen.queryByRole('button', { name: /Save Settings/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Saved?$/ })).toBeNull()
   })
 
   // Monitoring isn't configuration: Stats and Cache belong under Activity, not the
@@ -325,7 +325,7 @@ describe('PlexUpload', () => {
 
     const adoptCheckbox = screen.getByLabelText(/Adopt existing processed posters/i)
     await user.click(adoptCheckbox)
-    await user.click(screen.getByRole('button', { name: /Save Settings/i }))
+    await user.click(screen.getByRole('button', { name: /^Saved?$/ }))
 
     await waitFor(() => {
       expect(mockSavePlexWebhookSettings).toHaveBeenCalledWith(expect.objectContaining({
@@ -405,7 +405,7 @@ describe('PlexUpload', () => {
 
     const routingBlock = await screen.findByTestId('instance-routing-Radarr-4K')
     await user.click(within(routingBlock).getByLabelText(/Movies 4K/i))
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
 
     // Nothing persisted, and the page summary still shows the default (reverted) routing.
     expect(mockSavePlexUploadInstanceMap).not.toHaveBeenCalled()

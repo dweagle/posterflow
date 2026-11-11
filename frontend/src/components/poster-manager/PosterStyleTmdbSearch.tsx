@@ -157,12 +157,12 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
               onClick={handleSearch}
               title="Search TMDB for this item"
             >
-              {isLoading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />}
+              {isLoading ? <Loader2 size={13} className="spinning" /> : <Search size={13} />}
               <span>TMDB</span>
             </button>
             <button
               type="button"
-              className="maker-nav-btn"
+              className="btn-secondary btn-sm maker-nav-btn"
               title="Search in Maker Tools (opens in a new tab)"
               onClick={() => {
                 const filter = mediaTypeToTmdbFilter(item.type)
@@ -182,7 +182,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
               href={googleSearchUrl(cleanTitle, item.year)}
               target="_blank"
               rel="noopener noreferrer"
-              className="maker-nav-btn"
+              className="btn-secondary btn-sm maker-nav-btn"
               title="Google search (opens in a new tab)"
             >
               <Search size={13} />
@@ -192,7 +192,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
               href={tpdbSearchUrl(cleanTitle, item.type)}
               target="_blank"
               rel="noopener noreferrer"
-              className="maker-nav-btn"
+              className="btn-secondary btn-sm maker-nav-btn"
               title="Search ThePosterDB (opens in a new tab)"
             >
               <ExternalLink size={13} />
@@ -233,7 +233,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
             </div>
           ) : isLoading ? (
             <div className="tmdb-candidates-loading">
-              <Loader2 size={16} className="spin-icon" />
+              <Loader2 size={16} className="spinning" />
               <span>Searching TMDB…</span>
             </div>
           ) : !candidates || candidates.length === 0 ? (

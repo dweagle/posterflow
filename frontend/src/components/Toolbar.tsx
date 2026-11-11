@@ -10,7 +10,7 @@ type ToolbarProps = {
 
 /**
  * The page toolbar used across the app: title, hover-info tooltip, and action buttons.
- * Styling is shared in styles/globals.css, so every page gets the same bar.
+ *  * Its stylesheet is components/Toolbar.css, loaded with the app shell, so every page gets the same bar.
  */
 
 function Toolbar({ title, description, titleControl, children }: ToolbarProps) {

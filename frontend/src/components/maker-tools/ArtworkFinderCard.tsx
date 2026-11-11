@@ -1,4 +1,4 @@
-import { useCallback, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { Check, ChevronDown, ChevronUp, Clapperboard as MovieIcon, Copy, Crop as CropIcon, Download, FolderOpen, Globe, Image as ImageIcon, Plus, Sparkles, Tv, Type as TypeIcon, Wand2 } from 'lucide-react'
 import {
   addArtwork,
@@ -35,6 +35,7 @@ import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
 import fanartIcon from '../../assets/service-icons/fanart.png'
 import appleTvIcon from '../../assets/service-icons/appletv.png'
+import Modal from '../../components/Modal'
 
 type Props = {
   item: TmdbSearchResult
@@ -83,15 +84,6 @@ function previewUrl(key: ArtworkListType, c: ArtworkCandidate): string {
   return `https://image.tmdb.org/t/p/${size}${c.ref}`
 }
 
-// Checkerboard for logo thumbs — kept on the button (behind the img) so the "make white" CSS
-// filter recolors only the logo, not its backing (which would otherwise turn the board white too).
-const CHECKER: CSSProperties = {
-  backgroundColor: '#aaa',
-  backgroundImage:
-    'linear-gradient(45deg, #888 25%, transparent 25%), linear-gradient(-45deg, #888 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #888 75%), linear-gradient(-45deg, transparent 75%, #888 75%)',
-  backgroundSize: '12px 12px',
-  backgroundPosition: '0 0, 0 6px, 6px -6px, -6px 0px',
-}
 
 // Full-resolution URL for the lightbox preview.
 function fullUrl(c: ArtworkCandidate): string {
@@ -363,7 +355,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
     : item.media_type === 'tv' ? <Tv size={12} /> : <FolderOpen size={12} />
 
   return (
-    <div className="tmdb-result-wrapper artwork-finder-card" style={{ marginBottom: 16 }}>
+    <div className="tmdb-result-wrapper artwork-finder-card">
       <div className={`tmdb-result-card${dropTarget.dragOver ? ' drag-over' : ''}`} {...dropTarget.dropProps}>
         <div className="tmdb-poster">
           {item.poster_url
@@ -385,7 +377,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
           <div className="tmdb-result-meta">
             <span className={`badge ${item.media_type === 'movie' ? 'badge-blue' : item.media_type === 'tv' ? 'badge-green' : 'badge-orange'}`}>{typeIcon} {item.media_type === 'movie' ? 'Movie' : item.media_type === 'tv' ? 'Series' : 'Collection'}</span>
             {missing && missing.length > 0 && (
-              <>
+       <>
                 <span className="artwork-missing-label">Missing:</span>
                 {missing.map((t) => (
                   <span key={t} className="badge artwork-missing-badge">{MISSING_LABEL[t]}</span>
@@ -469,7 +461,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
 
       {open && (
         <div className="tmdb-gallery-panel">
-          <div className="tmdb-gallery-tabs" style={{ marginBottom: 10 }}>
+          <div className="tmdb-gallery-tabs mb-sm">
             {(sources.tvdb || sources.fanart || sources.apple) && (
               <div className="tmdb-gallery-sources" role="group" aria-label="Artwork source">
                 {([['tmdb', tmdbIcon], ['tvdb', tvdbIcon], ['fanart', fanartIcon], ['apple', appleTvIcon]] as const)
@@ -506,9 +498,9 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             </div>
           </div>
           {error && <p className="tmdb-error">{error}</p>}
-          {loading && !data && <p style={{ fontSize: '0.8rem', color: '#888', margin: '0 0 10px' }}>Loading {SOURCE_LABEL[source]} artwork…</p>}
+          {loading && !data && <p className="art-gallery-note art-gallery-note--spaced">Loading {SOURCE_LABEL[source]} artwork…</p>}
           {data && source === 'tmdb' && !data.plex_available && (
-            <p style={{ fontSize: '0.8rem', color: '#ffb74d', margin: '0 0 10px' }}>
+            <p className="art-gallery-note art-gallery-note--spaced text-warning">
               No Plex token configured — square art (Plex-only; TMDB has none) is unavailable. Add a Plex instance in Settings to enable it.
             </p>
           )}
@@ -519,21 +511,21 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             const canAdd = key !== 'poster'          // posters aren't a scope subtype
             const canCrop = key === 'poster' || key === 'background'  // good square-crop sources
             return (
-              <div key={key} style={{ marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                  <strong style={{ fontSize: '0.85rem' }}>{label}</strong>
-                  <span style={{ fontSize: '0.75rem', color: '#888' }}>{cands.length}</span>
+              <div key={key} className="art-gallery-section">
+                <div className="art-gallery-head">
+                  <strong>{label}</strong>
+                  <span className="art-gallery-count">{cands.length}</span>
                   {key === 'logo' && cands.length > 0 && (
-                    <button type="button" className="btn-toolbar" style={{ fontSize: '0.72rem', padding: '2px 8px', minWidth: 0 }} onClick={autoPickWhite} title="Add the first white logo">
+                    <button type="button" className="btn-toolbar gallery-btn" onClick={autoPickWhite} title="Add the first white logo">
                       <Sparkles size={12} /> Auto-pick white
                     </button>
                   )}
                   {key === 'poster' && cands.length > 0 && (
-                    <span style={{ fontSize: '0.72rem', color: '#888' }}>— crop one into square art</span>
+                    <span className="art-gallery-count">— crop one into square art</span>
                   )}
                 </div>
                 {cands.length === 0
-                  ? <p style={{ fontSize: '0.78rem', color: '#777', margin: 0 }}>
+                  ? <p className="art-gallery-note">
                       {key === 'squareart' && source === 'fanart'
                         ? "fanart.tv has no textless square art for this title — switch to the TMDB tab for Plex's square art."
                         : key === 'squareart' && source === 'tvdb'
@@ -550,22 +542,12 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                         return (
                           <div key={ckey} className="tmdb-gallery-item">
                             <div className="tmdb-gallery-thumb-wrapper">
-                              <button type="button" className="tmdb-gallery-thumb-btn" style={key === 'logo' ? CHECKER : undefined} onClick={() => openPreview(key, c, white)} title="Click to preview full size">
+                              <button type="button" className={key === 'logo' ? 'tmdb-gallery-thumb-btn checkerboard' : 'tmdb-gallery-thumb-btn'} onClick={() => openPreview(key, c, white)} title="Click to preview full size">
                                 <img
-                                  className="tmdb-gallery-thumb"
+                                  className={['tmdb-gallery-thumb', key === 'squareart' && 'tmdb-gallery-thumb--square', offBox(key, c) && 'tmdb-gallery-thumb--contain', key === 'logo' && 'tmdb-gallery-thumb--logo', key === 'logo' && white && 'tmdb-gallery-thumb--white'].filter(Boolean).join(' ')}
                                   src={previewUrl(key, c)}
                                   alt=""
                                   loading="lazy"
-                                  style={{
-                                    ...(key === 'squareart' ? { aspectRatio: '1 / 1' } : {}),
-                                    // One box per grid keeps rows aligned; an image far from it (Apple TV's 4:3 and
-                                    // portrait heroes) is shown whole inside the box rather than cropped.
-                                    ...(offBox(key, c) ? { objectFit: 'contain' } : {}),
-                                    // Logos: keep the checkerboard on the BUTTON (behind the img), and blank the
-                                    // img's own — so "make white" recolors only the logo, board stays checkered.
-                                    ...(key === 'logo' ? { backgroundColor: 'transparent', backgroundImage: 'none' } : {}),
-                                    ...(key === 'logo' && white ? { filter: 'brightness(0) invert(1)' } : {}),
-                                  }}
                                 />
                               </button>
                               {/* Collection logos are borrowed from member movies — overlay which one. */}
@@ -574,13 +556,13 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                               )}
                             </div>
                             <div className="tmdb-gallery-item-meta">
-                              <div className="tmdb-gallery-meta-row" style={{ gap: 6 }}>
+                              <div className="tmdb-gallery-meta-row tmdb-gallery-meta-row--tight">
                                 {/* Under the TMDB tab only square art comes from Plex, so its badge is
                                     the one worth showing; the TVDB and fanart.tv tabs label their own. */}
-                                {c.source === 'gracenote' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>Plex</span>}
-                                {c.source === 'tvdb' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>TVDB</span>}
-                                {c.source === 'fanart' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>fanart.tv</span>}
-                                {c.source === 'apple' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>Apple TV</span>}
+                                {c.source === 'gracenote' && <span className="badge badge-grey">Plex</span>}
+                                {c.source === 'tvdb' && <span className="badge badge-grey">TVDB</span>}
+                                {c.source === 'fanart' && <span className="badge badge-grey">fanart.tv</span>}
+                                {c.source === 'apple' && <span className="badge badge-grey">Apple TV</span>}
                                 {/* TL / language code, same badge the TMDB search gallery uses. Square art is a
                                     single Plex image with no language, so it gets none. */}
                                 {key !== 'squareart' && (c.language === null
@@ -590,31 +572,31 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                                     : null)}
                                 {c.width && c.height ? <span className="tmdb-gallery-dims">{c.width}×{c.height}</span> : null}
                                 {key === 'logo' && typeof c.off_white_pct === 'number' && (
-                                  <span className={`badge ${c.is_white ? 'badge-green' : 'badge-orange'}`} style={{ fontSize: '0.62rem' }} title={c.is_white ? 'Passes the white filter' : 'Off-white %'}>
+                                  <span className={`badge ${c.is_white ? 'badge-green' : 'badge-orange'}`} title={c.is_white ? 'Passes the white filter' : 'Off-white %'}>
                                     {c.is_white ? <Check size={10} /> : null} {c.off_white_pct.toFixed(1)}%
                                   </span>
                                 )}
                               </div>
-                              <div style={{ display: 'flex', gap: 6 }}>
+                              <div className="art-gallery-actions">
                                 {canAdd && (shapeFitsRole(key, c)
                                   ? (
-                                    <button type="button" className={`btn-toolbar ${isAdded ? '' : 'btn-primary'}`} style={{ flex: 1, minWidth: 0, fontSize: '0.72rem', padding: '3px 6px', justifyContent: 'center' }} onClick={() => handleAdd(key as ArtworkSubtype, c)} disabled={isAdding || isAdded}>
+                                    <button type="button" className={`btn-toolbar gallery-btn flex-1 ${isAdded ? '' : 'btn-primary'}`} onClick={() => handleAdd(key as ArtworkSubtype, c)} disabled={isAdding || isAdded}>
                                       {isAdded ? <><Check size={12} /> Added</> : isAdding ? 'Adding…' : <><Plus size={12} /> Add</>}
                                     </button>
                                   ) : (
-                                    <span style={{ flex: 1, minWidth: 0, display: 'flex' }} title={`Apple TV art must be ${key === 'background' ? '16:9' : 'square'} to add as ${key === 'squareart' ? 'square art' : key}`}>
-                                      <button type="button" className="btn-toolbar" style={{ flex: 1, minWidth: 0, fontSize: '0.72rem', padding: '3px 6px', justifyContent: 'center' }} disabled>
+                                    <span className="art-gallery-action-wrap" title={`Apple TV art must be ${key === 'background' ? '16:9' : 'square'} to add as ${key === 'squareart' ? 'square art' : key}`}>
+                                      <button type="button" className="btn-toolbar gallery-btn" disabled>
                                         <Plus size={12} /> Add
                                       </button>
                                     </span>
                                   ))}
                                 {key === 'logo' && (
-                                  <button type="button" className={`btn-toolbar ${white ? 'btn-primary' : ''}`} style={{ minWidth: 0, fontSize: '0.72rem', padding: '3px 6px', justifyContent: 'center' }} title="Recolor to solid white on save" onClick={() => setMakeWhite((m) => ({ ...m, [c.ref]: !m[c.ref] }))}>
+                                  <button type="button" className={`btn-toolbar gallery-btn ${white ? 'btn-primary' : ''}`} title="Recolor to solid white on save" onClick={() => setMakeWhite((m) => ({ ...m, [c.ref]: !m[c.ref] }))}>
                                     <Wand2 size={12} /> White
                                   </button>
                                 )}
                                 {canCrop && (
-                                  <button type="button" className="btn-toolbar" style={{ flex: key === 'poster' ? 1 : undefined, minWidth: 0, fontSize: '0.72rem', padding: '3px 6px', justifyContent: 'center' }} title="Crop this image into square art" onClick={() => noScope ? showToast('Pick an artwork scope first', 'error') : setCropTarget(c)}>
+                                  <button type="button" className={key === 'poster' ? 'btn-toolbar gallery-btn flex-1' : 'btn-toolbar gallery-btn'} title="Crop this image into square art" onClick={() => noScope ? showToast('Pick an artwork scope first', 'error') : setCropTarget(c)}>
                                     <CropIcon size={12} /> Crop → Square
                                   </button>
                                 )}
@@ -629,10 +611,10 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             )
           })}
           {noScope && data && (
-            <p style={{ fontSize: '0.78rem', color: '#ffb74d', margin: 0 }}>Choose an artwork scope at the top to enable adding.</p>
+            <p className="art-gallery-note text-warning">Choose an artwork scope at the top to enable adding.</p>
           )}
           {!noScope && scopeLabel && data && (
-            <p style={{ fontSize: '0.75rem', color: '#777', margin: 0 }}>Adds land in scope: <strong>{scopeLabel}</strong> (IDarr renames + uploads on its next run).</p>
+            <p className="art-gallery-note">Adds land in scope: <strong>{scopeLabel}</strong> (IDarr renames + uploads on its next run).</p>
           )}
         </div>
       )}
@@ -644,8 +626,8 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             {preview.isLogo && preview.white ? (
               // The white filter also whitens an element's own background, so keep the backing on
               // a wrapper (not the filtered img) — dark, so the recolored white logo stays visible.
-              <div style={{ ...CHECKER, padding: '1.5rem 2rem', borderRadius: 8, boxShadow: '0 8px 40px rgba(0,0,0,0.7)', display: 'flex', maxWidth: '100%', maxHeight: 'calc(92vh - 3.5rem)' }}>
-                <img src={preview.src} alt="Preview" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block', filter: 'brightness(0) invert(1)' }} />
+              <div className="checkerboard art-lightbox-logo-pane">
+                <img src={preview.src} alt="Preview" className="art-lightbox-logo-img" />
               </div>
             ) : (
               <img
@@ -658,57 +640,50 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
               {preview.dims && <span className="tmdb-gallery-dims">{preview.dims}</span>}
               <button
                 type="button"
-                className="btn-toolbar btn-primary"
-                style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', minWidth: 0 }}
+                className="btn-toolbar btn-primary lightbox-btn"
                 onClick={() => void downloadImage(preview.download, preview.filename)}
               >
                 <Download size={13} /> Download
               </button>
             </div>
           </div>
-          <button type="button" className="tmdb-lightbox-close" onClick={() => setPreview(null)}>×</button>
+          <button type="button" className="btn-icon btn-icon-filled tmdb-lightbox-close" onClick={() => setPreview(null)}>×</button>
         </div>
       )}
 
       {/* Overwrite confirmation — mirrors the PSD-export overwrite modal */}
       {overwriteConfirm && (
-        <div className="modal-overlay">
-          <div className="modal-content schedule-modal">
-            <div className="modal-header">
-              <h2>Overwrite existing artwork?</h2>
-              <button className="modal-close" onClick={() => setOverwriteConfirm(null)}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ color: '#ccc', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                This scope already has a file with this name:
-              </p>
-              <div className="psd-not-found-filename"><code>{overwriteConfirm.filename}</code></div>
-              {scopeLabel && (
-                <div className="psd-not-found-folder">
-                  <span className="psd-not-found-folder-label">Scope:</span>
-                  <code>{scopeLabel}</code>
-                </div>
-              )}
-              <p style={{ marginTop: '1rem', color: '#ffb74d', fontSize: '0.85rem', lineHeight: 1.6 }}>
-                Overwriting moves the existing file to the IDarr duplicates folder and saves this one in its place.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setOverwriteConfirm(null)}>Cancel</button>
-              <button
-                className="btn-primary"
-                style={{ justifyContent: 'center', background: '#f44336' }}
-                onClick={() => {
-                  const o = overwriteConfirm
-                  setOverwriteConfirm(null)
-                  void handleAdd(o.subtype, o.candidate, true)
-                }}
-              >
-                Overwrite
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal onClose={() => setOverwriteConfirm(null)} closeOnOverlay={false}>
+          <Modal.Header title="Overwrite existing artwork?" />
+          <Modal.Body>
+            <p className="modal-text">
+              This scope already has a file with this name:
+            </p>
+            <div className="psd-not-found-filename"><code>{overwriteConfirm.filename}</code></div>
+            {scopeLabel && (
+              <div className="psd-not-found-folder">
+                <span className="psd-not-found-folder-label">Scope:</span>
+                <code>{scopeLabel}</code>
+              </div>
+            )}
+            <p className="modal-note text-warning">
+              Overwriting moves the existing file to the IDarr duplicates folder and saves this one in its place.
+            </p>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={() => setOverwriteConfirm(null)}>Cancel</button>
+            <button
+              className="btn-danger"
+              onClick={() => {
+                const o = overwriteConfirm
+                setOverwriteConfirm(null)
+                void handleAdd(o.subtype, o.candidate, true)
+              }}
+            >
+              Overwrite
+            </button>
+          </Modal.Footer>
+        </Modal>
       )}
 
       {/* Crop-to-square tool */}
@@ -724,40 +699,34 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
 
       {/* Crop overwrite confirmation */}
       {cropOverwrite && (
-        <div className="modal-overlay">
-          <div className="modal-content schedule-modal">
-            <div className="modal-header">
-              <h2>Overwrite existing square art?</h2>
-              <button className="modal-close" onClick={() => setCropOverwrite(null)}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ color: '#ccc', lineHeight: 1.6 }}>
-                This scope already has square art for this title. Overwriting moves the existing file to the
-                IDarr duplicates folder and saves the cropped one in its place.
-              </p>
-              {scopeLabel && (
-                <div className="psd-not-found-folder">
-                  <span className="psd-not-found-folder-label">Scope:</span>
-                  <code>{scopeLabel}</code>
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setCropOverwrite(null)}>Cancel</button>
-              <button
-                className="btn-primary"
-                style={{ justifyContent: 'center', background: '#f44336' }}
-                onClick={() => {
-                  const o = cropOverwrite
-                  setCropOverwrite(null)
-                  void doCrop(o.candidate, o.crop, true)
-                }}
-              >
-                Overwrite
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal onClose={() => setCropOverwrite(null)} closeOnOverlay={false}>
+          <Modal.Header title="Overwrite existing square art?" />
+          <Modal.Body>
+            <p className="modal-text">
+              This scope already has square art for this title. Overwriting moves the existing file to the
+              IDarr duplicates folder and saves the cropped one in its place.
+            </p>
+            {scopeLabel && (
+              <div className="psd-not-found-folder">
+                <span className="psd-not-found-folder-label">Scope:</span>
+                <code>{scopeLabel}</code>
+              </div>
+            )}
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={() => setCropOverwrite(null)}>Cancel</button>
+            <button
+              className="btn-danger"
+              onClick={() => {
+                const o = cropOverwrite
+                setCropOverwrite(null)
+                void doCrop(o.candidate, o.crop, true)
+              }}
+            >
+              Overwrite
+            </button>
+          </Modal.Footer>
+        </Modal>
       )}
 
       {/* Pick backgrounds / square art from a server-side folder */}

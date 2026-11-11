@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react'
-import type { MouseEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { ListPlus, Loader2, Search, X, Check } from 'lucide-react'
 import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
 import SortControls from './SortControls'
 import { type ItemType, sortItems, useSortPrefs } from './itemSort'
 import { type StyleClaimStatus } from '../../hooks/useCommunityClaimStatus'
+import Modal from '../../components/Modal'
 
 export interface SelectableListItem {
   key: string
@@ -98,95 +99,84 @@ export default function CreateListModal({ items, submitting, onAdd, onClose, sty
     })
 
   const count = selected.size
-  const handleOverlay = (e: MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget && !submitting) onClose()
-  }
-
   return (
-    <div className="modal-overlay" onClick={handleOverlay}>
-      <div className="modal-content schedule-modal create-list-modal">
-        <div className="modal-header">
-          <h2>Create List</h2>
-          <button className="modal-close" onClick={onClose} disabled={submitting}>×</button>
+    <Modal onClose={onClose} className="create-list-modal" busy={submitting}>
+      <Modal.Header title="Create List" />
+      <Modal.Body>
+        <p className="create-list-sub">Pick the items to publish to the community Lists tab.</p>
+
+        <div className="unmatched-search-bar">
+          <Search size={15} className="search-bar-icon" />
+          <input
+            type="text"
+            className="unmatched-search-input"
+            placeholder={`Search ${items.length} items…`}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {query && (
+            <button className="btn-icon btn-icon-sm search-clear-btn" onClick={() => setQuery('')} title="Clear search">
+              <X size={14} />
+            </button>
+          )}
         </div>
 
-        <div className="modal-body">
-          <p className="create-list-sub">Pick the items to publish to the community Lists tab.</p>
+        <SortControls prefs={prefs} onChange={setPrefs} showGroup={showGroup} showSeasons={hasSeasons} />
 
-          <div className="unmatched-search-bar">
-            <Search size={15} className="search-bar-icon" />
-            <input
-              type="text"
-              className="unmatched-search-input"
-              placeholder={`Search ${items.length} items…`}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {query && (
-              <button className="search-clear-btn" onClick={() => setQuery('')} title="Clear search">
-                <X size={14} />
+        <div className="create-list-toolbar">
+          <button type="button" className="btn-secondary btn-sm" onClick={toggleAllVisible} disabled={visible.length === 0}>
+            {allVisibleSelected ? 'Clear' : 'Select all'}{lower || (showGroup && prefs.group !== 'all') ? ' (filtered)' : ''}
+          </button>
+          <span className="create-list-count">{count} of {items.length} selected</span>
+        </div>
+
+        <div className="create-list-rows">
+          {visible.map((item) => {
+            const checked = selected.has(item.key)
+            return (
+              <button
+                type="button"
+                key={item.key}
+                className={`create-list-row${checked ? ' selected' : ''}`}
+                onClick={() => toggle(item.key)}
+              >
+                {item.posterUrl
+                  ? <img src={item.posterUrl} alt="" className="create-list-poster" loading="lazy" />
+                  : <span className="create-list-poster create-list-poster--empty" />}
+                <span className="create-list-title">
+                  {item.title}{item.year ? <span className="create-list-year"> ({item.year})</span> : null}
+                </span>
+                <div className="create-list-meta">
+                  {item.badgeType && (
+                    <span className={`unmatched-cat-badge unmatched-cat-badge--${item.badgeType}`}>
+                      {BADGE_LABEL[item.badgeType]}
+                    </span>
+                  )}
+                  <CommunityStatusBadge status={item.claimStatus ?? null} />
+                  <ArrMissingBadge available={item.available} source={item.source} />
+                </div>
+                <span className="create-list-check">{checked && <Check size={16} />}</span>
               </button>
-            )}
-          </div>
-
-          <SortControls prefs={prefs} onChange={setPrefs} showGroup={showGroup} showSeasons={hasSeasons} />
-
-          <div className="create-list-toolbar">
-            <button type="button" className="create-list-selectall" onClick={toggleAllVisible} disabled={visible.length === 0}>
-              {allVisibleSelected ? 'Clear' : 'Select all'}{lower || (showGroup && prefs.group !== 'all') ? ' (filtered)' : ''}
-            </button>
-            <span className="create-list-count">{count} of {items.length} selected</span>
-          </div>
-
-          <div className="create-list-rows">
-            {visible.map((item) => {
-              const checked = selected.has(item.key)
-              return (
-                <button
-                  type="button"
-                  key={item.key}
-                  className={`create-list-row${checked ? ' selected' : ''}`}
-                  onClick={() => toggle(item.key)}
-                >
-                  {item.posterUrl
-                    ? <img src={item.posterUrl} alt="" className="create-list-poster" loading="lazy" />
-                    : <span className="create-list-poster create-list-poster--empty" />}
-                  <span className="create-list-title">
-                    {item.title}{item.year ? <span className="create-list-year"> ({item.year})</span> : null}
-                  </span>
-                  <div className="create-list-meta">
-                    {item.badgeType && (
-                      <span className={`unmatched-cat-badge unmatched-cat-badge--${item.badgeType}`}>
-                        {BADGE_LABEL[item.badgeType]}
-                      </span>
-                    )}
-                    <CommunityStatusBadge status={item.claimStatus ?? null} />
-                    <ArrMissingBadge available={item.available} source={item.source} />
-                  </div>
-                  <span className="create-list-check">{checked && <Check size={16} />}</span>
-                </button>
-              )
-            })}
-            {visible.length === 0 && <div className="create-list-empty">No items match your search.</div>}
-          </div>
+            )
+          })}
+          {visible.length === 0 && <div className="create-list-empty">No items match your search.</div>}
         </div>
-
-        <div className="modal-footer">
-          {styleControl}
-          <div className="modal-footer-actions">
-            <button className="btn-secondary" onClick={onClose} disabled={submitting}>Cancel</button>
-            <button
-              className="btn-primary"
-              onClick={() => onAdd([...selected])}
-              disabled={submitting || count === 0 || !canAdd}
-              title={!canAdd ? 'Select a poster style (CL2K or MM2K)' : undefined}
-            >
-              {submitting ? <Loader2 size={14} className="spin-icon" /> : <ListPlus size={14} />}
-              {' '}Add {count} to Lists
-            </button>
-          </div>
+      </Modal.Body>
+      <Modal.Footer>
+        {styleControl}
+        <div className="modal-footer-actions">
+          <button className="btn-secondary" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={() => onAdd([...selected])}
+            disabled={submitting || count === 0 || !canAdd}
+            title={!canAdd ? 'Select a poster style (CL2K or MM2K)' : undefined}
+          >
+            {submitting ? <Loader2 size={14} className="spinning" /> : <ListPlus size={14} />}
+            {' '}Add {count} to Lists
+          </button>
         </div>
-      </div>
-    </div>
+      </Modal.Footer>
+    </Modal>
   )
 }

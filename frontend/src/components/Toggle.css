@@ -1,0 +1,65 @@
+/* The toggle switch: a checkbox drawn as a slider, one size everywhere.
+     <label class="toggle-switch"><input type="checkbox"><span class="toggle-slider"></span></label>
+   A page may recolor the checked state (the Overlays tabs do); it does not resize the switch. */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background-color: var(--color-border-strong);
+  border-radius: var(--radius-pill);
+}
+
+.toggle-slider:before {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  left: 3px;
+  top: 3px;
+  background-color: var(--color-text);
+  border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: var(--color-button-primary);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(16px);
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  box-shadow: 0 0 0 2px rgba(var(--rgb-accent-deep), 0.35);
+}
+
+/* The knob slides on a click, not on first paint: transitions start once the app has rendered,
+   and a page that is still loading its values keeps them off with `toggles-settling`. */
+body.ui-ready .toggle-slider,
+body.ui-ready .toggle-slider:before {
+  transition: background-color 0.2s, transform 0.2s;
+}
+
+.toggles-settling .toggle-slider,
+.toggles-settling .toggle-slider:before {
+  transition: none;
+}

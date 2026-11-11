@@ -30,11 +30,19 @@ import RemindersTab from '../components/maker-tools/RemindersTab'
 import { useReminders } from '../contexts/RemindersContext'
 import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
-import './MakerTools.css'
+import './maker-tools/base.css'
+import './maker-tools/search.css'
+import './maker-tools/gallery.css'
+import './maker-tools/psd.css'
+import './maker-tools/unmatched.css'
+import './maker-tools/artwork.css'
+import './maker-tools/reminders.css'
 import Toolbar from '../components/Toolbar'
 import IdarrScopePicker from '../components/maker-tools/IdarrScopePicker'
 import MakerScopeRow from '../components/maker-tools/MakerScopeRow'
 import { publishUploadPreferences, readUploadPreferences, type UploadPreferences } from '../components/community/useIdarrQuickAdd'
+import Modal from '../components/Modal'
+import Tabs from '../components/Tabs'
 
 type ResultTab = string
 type DiscoveryTab = 'series' | 'movies'
@@ -108,7 +116,7 @@ function InfoTip({ children }: { children: ReactNode }) {
   }
   return (
     <span className="psd-info-wrap" ref={wrapRef}>
-      <button type="button" className="psd-info-btn" aria-label="More info" onClick={toggle}>
+      <button type="button" className="btn-icon btn-icon-sm psd-info-btn" aria-label="More info" onClick={toggle}>
         <Info size={13} />
       </button>
       {open && (
@@ -614,62 +622,32 @@ function MakerTools() {
 
   return (
     <div className="page-container maker-tools-page">
-      <div className="maker-header">
+      <div className="page-header maker-header">
         <h1>Maker Tools</h1>
         <p>Independent maker workflow tools and utilities.</p>
       </div>
 
-      <div className="maker-tools-tabs" role="tablist" aria-label="Maker tools tabs">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'tmdb-search'}
-          className={activeTab === 'tmdb-search' ? 'active' : ''}
-          onClick={() => setActiveTab('tmdb-search')}
-        >
-          <Search size={16} /> TMDB Search
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'unmatched'}
-          className={activeTab === 'unmatched' ? 'active' : ''}
-          onClick={() => setActiveTab('unmatched')}
-        >
-          <LayoutGrid size={16} /> Unmatched
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'artwork'}
-          className={activeTab === 'artwork' ? 'active' : ''}
-          onClick={() => setActiveTab('artwork')}
-        >
-          <Paintbrush size={16} /> Artwork
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'reminders'}
-          className={activeTab === 'reminders' ? 'active' : ''}
-          onClick={() => setActiveTab('reminders')}
-        >
-          <span className="maker-tab-icon">
-            <Bell size={16} />
-            {reminderCount > 0 && <span className="maker-tab-count">{reminderCount}</span>}
-          </span>
-          Reminders
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'monitor'}
-          className={activeTab === 'monitor' ? 'active' : ''}
-          onClick={() => setActiveTab('monitor')}
-        >
-          <Monitor size={16} /> Monitor
-        </button>
-      </div>
+      <Tabs
+        ariaLabel="Maker tools tabs"
+        value={activeTab}
+        onChange={setActiveTab}
+        items={[
+          { key: 'tmdb-search', label: 'TMDB Search', icon: <Search size={16} /> },
+          { key: 'unmatched', label: 'Unmatched', icon: <LayoutGrid size={16} /> },
+          { key: 'artwork', label: 'Artwork', icon: <Paintbrush size={16} /> },
+          {
+            key: 'reminders',
+            label: 'Reminders',
+            icon: (
+              <span className="maker-tab-icon">
+                <Bell size={16} />
+                {reminderCount > 0 && <span className="maker-tab-count">{reminderCount}</span>}
+              </span>
+            ),
+          },
+          { key: 'monitor', label: 'Monitor', icon: <Monitor size={16} /> },
+        ]}
+      />
 
       {activeTab === 'monitor' && (
       <div className="maker-tools-panel">
@@ -746,12 +724,12 @@ function MakerTools() {
                     <div className="stat-card"><span>{postersReady}</span><small>Ready to Go</small></div>
                   </div>
 
-                  <div className="tmdb-filter-bar" role="group" aria-label="Filter premieres by poster status">
+                  <div className="tmdb-filter-bar pf-subtabs" role="group" aria-label="Filter premieres by poster status">
                     {(['all', 'needed', 'ready'] as MonitorFilter[]).map((f) => (
                       <button
                         key={f}
                         type="button"
-                        className={`tmdb-filter-btn${monitorFilter === f ? ' active' : ''}`}
+                        className={monitorFilter === f ? 'active' : ''}
                         onClick={() => setMonitorFilter(f)}
                       >
                         {f === 'all' && <>All ({libraryResult.shows.length})</>}
@@ -762,7 +740,7 @@ function MakerTools() {
                   </div>
 
                   <div className="maker-show-list full-width">
-                    {visibleShows.length === 0 && <p className="muted">{emptyMessage}</p>}
+                    {visibleShows.length === 0 && <p className="text-dim">{emptyMessage}</p>}
 
                     {visibleShows
                       .map((show) => {
@@ -976,12 +954,12 @@ function MakerTools() {
             </div>
 
             <MakerScopeRow control={<IdarrScopePicker />}>
-            <div className="tmdb-filter-bar">
+            <div className="tmdb-filter-bar pf-subtabs">
               {(['all', 'movie', 'tv', 'collection'] as TmdbSearchFilter[]).map((f) => (
                 <button
                   key={f}
                   type="button"
-                  className={`tmdb-filter-btn${tmdbFilter === f ? ' active' : ''}`}
+                  className={tmdbFilter === f ? 'active' : ''}
                   onClick={() => handleTmdbFilterChange(f)}
                 >
                   {f === 'all' && 'All'}
@@ -1028,638 +1006,627 @@ function MakerTools() {
       {activeTab === 'reminders' && <RemindersTab psdConfig={psdConfig} />}
 
       {showPsdConfigModal && (
-        <div className="modal-overlay">
-          <div className="modal-content schedule-modal">
-            <div className="modal-header">
-              <h2>TMDB Search/PSD Export Settings</h2>
-              <button className="modal-close" onClick={closePsdConfigModal}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="maker-card">
-                {/* Top half: toggle settings on the left, artwork export folders on the right. */}
-                <div className="psd-style-cols">
-                  <div>
-                    <div className="maker-setting-row">
-                      <div>
-                        <span style={{ fontWeight: 500 }}>Fit Poster Inside Border</span>
-                        <InfoTip>
-                          Default export fills the full canvas, top-aligned and never cropped (tall or wide
-                          art overhangs the canvas). Enable this to cover-fit posters into the
-                          bordered area (25px side borders, top-aligned) down to the template&apos;s bottom
-                          guide — the line where the bottom fade begins — scaling up so the art always
-                          reaches it (non-2:3 posters may overhang the side borders slightly, centered).
-                        </InfoTip>
-                      </div>
-                      <label className="toggle-switch" style={{ flexShrink: 0 }}>
-                        <input
-                          type="checkbox"
-                          checked={psdPosterFitBorder}
-                          onChange={(e) => setPsdPosterFitBorder(e.target.checked)}
-                        />
-                        <span className="toggle-slider" />
-                      </label>
+        <Modal onClose={closePsdConfigModal} size="xl" closeOnOverlay={false}>
+          <Modal.Header title="TMDB Search/PSD Export Settings" />
+          <Modal.Body>
+            <div className="maker-card">
+              {/* Top half: toggle settings on the left, artwork export folders on the right. */}
+              <div className="psd-style-cols">
+                <div>
+                  <div className="maker-setting-row">
+                    <div>
+                      <span className="fw-medium">Fit Poster Inside Border</span>
+                      <InfoTip>
+                        Default export fills the full canvas, top-aligned and never cropped (tall or wide
+                        art overhangs the canvas). Enable this to cover-fit posters into the
+                        bordered area (25px side borders, top-aligned) down to the template&apos;s bottom
+                        guide — the line where the bottom fade begins — scaling up so the art always
+                        reaches it (non-2:3 posters may overhang the side borders slightly, centered).
+                      </InfoTip>
                     </div>
-                    <div className="maker-setting-row">
-                      <div>
-                        <span style={{ fontWeight: 500 }}>Open After Export</span>
-                        <InfoTip>
-                          When enabled, exported PSD files automatically open in the selected Default Editor —
-                          Photopea in a new tab (requires PosterFlow to be accessible over HTTPS), or queued for
-                          the Photoshop panel. When disabled, exports just save to the export folder and the
-                          Pea/PS toggle is hidden on the maker cards. If no export folder is configured, files
-                          are saved temporarily to <code>/config/psd_cache</code>.
-                        </InfoTip>
-                      </div>
-                      <label className="toggle-switch" style={{ flexShrink: 0 }}>
-                        <input
-                          type="checkbox"
-                          checked={psdOpenPhotopea}
-                          onChange={(e) => setPsdOpenPhotopea(e.target.checked)}
-                        />
-                        <span className="toggle-slider" />
-                      </label>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={psdPosterFitBorder}
+                        onChange={(e) => setPsdPosterFitBorder(e.target.checked)}
+                      />
+                      <span className="toggle-slider" />
+                    </label>
+                  </div>
+                  <div className="maker-setting-row">
+                    <div>
+                      <span className="fw-medium">Open After Export</span>
+                      <InfoTip>
+                        When enabled, exported PSD files automatically open in the selected Default Editor —
+                        Photopea in a new tab (requires PosterFlow to be accessible over HTTPS), or queued for
+                        the Photoshop panel. When disabled, exports just save to the export folder and the
+                        Pea/PS toggle is hidden on the maker cards. If no export folder is configured, files
+                        are saved temporarily to <code>/config/psd_cache</code>.
+                      </InfoTip>
                     </div>
-                    {psdOpenPhotopea && (
-                      <>
-                        <div className="maker-setting-row">
-                          <div>
-                            <span style={{ fontWeight: 500 }}>Default Editor</span>
-                            <InfoTip>
-                              Where the export buttons send a saved PSD by default — the per-export Pea/PS toggle
-                              next to the export buttons starts on this choice. Photoshop mode queues the export for
-                              the Posterflow panel running inside Photoshop (it polls this server and opens the PSD
-                              itself); the panel needs its server connection configured.
-                            </InfoTip>
-                          </div>
-                          <div className="editor-choice">
-                            {([['photopea', 'Photopea'], ['photoshop', 'Photoshop']] as const).map(([val, label]) => (
-                              <label key={val}>
-                                <input
-                                  type="radio"
-                                  name="psd-default-editor"
-                                  checked={psdDefaultEditor === val}
-                                  onChange={() => setPsdDefaultEditor(val)}
-                                />
-                                {label}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          className="psd-ccx-link psd-ccx-link--row"
-                          title="Download the Posterflow panel for Photoshop — double-click the file to install it via Creative Cloud"
-                          onClick={() => { void downloadPhotoshopPlugin().catch((err) => showToast(getApiErrorMessage(err, 'Failed to download the plugin'), 'error')) }}
-                        >
-                          Download the Photoshop panel (.ccx)
-                        </button>
-                      </>
-                    )}
-                    {psdOpenPhotopea && (
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={psdOpenPhotopea}
+                        onChange={(e) => setPsdOpenPhotopea(e.target.checked)}
+                      />
+                      <span className="toggle-slider" />
+                    </label>
+                  </div>
+                  {psdOpenPhotopea && (
+          <>
                       <div className="maker-setting-row">
                         <div>
-                          <span style={{ fontWeight: 500 }}>Reuse one Photopea tab</span>
+                          <span className="fw-medium">Default Editor</span>
                           <InfoTip>
-                            When enabled, exports open as <strong>separate documents in a single Photopea tab</strong>
-                            {' '}instead of a new tab each time — handy for making one title in two styles side by side.
-                            The first export opens the tab; later exports are added to it (each still saves back to its
-                            own PSD). If you close that tab, the next export opens a fresh one.
+                            Where the export buttons send a saved PSD by default — the per-export Pea/PS toggle
+                            next to the export buttons starts on this choice. Photoshop mode queues the export for
+                            the Posterflow panel running inside Photoshop (it polls this server and opens the PSD
+                            itself); the panel needs its server connection configured.
                           </InfoTip>
                         </div>
-                        <label className="toggle-switch" style={{ flexShrink: 0 }}>
-                          <input
-                            type="checkbox"
-                            checked={psdSameTab}
-                            onChange={(e) => setPsdSameTab(e.target.checked)}
-                          />
-                          <span className="toggle-slider" />
-                        </label>
+                        <div className="editor-choice">
+                          {([['photopea', 'Photopea'], ['photoshop', 'Photoshop']] as const).map(([val, label]) => (
+                            <label key={val}>
+                              <input
+                                type="radio"
+                                name="psd-default-editor"
+                                checked={psdDefaultEditor === val}
+                                onChange={() => setPsdDefaultEditor(val)}
+                              />
+                              {label}
+                            </label>
+                          ))}
+                        </div>
                       </div>
-                    )}
-                    <div className="maker-setting-row">
-                      <div>
-                        <span style={{ fontWeight: 500 }}>Requests Upload Picks From Exports</span>
-                        <InfoTip>
-                          When on, the <strong>Upload</strong> button on a request card first lists posters
-                          already saved to the Poster Pull Folder and the Style Folders&apos; Image Export
-                          Folders, with the newest match for the request pre-selected. Turn off to open your
-                          browser&apos;s file dialog right away. Needs at least one of those folders set.
-                        </InfoTip>
-                      </div>
-                      <label className="toggle-switch" style={{ flexShrink: 0 }}>
-                        <input
-                          type="checkbox"
-                          checked={requestExportPicker}
-                          onChange={(e) => setRequestExportPicker(e.target.checked)}
-                        />
-                        <span className="toggle-slider" />
-                      </label>
-                    </div>
-                    <div className="maker-setting-row">
-                      <div>
-                        <span style={{ fontWeight: 500 }}>Requests Upload Adds to IDarr</span>
-                        <InfoTip>
-                          The same switch as <strong>Image Drop also adds to IDarr</strong> on the Requests page.
-                          When on, posters uploaded or dropped on a request card also go to your IDarr quick
-                          add folder and IDarr runs, like dropping files on the IDarr sidebar icon.
-                        </InfoTip>
-                      </div>
-                      <label className="toggle-switch" style={{ flexShrink: 0 }}>
-                        <input
-                          type="checkbox"
-                          checked={requestUpload.enabled}
-                          onChange={(e) => setRequestUpload((r) => ({ ...r, enabled: e.target.checked }))}
-                        />
-                        <span className="toggle-slider" />
-                      </label>
-                    </div>
-                    <div className="maker-setting-row">
-                      <div>
-                        <span style={{ fontWeight: 500 }}>Requests Upload Posts to Discord</span>
-                        <InfoTip>
-                          When on, uploads go to the request&apos;s Discord thread. Turn it off to add posters to
-                          IDarr only. It can only be off while <strong>Adds to IDarr</strong> is on, so an upload
-                          always does something; the choice is remembered while IDarr is off.
-                        </InfoTip>
-                      </div>
-                      <label className="toggle-switch" style={{ flexShrink: 0 }} title={requestUpload.enabled ? undefined : 'Turn on Adds to IDarr to post to IDarr only'}>
-                        <input
-                          type="checkbox"
-                          checked={!requestUpload.enabled || requestUpload.idarrAction === 'discord_idarr'}
-                          disabled={!requestUpload.enabled}
-                          onChange={(e) => setRequestUpload((r) => ({ ...r, idarrAction: e.target.checked ? 'discord_idarr' : 'idarr' }))}
-                        />
-                        <span className="toggle-slider" />
-                      </label>
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 600, margin: '0 0 0.5rem' }}>
-                      Artwork Export Folders
-                      <InfoTip>
-                        Power the maker cards&apos; green gallery buttons — logo/backdrop saves and the
-                        poster crop-into-square-art tool — which write files named for artwork drives
-                        (<code>Title (Year) {'{ids}'} - logo.png</code> / <code>- background.jpg</code> /{' '}
-                        <code>- squareart.jpg</code>). Leave a folder blank to hide its button.
-                      </InfoTip>
-                    </div>
-                    <label className="field-label">
-                      Logo Export Folder
-                      <InfoTip>
-                        Optional. Where the gallery&apos;s logo save button writes
-                        <code> - logo.png</code> files. Set an absolute container-side path
-                        (e.g. <code>/config/artwork/logos</code>). Separate from the CL2K panel logo
-                        folder below, which the Photopea/Photoshop <strong>Logo</strong> button uses.
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={artworkLogoExportFolder}
-                        onChange={(e) => setArtworkLogoExportFolder(e.target.value)}
-                        placeholder="(blank = no save button)"
-                      />
-                    </label>
-                    <label className="field-label">
-                      Background Export Folder
-                      <InfoTip>
-                        Optional. Where the gallery&apos;s backdrop save button writes
-                        <code> - background.jpg</code> files. Set an absolute container-side path
-                        (e.g. <code>/config/artwork/backgrounds</code>).
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={backgroundExportFolder}
-                        onChange={(e) => setBackgroundExportFolder(e.target.value)}
-                        placeholder="(blank = no save button)"
-                      />
-                    </label>
-                    <label className="field-label">
-                      Square Art Export Folder
-                      <InfoTip>
-                        Optional. Where the gallery&apos;s poster crop tool writes
-                        <code> - squareart.jpg</code> files. Set an absolute container-side path
-                        (e.g. <code>/config/artwork/squareart</code>).
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={squareartExportFolder}
-                        onChange={(e) => setSquareartExportFolder(e.target.value)}
-                        placeholder="(blank = no crop button)"
-                      />
-                    </label>
-                    <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>
-                      PSD Poster Pulls
-                      <InfoTip>
-                        For pulling the raw poster art layer <strong>out of</strong> an open PSD via the
-                        panels&apos; <strong>Poster</strong> button. This is NOT where finished posters
-                        land — the JPG button and batch exports use the Style Folders&apos; image export
-                        folders below.
-                      </InfoTip>
-                    </div>
-                    <label className="field-label">
-                      Poster Pull Folder
-                      <InfoTip>
-                        Optional. Where the panels&apos; <strong>Poster</strong> button saves the SELECTED
-                        poster layer(s) as JPGs, named by tag —
-                        <code> Title (Year) {'{ids}'}.jpg</code>, or <code>- Season N</code> /{' '}
-                        <code>- Specials</code> for s1/s2/s0 layers. When blank, the panels fall back
-                        to a browser download.
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={posterExportFolder}
-                        onChange={(e) => setPosterExportFolder(e.target.value)}
-                        placeholder="(blank = download)"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>
-                  Style Folders
-                  <InfoTip>
-                    Exports are routed by the request's poster style — a <strong>CL2K</strong> request uses
-                    the CL2K settings, an <strong>MM2K</strong> request uses the MM2K settings. Plain TMDB
-                    searches (no style tag) default to <strong>CL2K</strong>. Any folder left blank falls
-                    back to a browser download for that style.
-                  </InfoTip>
-                </div>
-                <div className="psd-style-cols">
-                  {!hiddenStyles.has('CL2K') && (
-                  <div>
-                    <div style={{ fontWeight: 600, margin: '0 0 0.5rem', color: '#3fae62' }}>CL2K</div>
-                    <label className="field-label">
-                      PSD Export Folder
-                      <InfoTip>
-                        Optional. When set, exported CL2K PSD files are saved to this folder instead of
-                        downloading to your browser. Must be an absolute container-side path
-                        (e.g. <code>/config/psd_exports</code>). Leave blank for download-only — except with
-                        Open After Export enabled, where a blank path saves to <code>/config/psd_cache</code>
-                        instead (Photopea and the Photoshop panel both load from and save back to that folder).
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={psdExportFolder}
-                        onChange={(e) => setPsdExportFolder(e.target.value)}
-                        placeholder="/config/psd_exports"
-                      />
-                    </label>
-                    <label className="field-label">
-                      Image Export Folder
-                      <InfoTip>
-                        Optional. Where CL2K images exported with the panel's in-box <strong>JPG</strong> button
-                        land. Set an absolute container-side path (e.g. <code>/config/poster_jpgs</code>).
-                        When blank, Photopea falls back to downloading images in your browser, and the
-                        Photoshop panel falls back to its own local save folder (it asks once and remembers).
-                        PSDs opened locally in Photoshop always use the panel's folder and ignore this
-                        setting. Photopea's own
-                        Export As (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={psdImageExportFolder}
-                        onChange={(e) => setPsdImageExportFolder(e.target.value)}
-                        placeholder="(blank = download)"
-                      />
-                    </label>
-                    <label className="field-label">
-                      PSD Template File
-                      <InfoTip>
-                        Override the bundled CL2K default PSD template with your own. Provide an absolute
-                        container-side path to a <code>.psd</code> file (e.g. <code>/config/cl2k_template.psd</code>).
-                        The poster image is injected into the <strong>POSTER</strong> group and the logo into
-                        the <strong>LOGO</strong> group. Leave blank to use the built-in default template.
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={psdTemplatePath}
-                        onChange={(e) => setPsdTemplatePath(e.target.value)}
-                        placeholder="/config/cl2k_template.psd"
-                      />
-                    </label>
-                    <label className="field-label">
-                      Logo Export Folder
-                      <InfoTip>
-                        Optional. Where the panel's in-box <strong>Logo</strong> button saves the PSD's
-                        <strong> LOGO</strong> group as a trimmed transparent PNG (named like the poster). Set an
-                        absolute container-side path (e.g. <code>/config/logos</code>). When blank, Photopea
-                        falls back to a browser download, and the Photoshop panel falls back to its own local
-                        logo folder (it asks once and remembers). CL2K only — MM2K templates have no LOGO
-                        group.
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={logoExportFolder}
-                        onChange={(e) => setLogoExportFolder(e.target.value)}
-                        placeholder="(blank = download)"
-                      />
-                    </label>
-                  </div>
+                      <button
+                        type="button"
+                        className="btn-link psd-ccx-link--row"
+                        title="Download the Posterflow panel for Photoshop — double-click the file to install it via Creative Cloud"
+                        onClick={() => { void downloadPhotoshopPlugin().catch((err) => showToast(getApiErrorMessage(err, 'Failed to download the plugin'), 'error')) }}
+                      >
+                        Download the Photoshop panel (.ccx)
+                      </button>
+                    </>
                   )}
-                  {!hiddenStyles.has('MM2K') && (
-                  <div>
-                    <div style={{ fontWeight: 600, margin: '0 0 0.5rem', color: '#5a86f0' }}>MM2K</div>
-                    <label className="field-label">
-                      PSD Export Folder
+                  {psdOpenPhotopea && (
+                    <div className="maker-setting-row">
+                      <div>
+                        <span className="fw-medium">Reuse one Photopea tab</span>
+                        <InfoTip>
+                          When enabled, exports open as <strong>separate documents in a single Photopea tab</strong>
+                          {' '}instead of a new tab each time — handy for making one title in two styles side by side.
+                          The first export opens the tab; later exports are added to it (each still saves back to its
+                          own PSD). If you close that tab, the next export opens a fresh one.
+                        </InfoTip>
+                      </div>
+                      <label className="toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={psdSameTab}
+                          onChange={(e) => setPsdSameTab(e.target.checked)}
+                        />
+                        <span className="toggle-slider" />
+                      </label>
+                    </div>
+                  )}
+                  <div className="maker-setting-row">
+                    <div>
+                      <span className="fw-medium">Requests Upload Picks From Exports</span>
                       <InfoTip>
-                        Optional. When set, exported MM2K PSD files are saved to this folder instead of
-                        downloading to your browser. Must be an absolute container-side path
-                        (e.g. <code>/config/psd_exports_mm2k</code>). Leave blank for download-only — except with
-                        Open After Export enabled, where a blank path saves to <code>/config/psd_cache</code>
-                        instead (Photopea and the Photoshop panel both load from and save back to that folder).
+                        When on, the <strong>Upload</strong> button on a request card first lists posters
+                        already saved to the Poster Pull Folder and the Style Folders&apos; Image Export
+                        Folders, with the newest match for the request pre-selected. Turn off to open your
+                        browser&apos;s file dialog right away. Needs at least one of those folders set.
                       </InfoTip>
+                    </div>
+                    <label className="toggle-switch">
                       <input
-                        type="text"
-                        value={psdExportFolderMm2k}
-                        onChange={(e) => setPsdExportFolderMm2k(e.target.value)}
-                        placeholder="/config/psd_exports_mm2k"
+                        type="checkbox"
+                        checked={requestExportPicker}
+                        onChange={(e) => setRequestExportPicker(e.target.checked)}
                       />
-                    </label>
-                    <label className="field-label">
-                      Image Export Folder
-                      <InfoTip>
-                        Optional. Where MM2K images exported with the panel's in-box <strong>JPG</strong> button
-                        land. Set an absolute container-side path (e.g. <code>/config/poster_jpgs_mm2k</code>).
-                        When blank, Photopea falls back to downloading images in your browser, and the
-                        Photoshop panel falls back to its own local save folder (it asks once and remembers).
-                        PSDs opened locally in Photoshop always use the panel's folder and ignore this
-                        setting. Photopea's own
-                        Export As (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={psdImageExportFolderMm2k}
-                        onChange={(e) => setPsdImageExportFolderMm2k(e.target.value)}
-                        placeholder="(blank = download)"
-                      />
-                    </label>
-                    <label className="field-label">
-                      PSD Template File
-                      <InfoTip>
-                        Override the bundled MM2K default PSD template with your own. Provide an absolute
-                        container-side path to a <code>.psd</code> file (e.g. <code>/config/mm2k_template.psd</code>).
-                        The poster image is injected into the <strong>POSTER</strong> group (MM2K templates use
-                        text titles, not a <strong>LOGO</strong> group). Leave blank to use the built-in MM2K
-                        default template.
-                      </InfoTip>
-                      <input
-                        type="text"
-                        value={psdTemplatePathMm2k}
-                        onChange={(e) => setPsdTemplatePathMm2k(e.target.value)}
-                        placeholder="/config/mm2k_template.psd"
-                      />
+                      <span className="toggle-slider" />
                     </label>
                   </div>
-                  )}
+                  <div className="maker-setting-row">
+                    <div>
+                      <span className="fw-medium">Requests Upload Adds to IDarr</span>
+                      <InfoTip>
+                        The same switch as <strong>Image Drop also adds to IDarr</strong> on the Requests page.
+                        When on, posters uploaded or dropped on a request card also go to your IDarr quick
+                        add folder and IDarr runs, like dropping files on the IDarr sidebar icon.
+                      </InfoTip>
+                    </div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={requestUpload.enabled}
+                        onChange={(e) => setRequestUpload((r) => ({ ...r, enabled: e.target.checked }))}
+                      />
+                      <span className="toggle-slider" />
+                    </label>
+                  </div>
+                  <div className="maker-setting-row">
+                    <div>
+                      <span className="fw-medium">Requests Upload Posts to Discord</span>
+                      <InfoTip>
+                        When on, uploads go to the request&apos;s Discord thread. Turn it off to add posters to
+                        IDarr only. It can only be off while <strong>Adds to IDarr</strong> is on, so an upload
+                        always does something; the choice is remembered while IDarr is off.
+                      </InfoTip>
+                    </div>
+                    <label className="toggle-switch" title={requestUpload.enabled ? undefined : 'Turn on Adds to IDarr to post to IDarr only'}>
+                      <input
+                        type="checkbox"
+                        checked={!requestUpload.enabled || requestUpload.idarrAction === 'discord_idarr'}
+                        disabled={!requestUpload.enabled}
+                        onChange={(e) => setRequestUpload((r) => ({ ...r, idarrAction: e.target.checked ? 'discord_idarr' : 'idarr' }))}
+                      />
+                      <span className="toggle-slider" />
+                    </label>
+                  </div>
                 </div>
-
-
+                <div>
+                  <div className="maker-subhead">
+                    Artwork Export Folders
+                    <InfoTip>
+                      Power the maker cards&apos; green gallery buttons — logo/backdrop saves and the
+                      poster crop-into-square-art tool — which write files named for artwork drives
+                      (<code>Title (Year) {'{ids}'} - logo.png</code> / <code>- background.jpg</code> /{' '}
+                      <code>- squareart.jpg</code>). Leave a folder blank to hide its button.
+                    </InfoTip>
+                  </div>
+                  <label className="field-label">
+                    Logo Export Folder
+                    <InfoTip>
+                      Optional. Where the gallery&apos;s logo save button writes
+                      <code> - logo.png</code> files. Set an absolute container-side path
+                      (e.g. <code>/config/artwork/logos</code>). Separate from the CL2K panel logo
+                      folder below, which the Photopea/Photoshop <strong>Logo</strong> button uses.
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={artworkLogoExportFolder}
+                      onChange={(e) => setArtworkLogoExportFolder(e.target.value)}
+                      placeholder="(blank = no save button)"
+                    />
+                  </label>
+                  <label className="field-label">
+                    Background Export Folder
+                    <InfoTip>
+                      Optional. Where the gallery&apos;s backdrop save button writes
+                      <code> - background.jpg</code> files. Set an absolute container-side path
+                      (e.g. <code>/config/artwork/backgrounds</code>).
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={backgroundExportFolder}
+                      onChange={(e) => setBackgroundExportFolder(e.target.value)}
+                      placeholder="(blank = no save button)"
+                    />
+                  </label>
+                  <label className="field-label">
+                    Square Art Export Folder
+                    <InfoTip>
+                      Optional. Where the gallery&apos;s poster crop tool writes
+                      <code> - squareart.jpg</code> files. Set an absolute container-side path
+                      (e.g. <code>/config/artwork/squareart</code>).
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={squareartExportFolder}
+                      onChange={(e) => setSquareartExportFolder(e.target.value)}
+                      placeholder="(blank = no crop button)"
+                    />
+                  </label>
+                  <div className="maker-subhead maker-subhead--spaced">
+                    PSD Poster Pulls
+                    <InfoTip>
+                      For pulling the raw poster art layer <strong>out of</strong> an open PSD via the
+                      panels&apos; <strong>Poster</strong> button. This is NOT where finished posters
+                      land — the JPG button and batch exports use the Style Folders&apos; image export
+                      folders below.
+                    </InfoTip>
+                  </div>
+                  <label className="field-label">
+                    Poster Pull Folder
+                    <InfoTip>
+                      Optional. Where the panels&apos; <strong>Poster</strong> button saves the SELECTED
+                      poster layer(s) as JPGs, named by tag —
+                      <code> Title (Year) {'{ids}'}.jpg</code>, or <code>- Season N</code> /{' '}
+                      <code>- Specials</code> for s1/s2/s0 layers. When blank, the panels fall back
+                      to a browser download.
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={posterExportFolder}
+                      onChange={(e) => setPosterExportFolder(e.target.value)}
+                      placeholder="(blank = download)"
+                    />
+                  </label>
+                </div>
               </div>
+
+              <div className="maker-subhead maker-subhead--spaced">
+                Style Folders
+                <InfoTip>
+                  Exports are routed by the request's poster style — a <strong>CL2K</strong> request uses
+                  the CL2K settings, an <strong>MM2K</strong> request uses the MM2K settings. Plain TMDB
+                  searches (no style tag) default to <strong>CL2K</strong>. Any folder left blank falls
+                  back to a browser download for that style.
+                </InfoTip>
+              </div>
+              <div className="psd-style-cols">
+                {!hiddenStyles.has('CL2K') && (
+                <div>
+                  <div className="maker-subhead text-accent">CL2K</div>
+                  <label className="field-label">
+                    PSD Export Folder
+                    <InfoTip>
+                      Optional. When set, exported CL2K PSD files are saved to this folder instead of
+                      downloading to your browser. Must be an absolute container-side path
+                      (e.g. <code>/config/psd_exports</code>). Leave blank for download-only — except with
+                      Open After Export enabled, where a blank path saves to <code>/config/psd_cache</code>
+                      instead (Photopea and the Photoshop panel both load from and save back to that folder).
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={psdExportFolder}
+                      onChange={(e) => setPsdExportFolder(e.target.value)}
+                      placeholder="/config/psd_exports"
+                    />
+                  </label>
+                  <label className="field-label">
+                    Image Export Folder
+                    <InfoTip>
+                      Optional. Where CL2K images exported with the panel's in-box <strong>JPG</strong> button
+                      land. Set an absolute container-side path (e.g. <code>/config/poster_jpgs</code>).
+                      When blank, Photopea falls back to downloading images in your browser, and the
+                      Photoshop panel falls back to its own local save folder (it asks once and remembers).
+                      PSDs opened locally in Photoshop always use the panel's folder and ignore this
+                      setting. Photopea's own
+                      Export As (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={psdImageExportFolder}
+                      onChange={(e) => setPsdImageExportFolder(e.target.value)}
+                      placeholder="(blank = download)"
+                    />
+                  </label>
+                  <label className="field-label">
+                    PSD Template File
+                    <InfoTip>
+                      Override the bundled CL2K default PSD template with your own. Provide an absolute
+                      container-side path to a <code>.psd</code> file (e.g. <code>/config/cl2k_template.psd</code>).
+                      The poster image is injected into the <strong>POSTER</strong> group and the logo into
+                      the <strong>LOGO</strong> group. Leave blank to use the built-in default template.
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={psdTemplatePath}
+                      onChange={(e) => setPsdTemplatePath(e.target.value)}
+                      placeholder="/config/cl2k_template.psd"
+                    />
+                  </label>
+                  <label className="field-label">
+                    Logo Export Folder
+                    <InfoTip>
+                      Optional. Where the panel's in-box <strong>Logo</strong> button saves the PSD's
+                      <strong> LOGO</strong> group as a trimmed transparent PNG (named like the poster). Set an
+                      absolute container-side path (e.g. <code>/config/logos</code>). When blank, Photopea
+                      falls back to a browser download, and the Photoshop panel falls back to its own local
+                      logo folder (it asks once and remembers). CL2K only — MM2K templates have no LOGO
+                      group.
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={logoExportFolder}
+                      onChange={(e) => setLogoExportFolder(e.target.value)}
+                      placeholder="(blank = download)"
+                    />
+                  </label>
+                </div>
+                )}
+                {!hiddenStyles.has('MM2K') && (
+                <div>
+                  <div className="maker-subhead text-success">MM2K</div>
+                  <label className="field-label">
+                    PSD Export Folder
+                    <InfoTip>
+                      Optional. When set, exported MM2K PSD files are saved to this folder instead of
+                      downloading to your browser. Must be an absolute container-side path
+                      (e.g. <code>/config/psd_exports_mm2k</code>). Leave blank for download-only — except with
+                      Open After Export enabled, where a blank path saves to <code>/config/psd_cache</code>
+                      instead (Photopea and the Photoshop panel both load from and save back to that folder).
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={psdExportFolderMm2k}
+                      onChange={(e) => setPsdExportFolderMm2k(e.target.value)}
+                      placeholder="/config/psd_exports_mm2k"
+                    />
+                  </label>
+                  <label className="field-label">
+                    Image Export Folder
+                    <InfoTip>
+                      Optional. Where MM2K images exported with the panel's in-box <strong>JPG</strong> button
+                      land. Set an absolute container-side path (e.g. <code>/config/poster_jpgs_mm2k</code>).
+                      When blank, Photopea falls back to downloading images in your browser, and the
+                      Photoshop panel falls back to its own local save folder (it asks once and remembers).
+                      PSDs opened locally in Photoshop always use the panel's folder and ignore this
+                      setting. Photopea's own
+                      Export As (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={psdImageExportFolderMm2k}
+                      onChange={(e) => setPsdImageExportFolderMm2k(e.target.value)}
+                      placeholder="(blank = download)"
+                    />
+                  </label>
+                  <label className="field-label">
+                    PSD Template File
+                    <InfoTip>
+                      Override the bundled MM2K default PSD template with your own. Provide an absolute
+                      container-side path to a <code>.psd</code> file (e.g. <code>/config/mm2k_template.psd</code>).
+                      The poster image is injected into the <strong>POSTER</strong> group (MM2K templates use
+                      text titles, not a <strong>LOGO</strong> group). Leave blank to use the built-in MM2K
+                      default template.
+                    </InfoTip>
+                    <input
+                      type="text"
+                      value={psdTemplatePathMm2k}
+                      onChange={(e) => setPsdTemplatePathMm2k(e.target.value)}
+                      placeholder="/config/mm2k_template.psd"
+                    />
+                  </label>
+                </div>
+                )}
+              </div>
+
+
             </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={closePsdConfigModal} disabled={saving}>
-                Cancel
-              </button>
-              <button className="btn-primary" onClick={handleSavePsdConfig} disabled={saving} style={{ justifyContent: 'center' }}>
-                <Save size={16} /> {saving ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={closePsdConfigModal} disabled={saving}>
+              Cancel
+            </button>
+            <button className="btn-primary" onClick={handleSavePsdConfig} disabled={saving}>
+              <Save size={16} /> {saving ? 'Saving...' : 'Save'}
+            </button>
+          </Modal.Footer>
+        </Modal>
       )}
 
       {showConfigModal && (
-        <div className="modal-overlay">
-          <div className="modal-content schedule-modal">
-            <div className="modal-header">
-              <h2>Monitor Configuration</h2>
-              <button className="modal-close" onClick={closeConfigModal}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="maker-grid">
-                <div className="maker-card">
-                  <h3>General</h3>
-                  <p style={{ margin: '0.25rem 0 0.75rem', fontSize: '0.8rem', color: '#888' }}>
-                    TMDB and TheTVDB API keys are managed in{' '}
-                    <a
-                      href="/settings"
-                      onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
-                      style={{ color: '#64b5f6' }}
-                    >
-                      Settings → General → API Keys
-                    </a>
-                    . With a TheTVDB key, season numbers and premiere dates come from TheTVDB — the same source Sonarr uses — and
-                    TMDB fills in show details or steps in when TheTVDB can't answer. Shows marked ended are skipped and re-checked
-                    every 30 days, and a re-check looks back over the days it skipped.
-                  </p>
-                  <label className="field-label">
-                    Lookahead Days
-                    <input
-                      type="number"
-                      min={1}
-                      value={Number.isFinite(modalConfig.lookahead_days) ? modalConfig.lookahead_days : ''}
-                      onChange={(event) => {
-                        const rawValue = event.target.value
-                        if (rawValue.trim() === '') {
-                          setModalConfig((previous) => ({
-                            ...previous,
-                            lookahead_days: Number.NaN,
-                          }))
-                          return
-                        }
-
-                        const nextValue = Number(rawValue)
+        <Modal onClose={closeConfigModal} size="xl" closeOnOverlay={false}>
+          <Modal.Header title="Monitor Configuration" />
+          <Modal.Body>
+            <div className="maker-grid">
+              <div className="maker-card">
+                <h3>General</h3>
+                <p className="field-hint mb-md">
+                  TMDB and TheTVDB API keys are managed in{' '}
+                  <a
+                    href="/settings"
+                    onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
+                  >
+                    Settings → General → API Keys
+                  </a>
+                  . With a TheTVDB key, season numbers and premiere dates come from TheTVDB — the same source Sonarr uses — and
+                  TMDB fills in show details or steps in when TheTVDB can't answer. Shows marked ended are skipped and re-checked
+                  every 30 days, and a re-check looks back over the days it skipped.
+                </p>
+                <label className="field-label">
+                  Lookahead Days
+                  <input
+                    type="number"
+                    min={1}
+                    value={Number.isFinite(modalConfig.lookahead_days) ? modalConfig.lookahead_days : ''}
+                    onChange={(event) => {
+                      const rawValue = event.target.value
+                      if (rawValue.trim() === '') {
                         setModalConfig((previous) => ({
                           ...previous,
-                          lookahead_days: Number.isFinite(nextValue) && nextValue > 0 ? nextValue : previous.lookahead_days,
+                          lookahead_days: Number.NaN,
                         }))
-                      }}
-                    />
-                  </label>
-                  <label className="field-label">
-                    Missing Retention Days
-                    <input
-                      type="number"
-                      min={0}
-                      value={Number.isFinite(modalConfig.missing_retention_days) ? modalConfig.missing_retention_days : ''}
-                      onChange={(event) => {
-                        const rawValue = event.target.value
-                        if (rawValue.trim() === '') {
-                          setModalConfig((previous) => ({
-                            ...previous,
-                            missing_retention_days: Number.NaN,
-                          }))
-                          return
-                        }
-
-                        const nextValue = Number(rawValue)
-                        setModalConfig((previous) => ({
-                          ...previous,
-                          missing_retention_days: Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : previous.missing_retention_days,
-                        }))
-                      }}
-                    />
-                    <small className="muted">Keeps missing season premieres visible from previous runs for this many days. 0 = disable carryover.</small>
-                  </label>
-                  <label className="maker-checkbox-row">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(modalConfig.enable_discovery)}
-                      onChange={(event) => setModalConfig((previous) => ({ ...previous, enable_discovery: event.target.checked }))}
-                    />
-                    <span>
-                      Enable New Releases discovery
-                      <small className="muted" style={{ display: 'block', marginTop: '2px' }}>Monitor upcoming movie and TV show releases. Adds a tab alongside monitored drives for browsing new and upcoming TMDB titles.</small>
-                    </span>
-                  </label>
-                </div>
-
-                <div className="maker-card">
-                  <div className="maker-card-header-row">
-                    <h3>Monitor Drives</h3>
-                    <button className="btn-toolbar" type="button" onClick={addDriveSelection}>
-                      <Plus size={16} /> Add Drive
-                    </button>
-                  </div>
-                  <div className="maker-list">
-                    {modalConfig.drive_ids.length === 0 && <p className="muted">No monitor drives selected.</p>}
-                    {modalConfig.drive_ids.map((driveId, index) => {
-                      const disabledIds = new Set(selectedDriveIdSet)
-                      if (driveId > 0) {
-                        disabledIds.delete(driveId)
+                        return
                       }
 
-                      return (
-                        <div className="maker-list-item maker-drive-item" key={`drive-${index}`}>
-                          <select
-                            value={driveId > 0 ? String(driveId) : ''}
-                            onChange={(event) => updateDriveSelection(index, Number(event.target.value))}
-                          >
-                            <option value="">Select a synced drive...</option>
-                            {availableDrives.map((drive) => (
-                              <option key={drive.id} value={drive.id} disabled={disabledIds.has(drive.id)}>
-                                {drive.display_name || drive.name} ({drive.style_type})
-                              </option>
-                            ))}
-                          </select>
-                          <button className="btn-toolbar btn-danger" type="button" onClick={() => removeDriveSelection(index)}>
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      )
-                    })}
-                    {availableDrives.length === 0 && (
-                      <p className="muted">No drives available.</p>
-                    )}
-                  </div>
+                      const nextValue = Number(rawValue)
+                      setModalConfig((previous) => ({
+                        ...previous,
+                        lookahead_days: Number.isFinite(nextValue) && nextValue > 0 ? nextValue : previous.lookahead_days,
+                      }))
+                    }}
+                  />
+                </label>
+                <label className="field-label">
+                  Missing Retention Days
+                  <input
+                    type="number"
+                    min={0}
+                    value={Number.isFinite(modalConfig.missing_retention_days) ? modalConfig.missing_retention_days : ''}
+                    onChange={(event) => {
+                      const rawValue = event.target.value
+                      if (rawValue.trim() === '') {
+                        setModalConfig((previous) => ({
+                          ...previous,
+                          missing_retention_days: Number.NaN,
+                        }))
+                        return
+                      }
+
+                      const nextValue = Number(rawValue)
+                      setModalConfig((previous) => ({
+                        ...previous,
+                        missing_retention_days: Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : previous.missing_retention_days,
+                      }))
+                    }}
+                  />
+                  <small className="text-dim">Keeps missing season premieres visible from previous runs for this many days. 0 = disable carryover.</small>
+                </label>
+                <label className="maker-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(modalConfig.enable_discovery)}
+                    onChange={(event) => setModalConfig((previous) => ({ ...previous, enable_discovery: event.target.checked }))}
+                  />
+                  <span>
+                    Enable New Releases discovery
+                    <small className="text-dim block">Monitor upcoming movie and TV show releases. Adds a tab alongside monitored drives for browsing new and upcoming TMDB titles.</small>
+                  </span>
+                </label>
+              </div>
+
+              <div className="maker-card">
+                <div className="maker-card-header-row">
+                  <h3>Monitor Drives</h3>
+                  <button className="btn-toolbar" type="button" onClick={addDriveSelection}>
+                    <Plus size={16} /> Add Drive
+                  </button>
                 </div>
+                <div className="maker-list">
+                  {modalConfig.drive_ids.length === 0 && <p className="text-dim">No monitor drives selected.</p>}
+                  {modalConfig.drive_ids.map((driveId, index) => {
+                    const disabledIds = new Set(selectedDriveIdSet)
+                    if (driveId > 0) {
+                      disabledIds.delete(driveId)
+                    }
 
-                <div className="maker-card">
-                  <h3>Discovery</h3>
-                  <label className="field-label">
-                    Minimum Popularity
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      value={Number.isFinite(modalConfig.discovery_popularity) ? modalConfig.discovery_popularity : ''}
-                      onChange={(event) => {
-                        const rawValue = event.target.value
-                        if (rawValue.trim() === '') {
-                          setModalConfig((previous) => ({
-                            ...previous,
-                            discovery_popularity: Number.NaN,
-                          }))
-                          return
-                        }
-
-                        const nextValue = Number(rawValue)
-                        setModalConfig((previous) => ({
-                          ...previous,
-                          discovery_popularity: Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : previous.discovery_popularity,
-                        }))
-                      }}
-                    />
-                  </label>
-                  <label className="field-label">
-                    Minimum Vote Count
-                    <input
-                      type="number"
-                      min={0}
-                      value={Number.isFinite(modalConfig.discovery_vote_count) ? modalConfig.discovery_vote_count : ''}
-                      onChange={(event) => {
-                        const rawValue = event.target.value
-                        if (rawValue.trim() === '') {
-                          setModalConfig((previous) => ({
-                            ...previous,
-                            discovery_vote_count: Number.NaN,
-                          }))
-                          return
-                        }
-
-                        const nextValue = Number(rawValue)
-                        setModalConfig((previous) => ({
-                          ...previous,
-                          discovery_vote_count: Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : previous.discovery_vote_count,
-                        }))
-                      }}
-                    />
-                  </label>
-                  <label className="field-label">
-                    Max Results Per Language
-                    <input
-                      type="number"
-                      min={1}
-                      value={Number.isFinite(modalConfig.discovery_max_results) ? modalConfig.discovery_max_results : ''}
-                      onChange={(event) => {
-                        const rawValue = event.target.value
-                        if (rawValue.trim() === '') {
-                          setModalConfig((previous) => ({
-                            ...previous,
-                            discovery_max_results: Number.NaN,
-                          }))
-                          return
-                        }
-
-                        const nextValue = Number(rawValue)
-                        setModalConfig((previous) => ({
-                          ...previous,
-                          discovery_max_results: Number.isFinite(nextValue) && nextValue > 0 ? nextValue : previous.discovery_max_results,
-                        }))
-                      }}
-                    />
-                  </label>
-                  <label className="field-label">
-                    <span className="maker-label-row">
-                      Languages (comma-separated)
-                      <button
-                        type="button"
-                        className="maker-help-button"
-                        aria-label="Available language codes: en (English), ko (Korean), ja (Japanese), zh (Chinese), es (Spanish), fr (French), de (German), it (Italian), ru (Russian), hi (Hindi), th (Thai)"
-                        title="Available: en (English), ko (Korean), ja (Japanese), zh (Chinese), es (Spanish), fr (French), de (German), it (Italian), ru (Russian), hi (Hindi), th (Thai)"
-                      >
-                        <CircleHelp size={14} />
-                      </button>
-                    </span>
-                    <input
-                      type="text"
-                      value={modalDiscoveryLanguagesInput}
-                      onChange={(event) => updateDiscoveryLanguages(event.target.value)}
-                      placeholder="en, ko, ja, zh, es"
-                    />
-                  </label>
+                    return (
+                      <div className="maker-list-item maker-drive-item" key={`drive-${index}`}>
+                        <select
+                          value={driveId > 0 ? String(driveId) : ''}
+                          onChange={(event) => updateDriveSelection(index, Number(event.target.value))}
+                        >
+                          <option value="">Select a synced drive...</option>
+                          {availableDrives.map((drive) => (
+                            <option key={drive.id} value={drive.id} disabled={disabledIds.has(drive.id)}>
+                              {drive.display_name || drive.name} ({drive.style_type})
+                            </option>
+                          ))}
+                        </select>
+                        <button className="btn-icon btn-icon-filled btn-icon-danger" type="button" onClick={() => removeDriveSelection(index)} title="Remove this drive">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {availableDrives.length === 0 && (
+                    <p className="text-dim">No drives available.</p>
+                  )}
                 </div>
               </div>
+
+              <div className="maker-card">
+                <h3>Discovery</h3>
+                <label className="field-label">
+                  Minimum Popularity
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    value={Number.isFinite(modalConfig.discovery_popularity) ? modalConfig.discovery_popularity : ''}
+                    onChange={(event) => {
+                      const rawValue = event.target.value
+                      if (rawValue.trim() === '') {
+                        setModalConfig((previous) => ({
+                          ...previous,
+                          discovery_popularity: Number.NaN,
+                        }))
+                        return
+                      }
+
+                      const nextValue = Number(rawValue)
+                      setModalConfig((previous) => ({
+                        ...previous,
+                        discovery_popularity: Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : previous.discovery_popularity,
+                      }))
+                    }}
+                  />
+                </label>
+                <label className="field-label">
+                  Minimum Vote Count
+                  <input
+                    type="number"
+                    min={0}
+                    value={Number.isFinite(modalConfig.discovery_vote_count) ? modalConfig.discovery_vote_count : ''}
+                    onChange={(event) => {
+                      const rawValue = event.target.value
+                      if (rawValue.trim() === '') {
+                        setModalConfig((previous) => ({
+                          ...previous,
+                          discovery_vote_count: Number.NaN,
+                        }))
+                        return
+                      }
+
+                      const nextValue = Number(rawValue)
+                      setModalConfig((previous) => ({
+                        ...previous,
+                        discovery_vote_count: Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : previous.discovery_vote_count,
+                      }))
+                    }}
+                  />
+                </label>
+                <label className="field-label">
+                  Max Results Per Language
+                  <input
+                    type="number"
+                    min={1}
+                    value={Number.isFinite(modalConfig.discovery_max_results) ? modalConfig.discovery_max_results : ''}
+                    onChange={(event) => {
+                      const rawValue = event.target.value
+                      if (rawValue.trim() === '') {
+                        setModalConfig((previous) => ({
+                          ...previous,
+                          discovery_max_results: Number.NaN,
+                        }))
+                        return
+                      }
+
+                      const nextValue = Number(rawValue)
+                      setModalConfig((previous) => ({
+                        ...previous,
+                        discovery_max_results: Number.isFinite(nextValue) && nextValue > 0 ? nextValue : previous.discovery_max_results,
+                      }))
+                    }}
+                  />
+                </label>
+                <label className="field-label">
+                  <span className="maker-label-row">
+                    Languages (comma-separated)
+                    <button
+                      type="button"
+                      className="maker-help-button"
+                      aria-label="Available language codes: en (English), ko (Korean), ja (Japanese), zh (Chinese), es (Spanish), fr (French), de (German), it (Italian), ru (Russian), hi (Hindi), th (Thai)"
+                      title="Available: en (English), ko (Korean), ja (Japanese), zh (Chinese), es (Spanish), fr (French), de (German), it (Italian), ru (Russian), hi (Hindi), th (Thai)"
+                    >
+                      <CircleHelp size={14} />
+                    </button>
+                  </span>
+                  <input
+                    type="text"
+                    value={modalDiscoveryLanguagesInput}
+                    onChange={(event) => updateDiscoveryLanguages(event.target.value)}
+                    placeholder="en, ko, ja, zh, es"
+                  />
+                </label>
+              </div>
             </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={closeConfigModal} disabled={saving}>
-                Cancel
-              </button>
-              <button className="btn-primary" onClick={handleSaveConfig} disabled={saving || loading} style={{ justifyContent: 'center' }}>
-                <Save size={16} /> {saving ? 'Saving...' : 'Save Configuration'}
-              </button>
-            </div>
-          </div>
-        </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={closeConfigModal} disabled={saving}>
+              Cancel
+            </button>
+            <button className="btn-primary" onClick={handleSaveConfig} disabled={saving || loading}>
+              <Save size={16} /> {saving ? 'Saving...' : 'Save Configuration'}
+            </button>
+          </Modal.Footer>
+        </Modal>
       )}
     </div>
   )

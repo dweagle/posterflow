@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { Eye, Play, Save, UploadCloud, Plus, Trash2, FolderOpen, Search, RotateCw, Info, ChevronDown, ChevronRight, AlertTriangle, FileImage } from 'lucide-react'
+import { Eye, Play, UploadCloud, Plus, Trash2, FolderOpen, Search, RotateCw, Info, ChevronDown, ChevronRight, AlertTriangle, FileImage } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import IDarrTabs, { IDarrTab } from '../components/IDarr/IDarrTabs'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -47,6 +47,8 @@ import {
   setIdarrSyncTargets,
   refreshIdarrSyncTargets,
 } from '../hooks/useIdarrSyncTarget'
+import Modal from '../components/Modal'
+import SaveActions from '../components/SaveActions'
 
 const IDARR_TAB_STORAGE_KEY = 'posterflow.idarr.activeTab'
 // Pending matches are paginated
@@ -924,9 +926,14 @@ function IDarr() {
     setActiveTab(nextTab)
   }
 
-  const handleDiscardChanges = () => {
+  // Drop every unsaved edit and go back to the saved config.
+  const discardSettingsEdits = () => {
     setConfig(cloneIdarrConfig(originalConfigRef.current))
     setHasUnsavedSettings(false)
+  }
+
+  const handleDiscardChanges = () => {
+    discardSettingsEdits()
     if (pendingTabChange) {
       setActiveTab(pendingTabChange)
       setPendingTabChange(null)
@@ -1461,13 +1468,13 @@ const {
             <div className="field-group field-group-toggle">
               <label>
                 <span>Show in Poster Workflow</span>
-                <span className="idarr-toggle-control" style={{ flexShrink: 0 }}>
+                <span className="toggle-switch">
                   <input
                     type="checkbox"
                     checked={Boolean(config.show_in_workflow)}
                     onChange={(e) => updateConfig('show_in_workflow', e.target.checked)}
                   />
-                  <span className="idarr-toggle-slider" />
+                  <span className="toggle-slider" />
                 </span>
               </label>
               <small>When enabled, an IDarr Rename step will appear as step 1 in the Poster Workflow page so you can run it as part of your standard workflow.</small>
@@ -1616,11 +1623,10 @@ const {
               <small>Optional cap on number of assets processed per run. Leave blank for no limit.</small>
             </div>
           </div>
-          <p className="setting-description" style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#888' }}>
-            <strong style={{ color: '#ccc' }}>TMDB API Key:</strong> Configured globally in{' '}
+          <p className="setting-description mt-md">
+            <strong className="text-secondary">TMDB API Key:</strong> Configured globally in{' '}
             <a
               href="/settings"
-              style={{ color: '#64b5f6' }}
               onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
             >Settings → General → API Keys</a>.
           </p>
@@ -1635,13 +1641,13 @@ const {
                   <strong>Remove Non-image Files</strong>
                   <small>Deletes non-image files from incoming folders during processing to keep poster inputs clean.</small>
                 </div>
-                <span className="idarr-toggle-control">
+                <span className="toggle-switch">
                   <input
                     type="checkbox"
                     checked={config.remove_non_image_files}
                     onChange={(e) => updateConfig('remove_non_image_files', e.target.checked)}
                   />
-                  <span className="idarr-toggle-slider" />
+                  <span className="toggle-slider" />
                 </span>
               </div>
             </label>
@@ -1652,13 +1658,13 @@ const {
                   <strong>Show Unmatched</strong>
                   <small>Includes unmatched items in run output so you can review and resolve them after processing.</small>
                 </div>
-                <span className="idarr-toggle-control">
+                <span className="toggle-switch">
                   <input
                     type="checkbox"
                     checked={config.show_unmatched}
                     onChange={(e) => updateConfig('show_unmatched', e.target.checked)}
                   />
-                  <span className="idarr-toggle-slider" />
+                  <span className="toggle-slider" />
                 </span>
               </div>
             </label>
@@ -1669,13 +1675,13 @@ const {
                   <strong>Pending Matches Only</strong>
                   <small>Only queues items needing manual review and skips normal resolved processing in that run.</small>
                 </div>
-                <span className="idarr-toggle-control">
+                <span className="toggle-switch">
                   <input
                     type="checkbox"
                     checked={config.pending_matches}
                     onChange={(e) => updateConfig('pending_matches', e.target.checked)}
                   />
-                  <span className="idarr-toggle-slider" />
+                  <span className="toggle-slider" />
                 </span>
               </div>
             </label>
@@ -1686,13 +1692,13 @@ const {
                   <strong>Skip Collections</strong>
                   <small>Ignores collection/box-set assets so only movie, series, and season posters are handled.</small>
                 </div>
-                <span className="idarr-toggle-control">
+                <span className="toggle-switch">
                   <input
                     type="checkbox"
                     checked={config.skip_collections}
                     onChange={(e) => updateConfig('skip_collections', e.target.checked)}
                   />
-                  <span className="idarr-toggle-slider" />
+                  <span className="toggle-slider" />
                 </span>
               </div>
             </label>
@@ -1717,7 +1723,7 @@ const {
                   <strong>{target.label?.trim() || `Drive ${index + 1}`}</strong>
                   <button
                     type="button"
-                    className="btn-toolbar"
+                    className="btn-toolbar btn-danger"
                     onClick={() => removeSyncTarget(index)}
                     disabled={saving || loading || syncing}
                   >
@@ -1772,7 +1778,7 @@ const {
                             </span>
                           </span>
                         </span>
-                        <span className="idarr-toggle-control" style={{ flexShrink: 0 }}>
+                        <span className="toggle-switch">
                           <input
                             type="checkbox"
                             checked={Boolean(target.is_asset_drive)}
@@ -1784,7 +1790,7 @@ const {
                               }
                             }}
                           />
-                          <span className="idarr-toggle-slider" />
+                          <span className="toggle-slider" />
                         </span>
                       </label>
                     </div>
@@ -1799,7 +1805,7 @@ const {
                             </span>
                           </span>
                         </span>
-                        <span className="idarr-toggle-control" style={{ flexShrink: 0 }}>
+                        <span className="toggle-switch">
                           <input
                             type="checkbox"
                             checked={Boolean(target.is_psd_drive)}
@@ -1811,7 +1817,7 @@ const {
                               }
                             }}
                           />
-                          <span className="idarr-toggle-slider" />
+                          <span className="toggle-slider" />
                         </span>
                       </label>
                     </div>
@@ -1822,15 +1828,7 @@ const {
           </div>
           {(config.sync_targets || []).length > 0 && (
             <div className="idarr-sync-targets-footer">
-              <button
-                className={`btn-toolbar ${hasUnsavedSettings ? 'btn-unsaved' : ''}`}
-                onClick={handleSave}
-                disabled={!hasUnsavedSettings || saving || loading}
-                title={hasUnsavedSettings ? 'Save changes' : 'No changes to save'}
-              >
-                <Save size={16} />
-                {saving ? 'Saving...' : 'Save Settings'}
-              </button>
+              <SaveActions dirty={hasUnsavedSettings} saving={saving} disabled={!hasUnsavedSettings || saving || loading} onSave={handleSave} onCancel={discardSettingsEdits} />
             </div>
           )}
         </div>
@@ -1878,7 +1876,7 @@ const {
             }}
             disabled={pendingLoading || resolving}
           >
-            <RotateCw size={16} className={pendingLoading ? 'btn-icon-spin' : undefined} />
+            <RotateCw size={16} className={pendingLoading ? 'spinning' : undefined} />
             {pendingLoading ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
@@ -1908,7 +1906,7 @@ const {
       ) : pendingItems.length === 0 ? (
         <p className="section-description">No pending matches.</p>
       ) : (
-        <>
+    <>
           {pendingPager}
           <div className="pending-list">
           {pendingItems.map((item, itemIndex) => {
@@ -2066,7 +2064,7 @@ const {
       {ignoredItems.length === 0 ? (
         <p className="section-description">No ignored titles.</p>
       ) : (
-        <>
+    <>
           <p className="section-description">Total ignored: {sortedIgnoredItems.length}</p>
           <div className="ignored-titles-list">
             <div className="ignored-list-items">
@@ -2116,7 +2114,7 @@ const {
             <strong>Force Sync After Run</strong>
             <small>When off, the sync is skipped if no files were renamed. When on, the sync always runs after any IDarr run that includes a sync step (Run &amp; Sync, Quick Add, and scheduled runs).</small>
           </span>
-          <span className="idarr-toggle-control">
+          <span className="toggle-switch">
             <input
               type="checkbox"
               checked={Boolean(config.force_sync_after_run)}
@@ -2133,7 +2131,7 @@ const {
                 }
               }}
             />
-            <span className="idarr-toggle-slider" />
+            <span className="toggle-slider" />
           </span>
         </label>
       </div>
@@ -2210,89 +2208,84 @@ const {
     }
 
     return (
-      <div className="modal-overlay">
-        <div className="modal-content schedule-modal">
-          <div className="modal-header">
-            <h2>Purge Cache by Criteria</h2>
-            <button className="modal-close" onClick={closeTargetedPruneModal}>×</button>
+      <Modal onClose={closeTargetedPruneModal} closeOnOverlay={false}>
+        <Modal.Header title="Purge Cache by Criteria" />
+        <Modal.Body>
+          <p className="section-description">
+            Enter one or more filters. Matching cache rows will be purged.
+          </p>
+          <ul className="section-description">
+            <li>Permanently deletes matching rows from the IDarr cache table.</li>
+            <li>Does not remove any poster files from disk.</li>
+            <li>Does not change ignored titles.</li>
+            <li>Title uses exact match (case-insensitive).</li>
+            <li>Asset key uses exact match (case-insensitive).</li>
+            <li>TMDB/TVDB/IMDB filters match those exact cache IDs.</li>
+            <li>If multiple fields are entered, all must match the same row.</li>
+          </ul>
+          <div className="form-group">
+            <label className="field-label">Title (Exact)</label>
+            <input
+              type="text"
+              value={pruneTitleValue}
+              onChange={(event) => setPruneTitleValue(event.target.value)}
+              placeholder="e.g. iZombie"
+            />
           </div>
-          <div className="modal-body">
-            <p className="section-description">
-              Enter one or more filters. Matching cache rows will be purged.
-            </p>
-            <ul className="section-description">
-              <li>Permanently deletes matching rows from the IDarr cache table.</li>
-              <li>Does not remove any poster files from disk.</li>
-              <li>Does not change ignored titles.</li>
-              <li>Title uses exact match (case-insensitive).</li>
-              <li>Asset key uses exact match (case-insensitive).</li>
-              <li>TMDB/TVDB/IMDB filters match those exact cache IDs.</li>
-              <li>If multiple fields are entered, all must match the same row.</li>
-            </ul>
+          <div className="form-group">
+            <label className="field-label">Asset Key (Exact)</label>
+            <input
+              type="text"
+              value={pruneAssetKeyValue}
+              onChange={(event) => setPruneAssetKeyValue(event.target.value)}
+              placeholder="e.g. tv_series::izombie::2015"
+            />
+          </div>
+          <div className="resolver-id-row">
             <div className="form-group">
-              <label className="field-label">Title (Exact)</label>
+              <label className="field-label">TMDB ID</label>
               <input
                 type="text"
-                value={pruneTitleValue}
-                onChange={(event) => setPruneTitleValue(event.target.value)}
-                placeholder="e.g. iZombie"
+                value={pruneTmdbValue}
+                onChange={(event) => setPruneTmdbValue(event.target.value)}
+                placeholder="e.g. 60866"
               />
             </div>
             <div className="form-group">
-              <label className="field-label">Asset Key (Exact)</label>
+              <label className="field-label">TVDB ID</label>
               <input
                 type="text"
-                value={pruneAssetKeyValue}
-                onChange={(event) => setPruneAssetKeyValue(event.target.value)}
-                placeholder="e.g. tv_series::izombie::2015"
+                value={pruneTvdbValue}
+                onChange={(event) => setPruneTvdbValue(event.target.value)}
+                placeholder="e.g. 281470"
               />
             </div>
-            <div className="resolver-id-row">
-              <div className="form-group">
-                <label className="field-label">TMDB ID</label>
-                <input
-                  type="text"
-                  value={pruneTmdbValue}
-                  onChange={(event) => setPruneTmdbValue(event.target.value)}
-                  placeholder="e.g. 60866"
-                />
-              </div>
-              <div className="form-group">
-                <label className="field-label">TVDB ID</label>
-                <input
-                  type="text"
-                  value={pruneTvdbValue}
-                  onChange={(event) => setPruneTvdbValue(event.target.value)}
-                  placeholder="e.g. 281470"
-                />
-              </div>
-              <div className="form-group">
-                <label className="field-label">IMDB ID</label>
-                <input
-                  type="text"
-                  value={pruneImdbValue}
-                  onChange={(event) => setPruneImdbValue(event.target.value)}
-                  placeholder="e.g. tt3501584"
-                />
-              </div>
+            <div className="form-group">
+              <label className="field-label">IMDB ID</label>
+              <input
+                type="text"
+                value={pruneImdbValue}
+                onChange={(event) => setPruneImdbValue(event.target.value)}
+                placeholder="e.g. tt3501584"
+              />
             </div>
           </div>
-          <div className="modal-footer">
-            <button className="btn-secondary" onClick={closeTargetedPruneModal} disabled={cacheMaintaining}>
-              Cancel
-            </button>
-            <button
-              className="btn-primary"
-              onClick={() => {
-                void handlePruneTargetedCacheEntries()
-              }}
-              disabled={cacheMaintaining}
-            >
-              {cacheMaintaining ? 'Purging...' : 'Purge Entries'}
-            </button>
-          </div>
-        </div>
-      </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <button className="btn-secondary" onClick={closeTargetedPruneModal} disabled={cacheMaintaining}>
+            Cancel
+          </button>
+          <button
+            className="btn-danger"
+            onClick={() => {
+              void handlePruneTargetedCacheEntries()
+            }}
+            disabled={cacheMaintaining}
+          >
+            {cacheMaintaining ? 'Purging...' : 'Purge Entries'}
+          </button>
+        </Modal.Footer>
+      </Modal>
     )
   }
 
@@ -2302,34 +2295,29 @@ const {
     }
 
     return (
-      <div className="modal-overlay">
-        <div className="modal-content schedule-modal">
-          <div className="modal-header">
-            <h2>Edit Ignored Titles</h2>
-            <button className="modal-close" onClick={closeIgnoredEditor}>×</button>
-          </div>
-          <div className="modal-body">
-            <p className="section-description">
-              Enter one title per line. Use Title (Year) for movies/shows and plain title for collections.
-            </p>
-            <textarea
-              className="ignored-editor-textarea"
-              value={ignoredEditorValue}
-              onChange={(event) => setIgnoredEditorValue(event.target.value)}
-              placeholder="Example:\nMini-Series Collection\nBlood & Orchids (1986)"
-              rows={18}
-            />
-          </div>
-          <div className="modal-footer">
-            <button className="btn-secondary" onClick={closeIgnoredEditor} disabled={savingIgnoredTitles}>
-              Cancel
-            </button>
-            <button className="btn-primary" onClick={() => { void saveIgnoredEditor() }} disabled={savingIgnoredTitles}>
-              {savingIgnoredTitles ? 'Saving...' : 'Save List'}
-            </button>
-          </div>
-        </div>
-      </div>
+      <Modal onClose={closeIgnoredEditor} closeOnOverlay={false}>
+        <Modal.Header title="Edit Ignored Titles" />
+        <Modal.Body>
+          <p className="section-description">
+            Enter one title per line. Use Title (Year) for movies/shows and plain title for collections.
+          </p>
+          <textarea
+            className="ignored-editor-textarea"
+            value={ignoredEditorValue}
+            onChange={(event) => setIgnoredEditorValue(event.target.value)}
+            placeholder="Example:\nMini-Series Collection\nBlood & Orchids (1986)"
+            rows={18}
+          />
+        </Modal.Body>
+        <Modal.Footer>
+          <button className="btn-secondary" onClick={closeIgnoredEditor} disabled={savingIgnoredTitles}>
+            Cancel
+          </button>
+          <button className="btn-primary" onClick={() => { void saveIgnoredEditor() }} disabled={savingIgnoredTitles}>
+            {savingIgnoredTitles ? 'Saving...' : 'Save List'}
+          </button>
+        </Modal.Footer>
+      </Modal>
     )
   }
 
@@ -2358,369 +2346,364 @@ const {
       || (Array.isArray(resolverItem.source_filenames) && resolverItem.source_filenames.some((f) => isPsd(f)))
 
     return (
-      <div className="modal-overlay">
-        <div className="modal-content schedule-modal resolver-modal">
-          <div className="modal-header">
-            <h2>Resolve Pending Match</h2>
-            <button className="modal-close" onClick={resetResolver}>×</button>
-          </div>
-          <div className="modal-body" ref={resolverModalBodyRef}>
-            <div className="form-group">
-              <label className="field-label">Asset</label>
-              <div className="resolver-asset-header">
-                <div className="resolver-candidate-poster-wrap">
-                  {sourceIsPsd ? (
-                    <div className={`${sourcePosterClass} resolver-candidate-poster-placeholder idarr-psd-placeholder`}>
-                      <FileImage size={22} />
-                      <span>PSD</span>
-                    </div>
-                  ) : resolverItem.preview_url ? (
-                    <button
-                      type="button"
-                      className="resolver-candidate-poster-link resolver-source-preview-trigger"
-                      title="Preview source image"
-                      onClick={() => setResolverPreviewUrl(getPreviewImageUrl(resolverItem.preview_url))}
-                    >
-                      <img
-                        src={getPreviewImageUrl(resolverItem.preview_url) || ''}
-                        alt={`${resolverItem.title} source image`}
-                        className={sourcePosterClass}
-                        loading="lazy"
-                      />
-                    </button>
-                  ) : (
-                    <div className={`${sourcePosterClass} resolver-candidate-poster-placeholder`}>{sourcePlaceholderLabel}</div>
-                  )}
-                </div>
-                <div className="resolver-asset-header-text">
-                  <div>{resolverItem.title}{resolverItem.year ? ` (${resolverItem.year})` : ''}</div>
-                  <div>
-                    {(() => {
-                      const chip = getTypeChipMeta(resolverItem.type)
-                      return <span className={`pending-type-chip ${chip.className}`}>{chip.label}</span>
-                    })()}
+      <Modal onClose={resetResolver} className="resolver-modal" closeOnOverlay={false}>
+        <Modal.Header title="Resolve Pending Match" />
+        <Modal.Body ref={resolverModalBodyRef}>
+          <div className="form-group">
+            <label className="field-label">Asset</label>
+            <div className="resolver-asset-header">
+              <div className="resolver-candidate-poster-wrap">
+                {sourceIsPsd ? (
+                  <div className={`${sourcePosterClass} resolver-candidate-poster-placeholder idarr-psd-placeholder`}>
+                    <FileImage size={22} />
+                    <span>PSD</span>
                   </div>
-                </div>
-              </div>
-              <small className="resolver-item-count">
-                Item {pendingTotal === 0 ? 0 : resolverIndex + 1} of {pendingTotal}
-              </small>
-              <div className="action-buttons">
-                <button
-                  className="btn-toolbar"
-                  onClick={() => {
-                    void openResolverAtIndex(resolverIndex - 1)
-                  }}
-                  disabled={resolving || pendingLoading || resolverIndex <= 0}
-                >
-                  Previous
-                </button>
-                <button
-                  className="btn-toolbar"
-                  onClick={() => {
-                    void openResolverAtIndex(resolverIndex + 1)
-                  }}
-                  disabled={resolving || pendingLoading || resolverIndex >= pendingTotal - 1}
-                >
-                  Next
-                </button>
-                <button
-                  className="btn-toolbar resolver-ignore-next-btn"
-                  onClick={() => {
-                    if (resolverItem) {
-                      void handleIgnorePending(resolverItem, { forceAdvance: true })
-                    }
-                  }}
-                  disabled={resolving || pendingLoading || !resolverItem}
-                >
-                  Ignore & Next
-                </button>
-              </div>
-            </div>
-            <div className="form-group">
-              <small>Shortcuts: N = next pending, P = previous pending, Esc = close</small>
-            </div>
-            <div className="resolver-manual-section">
-              <button
-                type="button"
-                className="resolver-manual-section-toggle"
-                onClick={() => setManualSectionOpen((o) => !o)}
-              >
-                {manualSectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                <span className="resolver-manual-section-title">Manual Resolution</span>
-                {!manualSectionOpen && (
-                  <span className="resolver-manual-section-hint">Use if the candidates below don't match your item</span>
-                )}
-              </button>
-              {manualSectionOpen && (
-              <div className="resolver-manual-content">
-              <div className="form-group">
-                <label className="field-label">Media Type</label>
-                <small className="resolver-type-hint">Required when entering a TMDB ID manually — movie and TV IDs share the same number space.</small>
-                <div className="resolver-type-buttons">
-                  {(['movie', 'tv_series', 'collection'] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      className={`resolver-type-btn${resolverTmdbType === t ? ' active' : ''}`}
-                      onClick={() => setResolverTmdbType(resolverTmdbType === t ? '' : t)}
-                    >
-                      {t === 'movie' ? 'Movie' : t === 'tv_series' ? 'TV Show' : 'Collection'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="resolver-id-row">
-                <div className="form-group">
-                  <label className="field-label">TMDB ID</label>
-                  <input type="text" value={resolverTmdbId} onChange={(e) => setResolverTmdbId(e.target.value)} placeholder="12345" />
-                </div>
-                <div className="form-group">
-                  <label className="field-label">TVDB ID</label>
-                  <input type="text" value={resolverTvdbId} onChange={(e) => setResolverTvdbId(e.target.value)} placeholder="98765" />
-                </div>
-                <div className="form-group">
-                  <label className="field-label">IMDB ID</label>
-                  <input type="text" value={resolverImdbId} onChange={(e) => setResolverImdbId(e.target.value)} placeholder="tt1234567" />
-                </div>
-              </div>
-              <div className="resolver-manual-search-row">
-                <input
-                  type="text"
-                  className="resolver-manual-search-input"
-                  value={resolverManualSearch}
-                  onChange={(e) => setResolverManualSearch(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void handleManualCandidateSearch() }}
-                  placeholder="Search TMDB by title..."
-                />
-                <button
-                  className="btn-toolbar"
-                  onClick={() => void handleManualCandidateSearch()}
-                  disabled={!resolverManualSearch.trim() || resolverCandidatesLoading}
-                >
-                  Search
-                </button>
-                {resolverManualSearch.trim() && (
+                ) : resolverItem.preview_url ? (
                   <button
-                    className="btn-toolbar"
-                    onClick={() => {
-                      setResolverManualSearch('')
-                      if (resolverItem) void loadResolverCandidates(resolverItem)
-                    }}
-                    disabled={resolverCandidatesLoading}
+                    type="button"
+                    className="resolver-candidate-poster-link resolver-source-preview-trigger"
+                    title="Preview source image"
+                    onClick={() => setResolverPreviewUrl(getPreviewImageUrl(resolverItem.preview_url))}
                   >
-                    Reset
+                    <img
+                      src={getPreviewImageUrl(resolverItem.preview_url) || ''}
+                      alt={`${resolverItem.title} source image`}
+                      className={sourcePosterClass}
+                      loading="lazy"
+                    />
                   </button>
-                )}
-              </div>
-              </div>)}
-            </div>
-            <div className="form-group">
-              <label className="field-label">TMDB Candidates</label>
-              <div className="resolver-candidates-list">
-                {resolverCandidatesLoading ? (
-                  <div>Searching TMDB candidates...</div>
-                ) : displayedResolverCandidates.length === 0 ? (
-                  <div className="resolver-no-candidates">
-                    <div>No candidates found.</div>
-                    {(() => {
-                      const searchUrls = getResolverSearchUrls()
-                      return (
-                        <div className="resolver-no-candidates-links">
-                          <a href={searchUrls.tmdbMovie} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search TMDB Movies">
-                            <Search size={14} />
-                            TMDB Movie
-                          </a>
-                          <a href={searchUrls.tmdbShow} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search TMDB Shows">
-                            <Search size={14} />
-                            TMDB Show
-                          </a>
-                          <a href={searchUrls.tmdbCollection} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search TMDB Collections">
-                            <Search size={14} />
-                            TMDB Collection
-                          </a>
-                          <a href={searchUrls.tvdb} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search TVDB">
-                            <Search size={14} />
-                            TVDB
-                          </a>
-                          <a href={searchUrls.google} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search Google">
-                            <Search size={14} />
-                            Google
-                          </a>
-                        </div>
-                      )
-                    })()}
-                  </div>
                 ) : (
-                  <div className="settings-grid">
-                    {displayedResolverCandidates.slice(0, 6).map((candidate) => {
-                      const isSelected = selectedCandidate?.tmdb_id === candidate.tmdb_id && selectedCandidate?.media_type === candidate.media_type
-                      const tmdbUrl = getCandidateTmdbUrl(candidate.tmdb_id, candidate.media_type)
-                      return (
-                        <div
-                          key={`${candidate.tmdb_id}-${candidate.media_type}`}
-                          className={`field-group resolver-candidate-card${isSelected ? ' selected' : ''}`}
-                          onClick={() => setSelectedCandidate(isSelected ? null : candidate)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedCandidate(isSelected ? null : candidate) }}
-                        >
-                          <div className="resolver-candidate-header">
-                            <div className="resolver-candidate-poster-wrap">
-                              {candidate.poster_url ? (
-                                <button
-                                  type="button"
-                                  className="resolver-candidate-poster-link resolver-source-preview-trigger"
-                                  title="Preview poster"
-                                  onClick={(e) => { e.stopPropagation(); setResolverPreviewUrl(candidate.poster_url ?? null) }}
-                                >
-                                  <img
-                                    src={candidate.poster_url}
-                                    alt={`${candidate.title} poster`}
-                                    className="resolver-candidate-poster"
-                                    loading="lazy"
-                                  />
-                                </button>
-                              ) : (
-                                <div className="resolver-candidate-poster resolver-candidate-poster-placeholder">No Poster</div>
-                              )}
-                            </div>
-                            <div className="resolver-candidate-header-text">
-                              <label className="field-label">{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</label>
-                              <div className="resolver-candidate-meta-row">
-                                <span>TMDB {candidate.tmdb_id}</span>
-                                {(() => {
-                                  const chip = getTypeChipMeta(candidate.media_type)
-                                  return <span className={`pending-type-chip ${chip.className}`}>{chip.label}</span>
-                                })()}
-                              </div>
-                              <a href={tmdbUrl} target="_blank" rel="noopener noreferrer" className="resolver-candidate-tmdb-link" onClick={(e) => e.stopPropagation()}>
-                                TMDB Link ↗
-                              </a>
-                            </div>
-                          </div>
-                          <small>
-                            Score: {Number(candidate.vote_average || 0).toFixed(1)} • Popularity: {Number(candidate.popularity || 0).toFixed(1)}
-                          </small>
-                          <small>
-                            Match: {candidate.match_reason?.summary || 'tmdb_rank'}
-                            {typeof candidate.match_reason?.score === 'number' ? ` • Reason Score ${candidate.match_reason.score}` : ''}
-                          </small>
-                        </div>
-                      )
-                    })}
-                  </div>
+                  <div className={`${sourcePosterClass} resolver-candidate-poster-placeholder`}>{sourcePlaceholderLabel}</div>
                 )}
               </div>
-              <div className="action-buttons resolver-refresh-row">
+              <div className="resolver-asset-header-text">
+                <div>{resolverItem.title}{resolverItem.year ? ` (${resolverItem.year})` : ''}</div>
+                <div>
+                  {(() => {
+                    const chip = getTypeChipMeta(resolverItem.type)
+                    return <span className={`pending-type-chip ${chip.className}`}>{chip.label}</span>
+                  })()}
+                </div>
+              </div>
+            </div>
+            <small className="resolver-item-count">
+              Item {pendingTotal === 0 ? 0 : resolverIndex + 1} of {pendingTotal}
+            </small>
+            <div className="action-buttons">
+              <button
+                className="btn-toolbar"
+                onClick={() => {
+                  void openResolverAtIndex(resolverIndex - 1)
+                }}
+                disabled={resolving || pendingLoading || resolverIndex <= 0}
+              >
+                Previous
+              </button>
+              <button
+                className="btn-toolbar"
+                onClick={() => {
+                  void openResolverAtIndex(resolverIndex + 1)
+                }}
+                disabled={resolving || pendingLoading || resolverIndex >= pendingTotal - 1}
+              >
+                Next
+              </button>
+              <button
+                className="btn-toolbar"
+                onClick={() => {
+                  if (resolverItem) {
+                    void handleIgnorePending(resolverItem, { forceAdvance: true })
+                  }
+                }}
+                disabled={resolving || pendingLoading || !resolverItem}
+              >
+                Ignore & Next
+              </button>
+            </div>
+          </div>
+          <div className="form-group">
+            <small>Shortcuts: N = next pending, P = previous pending, Esc = close</small>
+          </div>
+          <div className="resolver-manual-section">
+            <button
+              type="button"
+              className="resolver-manual-section-toggle"
+              onClick={() => setManualSectionOpen((o) => !o)}
+            >
+              {manualSectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <span className="resolver-manual-section-title">Manual Resolution</span>
+              {!manualSectionOpen && (
+                <span className="resolver-manual-section-hint">Use if the candidates below don't match your item</span>
+              )}
+            </button>
+            {manualSectionOpen && (
+            <div className="resolver-manual-content">
+            <div className="form-group">
+              <label className="field-label">Media Type</label>
+              <small className="resolver-type-hint">Required when entering a TMDB ID manually — movie and TV IDs share the same number space.</small>
+              <div className="resolver-type-buttons">
+                {(['movie', 'tv_series', 'collection'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`resolver-type-btn${resolverTmdbType === t ? ' active' : ''}`}
+                    onClick={() => setResolverTmdbType(resolverTmdbType === t ? '' : t)}
+                  >
+                    {t === 'movie' ? 'Movie' : t === 'tv_series' ? 'TV Show' : 'Collection'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="resolver-id-row">
+              <div className="form-group">
+                <label className="field-label">TMDB ID</label>
+                <input type="text" value={resolverTmdbId} onChange={(e) => setResolverTmdbId(e.target.value)} placeholder="12345" />
+              </div>
+              <div className="form-group">
+                <label className="field-label">TVDB ID</label>
+                <input type="text" value={resolverTvdbId} onChange={(e) => setResolverTvdbId(e.target.value)} placeholder="98765" />
+              </div>
+              <div className="form-group">
+                <label className="field-label">IMDB ID</label>
+                <input type="text" value={resolverImdbId} onChange={(e) => setResolverImdbId(e.target.value)} placeholder="tt1234567" />
+              </div>
+            </div>
+            <div className="resolver-manual-search-row">
+              <input
+                type="text"
+                className="resolver-manual-search-input"
+                value={resolverManualSearch}
+                onChange={(e) => setResolverManualSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleManualCandidateSearch() }}
+                placeholder="Search TMDB by title..."
+              />
+              <button
+                className="btn-toolbar"
+                onClick={() => void handleManualCandidateSearch()}
+                disabled={!resolverManualSearch.trim() || resolverCandidatesLoading}
+              >
+                Search
+              </button>
+              {resolverManualSearch.trim() && (
                 <button
                   className="btn-toolbar"
                   onClick={() => {
-                    if (resolverItem) {
-                      void loadResolverCandidates(resolverItem)
-                    }
+                    setResolverManualSearch('')
+                    if (resolverItem) void loadResolverCandidates(resolverItem)
                   }}
-                  disabled={resolverCandidatesLoading || resolving || !resolverItem}
+                  disabled={resolverCandidatesLoading}
                 >
-                  {resolverCandidatesLoading ? 'Refreshing...' : 'Refresh Candidates'}
+                  Reset
                 </button>
-              </div>
-              {resolverHistory.length > 0 && (
-                <div className="settings-grid">
-                  {resolverHistory.slice(0, 3).map((entry, index) => (
-                    <div key={`${entry.resolved_at || 'unknown'}-${index}`} className="field-group">
-                      <label className="field-label">{entry.source === 'candidate' ? 'Candidate Resolution' : 'Manual Resolution'}</label>
-                      <div>
-                        {entry.resolved_at || 'unknown time'}
+              )}
+            </div>
+            </div>)}
+          </div>
+          <div className="form-group">
+            <label className="field-label">TMDB Candidates</label>
+            <div className="resolver-candidates-list">
+              {resolverCandidatesLoading ? (
+                <div>Searching TMDB candidates...</div>
+              ) : displayedResolverCandidates.length === 0 ? (
+                <div className="resolver-no-candidates">
+                  <div>No candidates found.</div>
+                  {(() => {
+                    const searchUrls = getResolverSearchUrls()
+                    return (
+                      <div className="resolver-no-candidates-links">
+                        <a href={searchUrls.tmdbMovie} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search TMDB Movies">
+                          <Search size={14} />
+                          TMDB Movie
+                        </a>
+                        <a href={searchUrls.tmdbShow} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search TMDB Shows">
+                          <Search size={14} />
+                          TMDB Show
+                        </a>
+                        <a href={searchUrls.tmdbCollection} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search TMDB Collections">
+                          <Search size={14} />
+                          TMDB Collection
+                        </a>
+                        <a href={searchUrls.tvdb} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search TVDB">
+                          <Search size={14} />
+                          TVDB
+                        </a>
+                        <a href={searchUrls.google} target="_blank" rel="noopener noreferrer" className="resolver-search-link" title="Search Google">
+                          <Search size={14} />
+                          Google
+                        </a>
                       </div>
-                      <small>
-                        IDs: {entry.tmdb_id ? `TMDB ${entry.tmdb_id}` : 'TMDB n/a'}
-                        {entry.tvdb_id ? ` • TVDB ${entry.tvdb_id}` : ''}
-                        {entry.imdb_id ? ` • IMDB ${entry.imdb_id}` : ''}
-                      </small>
-                      {entry.candidate_reason?.summary && (
-                        <small>Reason: {entry.candidate_reason.summary}</small>
-                      )}
-                    </div>
-                  ))}
+                    )
+                  })()}
+                </div>
+              ) : (
+                <div className="settings-grid">
+                  {displayedResolverCandidates.slice(0, 6).map((candidate) => {
+                    const isSelected = selectedCandidate?.tmdb_id === candidate.tmdb_id && selectedCandidate?.media_type === candidate.media_type
+                    const tmdbUrl = getCandidateTmdbUrl(candidate.tmdb_id, candidate.media_type)
+                    return (
+                      <div
+                        key={`${candidate.tmdb_id}-${candidate.media_type}`}
+                        className={`field-group resolver-candidate-card${isSelected ? ' selected' : ''}`}
+                        onClick={() => setSelectedCandidate(isSelected ? null : candidate)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedCandidate(isSelected ? null : candidate) }}
+                      >
+                        <div className="resolver-candidate-header">
+                          <div className="resolver-candidate-poster-wrap">
+                            {candidate.poster_url ? (
+                              <button
+                                type="button"
+                                className="resolver-candidate-poster-link resolver-source-preview-trigger"
+                                title="Preview poster"
+                                onClick={(e) => { e.stopPropagation(); setResolverPreviewUrl(candidate.poster_url ?? null) }}
+                              >
+                                <img
+                                  src={candidate.poster_url}
+                                  alt={`${candidate.title} poster`}
+                                  className="resolver-candidate-poster"
+                                  loading="lazy"
+                                />
+                              </button>
+                            ) : (
+                              <div className="resolver-candidate-poster resolver-candidate-poster-placeholder">No Poster</div>
+                            )}
+                          </div>
+                          <div className="resolver-candidate-header-text">
+                            <label className="field-label">{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</label>
+                            <div className="resolver-candidate-meta-row">
+                              <span>TMDB {candidate.tmdb_id}</span>
+                              {(() => {
+                                const chip = getTypeChipMeta(candidate.media_type)
+                                return <span className={`pending-type-chip ${chip.className}`}>{chip.label}</span>
+                              })()}
+                            </div>
+                            <a href={tmdbUrl} target="_blank" rel="noopener noreferrer" className="resolver-candidate-tmdb-link" onClick={(e) => e.stopPropagation()}>
+                              TMDB Link ↗
+                            </a>
+                          </div>
+                        </div>
+                        <small>
+                          Score: {Number(candidate.vote_average || 0).toFixed(1)} • Popularity: {Number(candidate.popularity || 0).toFixed(1)}
+                        </small>
+                        <small>
+                          Match: {candidate.match_reason?.summary || 'tmdb_rank'}
+                          {typeof candidate.match_reason?.score === 'number' ? ` • Reason Score ${candidate.match_reason.score}` : ''}
+                        </small>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
-          </div>
-          <div className="modal-footer">
-            <button className="btn-secondary" onClick={resetResolver} disabled={resolving}>
-              Cancel
-            </button>
-            {pendingTotal > 1 ? (
-              <>
-                <button
-                  className="btn-toolbar resolver-footer-btn"
-                  data-tooltip={selectedCandidate ? 'Use selected candidate and close — file not renamed, run Idarr to apply' : 'Save IDs and close — file not renamed, run Idarr to apply'}
-                  onClick={() => {
-                    selectedCandidate
-                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false })
-                      : void handleResolvePending({ forceAdvance: false })
-                  }}
-                  disabled={resolving}
-                >
-                  {resolving ? 'Resolving...' : <>Resolve &amp; Close<Info size={11} className="resolver-btn-info-icon" /></>}
-                </button>
-                <button
-                  className="btn-toolbar resolver-footer-btn"
-                  data-tooltip={selectedCandidate ? 'Use selected candidate and advance to next — file not renamed, run Idarr to apply' : 'Save IDs and advance to next — file not renamed, run Idarr to apply'}
-                  onClick={() => {
-                    selectedCandidate
-                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: true })
-                      : void handleResolvePending({ forceAdvance: true })
-                  }}
-                  disabled={resolving}
-                >
-                  {resolving ? 'Resolving...' : <>Resolve &amp; Next<Info size={11} className="resolver-btn-info-icon" /></>}
-                </button>
-                <button
-                  className="btn-toolbar btn-primary resolver-footer-btn"
-                  data-tooltip={selectedCandidate ? 'Use selected candidate, start renaming the file, and advance to next' : 'Save IDs, start renaming the file, and advance to next'}
-                  onClick={() => {
-                    selectedCandidate
-                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: true, andRename: true })
-                      : void handleResolveAndRename()
-                  }}
-                  disabled={resolving}
-                >
-                  {resolving ? 'Resolving...' : <>Resolve &amp; Rename<Info size={11} className="resolver-btn-info-icon" /></>}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="btn-toolbar resolver-footer-btn"
-                  data-tooltip={selectedCandidate ? 'Use selected candidate — file not renamed, run Idarr to apply' : 'Save IDs — file not renamed, run Idarr to apply'}
-                  onClick={() => {
-                    selectedCandidate
-                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false })
-                      : void handleResolvePending({ forceAdvance: false })
-                  }}
-                  disabled={resolving}
-                >
-                  {resolving ? 'Resolving...' : <>Resolve<Info size={11} className="resolver-btn-info-icon" /></>}
-                </button>
-                <button
-                  className="btn-toolbar btn-primary resolver-footer-btn"
-                  data-tooltip={selectedCandidate ? 'Use selected candidate and immediately start renaming the file' : 'Save IDs and immediately start renaming the file'}
-                  onClick={() => {
-                    selectedCandidate
-                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false, andRename: true })
-                      : void handleResolveAndRename()
-                  }}
-                  disabled={resolving}
-                >
-                  {resolving ? 'Resolving...' : <>Resolve &amp; Rename<Info size={11} className="resolver-btn-info-icon" /></>}
-                </button>
-              </>
+            <div className="action-buttons resolver-refresh-row">
+              <button
+                className="btn-toolbar"
+                onClick={() => {
+                  if (resolverItem) {
+                    void loadResolverCandidates(resolverItem)
+                  }
+                }}
+                disabled={resolverCandidatesLoading || resolving || !resolverItem}
+              >
+                {resolverCandidatesLoading ? 'Refreshing...' : 'Refresh Candidates'}
+              </button>
+            </div>
+            {resolverHistory.length > 0 && (
+              <div className="settings-grid">
+                {resolverHistory.slice(0, 3).map((entry, index) => (
+                  <div key={`${entry.resolved_at || 'unknown'}-${index}`} className="field-group">
+                    <label className="field-label">{entry.source === 'candidate' ? 'Candidate Resolution' : 'Manual Resolution'}</label>
+                    <div>
+                      {entry.resolved_at || 'unknown time'}
+                    </div>
+                    <small>
+                      IDs: {entry.tmdb_id ? `TMDB ${entry.tmdb_id}` : 'TMDB n/a'}
+                      {entry.tvdb_id ? ` • TVDB ${entry.tvdb_id}` : ''}
+                      {entry.imdb_id ? ` • IMDB ${entry.imdb_id}` : ''}
+                    </small>
+                    {entry.candidate_reason?.summary && (
+                      <small>Reason: {entry.candidate_reason.summary}</small>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-        </div>
-      </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <button className="btn-secondary" onClick={resetResolver} disabled={resolving}>
+            Cancel
+          </button>
+          {pendingTotal > 1 ? (
+      <>
+              <button
+                className="btn-toolbar resolver-footer-btn"
+                data-tooltip={selectedCandidate ? 'Use selected candidate and close — file not renamed, run Idarr to apply' : 'Save IDs and close — file not renamed, run Idarr to apply'}
+                onClick={() => {
+                  selectedCandidate
+                    ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false })
+                    : void handleResolvePending({ forceAdvance: false })
+                }}
+                disabled={resolving}
+              >
+                {resolving ? 'Resolving...' : <>Resolve &amp; Close<Info size={11} className="resolver-btn-info-icon" /></>}
+              </button>
+              <button
+                className="btn-toolbar resolver-footer-btn"
+                data-tooltip={selectedCandidate ? 'Use selected candidate and advance to next — file not renamed, run Idarr to apply' : 'Save IDs and advance to next — file not renamed, run Idarr to apply'}
+                onClick={() => {
+                  selectedCandidate
+                    ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: true })
+                    : void handleResolvePending({ forceAdvance: true })
+                }}
+                disabled={resolving}
+              >
+                {resolving ? 'Resolving...' : <>Resolve &amp; Next<Info size={11} className="resolver-btn-info-icon" /></>}
+              </button>
+              <button
+                className="btn-toolbar btn-primary resolver-footer-btn"
+                data-tooltip={selectedCandidate ? 'Use selected candidate, start renaming the file, and advance to next' : 'Save IDs, start renaming the file, and advance to next'}
+                onClick={() => {
+                  selectedCandidate
+                    ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: true, andRename: true })
+                    : void handleResolveAndRename()
+                }}
+                disabled={resolving}
+              >
+                {resolving ? 'Resolving...' : <>Resolve &amp; Rename<Info size={11} className="resolver-btn-info-icon" /></>}
+              </button>
+            </>
+          ) : (
+      <>
+              <button
+                className="btn-toolbar resolver-footer-btn"
+                data-tooltip={selectedCandidate ? 'Use selected candidate — file not renamed, run Idarr to apply' : 'Save IDs — file not renamed, run Idarr to apply'}
+                onClick={() => {
+                  selectedCandidate
+                    ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false })
+                    : void handleResolvePending({ forceAdvance: false })
+                }}
+                disabled={resolving}
+              >
+                {resolving ? 'Resolving...' : <>Resolve<Info size={11} className="resolver-btn-info-icon" /></>}
+              </button>
+              <button
+                className="btn-toolbar btn-primary resolver-footer-btn"
+                data-tooltip={selectedCandidate ? 'Use selected candidate and immediately start renaming the file' : 'Save IDs and immediately start renaming the file'}
+                onClick={() => {
+                  selectedCandidate
+                    ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false, andRename: true })
+                    : void handleResolveAndRename()
+                }}
+                disabled={resolving}
+              >
+                {resolving ? 'Resolving...' : <>Resolve &amp; Rename<Info size={11} className="resolver-btn-info-icon" /></>}
+              </button>
+            </>
+          )}
+        </Modal.Footer>
+      </Modal>
     )
   }
 
@@ -2764,51 +2747,44 @@ const {
         : 'Personal Drive Sync'
 
     return (
-      <div className="modal-overlay">
-        <div className="modal-content schedule-modal">
-          <div className="modal-header">
-            <h2>
-              {pendingActionConfirm.type === 'run'
+      <Modal onClose={closeActionConfirmation} closeOnOverlay={false}>
+        <Modal.Header title={pendingActionConfirm.type === 'run'
                 ? 'Confirm IDarr Run'
                 : pendingActionConfirm.type === 'run_and_sync'
                   ? 'Confirm IDarr Run & Sync'
-                  : 'Confirm IDarr Sync'}
-            </h2>
-            <button className="modal-close" onClick={closeActionConfirmation}>×</button>
+                  : 'Confirm IDarr Sync'} />
+        <Modal.Body>
+          <p className="section-description">
+            Please confirm the selected target and action before continuing.
+            {pendingActionConfirm.type === 'run_and_sync' && (
+              <> IDarr will run first, then automatically sync to your personal drive on completion.</>
+            )}
+          </p>
+          <div className="idarr-action-confirm-details">
+            <p className="idarr-action-confirm-line"><strong>Action:</strong> <span>{stateLabel}</span></p>
+            <p className="idarr-action-confirm-line"><strong>Selected Target:</strong> <span>{targetLabel}</span></p>
+            <p className="idarr-action-confirm-line"><strong>Personal Drive ID:</strong> <span>{driveId}</span></p>
+            <p className="idarr-action-confirm-line"><strong>Sync Folder:</strong> <span>{sourceDir}</span></p>
           </div>
-          <div className="modal-body">
-            <p className="section-description">
-              Please confirm the selected target and action before continuing.
-              {pendingActionConfirm.type === 'run_and_sync' && (
-                <> IDarr will run first, then automatically sync to your personal drive on completion.</>
-              )}
-            </p>
-            <div className="idarr-action-confirm-details">
-              <p className="idarr-action-confirm-line"><strong>Action:</strong> <span>{stateLabel}</span></p>
-              <p className="idarr-action-confirm-line"><strong>Selected Target:</strong> <span>{targetLabel}</span></p>
-              <p className="idarr-action-confirm-line"><strong>Personal Drive ID:</strong> <span>{driveId}</span></p>
-              <p className="idarr-action-confirm-line"><strong>Sync Folder:</strong> <span>{sourceDir}</span></p>
-            </div>
-          </div>
-          <div className="modal-footer">
-            <button className="btn-secondary" onClick={closeActionConfirmation} disabled={running || syncing}>
-              Cancel
-            </button>
-            <button className="btn-primary" onClick={confirmPendingAction} disabled={running || syncing}>
-              {pendingActionConfirm.type === 'run'
-                ? 'Start IDarr'
-                : pendingActionConfirm.type === 'run_and_sync'
-                  ? 'Start Run & Sync'
-                  : 'Start Sync'}
-            </button>
-          </div>
-        </div>
-      </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <button className="btn-secondary" onClick={closeActionConfirmation} disabled={running || syncing}>
+            Cancel
+          </button>
+          <button className="btn-primary" onClick={confirmPendingAction} disabled={running || syncing}>
+            {pendingActionConfirm.type === 'run'
+              ? 'Start IDarr'
+              : pendingActionConfirm.type === 'run_and_sync'
+                ? 'Start Run & Sync'
+                : 'Start Sync'}
+          </button>
+        </Modal.Footer>
+      </Modal>
     )
   }
 
   const renderIDarrTabContent = () => (
-    <>
+  <>
       <Toolbar
         title="IDarr"
         description="Run native in-app IDarr processing from the UI. Configure sync targets and TMDB settings in the Settings tab."
@@ -2842,7 +2818,7 @@ const {
             <Play size={16} />
             {running ? 'Starting...' : 'Run IDarr'}
           </button>
-          <button className="btn-toolbar" onClick={openSyncConfirmation} disabled={syncing || loading || !canSync}>
+          <button className="btn-toolbar btn-primary" onClick={openSyncConfirmation} disabled={syncing || loading || !canSync}>
             <UploadCloud size={16} />
             {syncing ? 'Starting Sync...' : 'Sync to Drive'}
           </button>
@@ -2859,7 +2835,7 @@ const {
               <div className="idarr-upload-toggles">
                 <label className="idarr-upload-inline-toggle">
                   <span>Auto-Rename Single Item on Upload</span>
-                  <span className="idarr-toggle-control">
+                  <span className="toggle-switch">
                     <input
                       type="checkbox"
                       checked={config.auto_rename_quick_add}
@@ -2869,12 +2845,12 @@ const {
                         void saveMakerIdarrConfig({ ...config, auto_rename_quick_add: next })
                       }}
                     />
-                    <span className="idarr-toggle-slider" />
+                    <span className="toggle-slider" />
                   </span>
                 </label>
                 <label className={`idarr-upload-inline-toggle ${!config.auto_rename_quick_add ? 'idarr-toggle-disabled' : ''}`}>
                   <span>Auto-Upload to GDrive after Rename</span>
-                  <span className="idarr-toggle-control">
+                  <span className="toggle-switch">
                     <input
                       type="checkbox"
                       checked={config.auto_upload_quick_add}
@@ -2885,7 +2861,7 @@ const {
                         void saveMakerIdarrConfig({ ...config, auto_upload_quick_add: next })
                       }}
                     />
-                    <span className="idarr-toggle-slider" />
+                    <span className="toggle-slider" />
                   </span>
                 </label>
               </div>
@@ -2943,7 +2919,7 @@ const {
   )
 
   const renderSettingsTabContent = () => (
-    <>
+  <>
       <Toolbar
         title="Settings"
         description="Configure your IDarr workflow options, including TMDB API key, sync targets, and processing behaviour."
@@ -2956,15 +2932,7 @@ const {
               Discord
             </button>
           </div>
-          <button
-            className={`btn-toolbar ${hasUnsavedSettings ? 'btn-unsaved' : ''}`}
-            onClick={handleSave}
-            disabled={!hasUnsavedSettings || saving || loading}
-            title={hasUnsavedSettings ? 'Save changes' : 'No changes to save'}
-          >
-            <Save size={16} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
+          <SaveActions dirty={hasUnsavedSettings} saving={saving} disabled={!hasUnsavedSettings || saving || loading} onSave={handleSave} onCancel={discardSettingsEdits} />
       </Toolbar>
 
       {renderIDarrConfigurationSection()}
@@ -2972,8 +2940,8 @@ const {
   )
 
   return (
-    <div className={`page-container idarr-page${configLoaded ? ' toggle-animations-enabled' : ''}`}>
-      <div className="idarr-header">
+    <div className={`page-container idarr-page${configLoaded ? '' : ' toggles-settling'}`}>
+      <div className="page-header idarr-header">
         <h1>IDarr</h1>
         <p>Native in-app IDarr workflow tools</p>
       </div>

@@ -1,9 +1,10 @@
-import { AlertCircle, CheckCircle, Eye, Info, Plus, Save, Trash2, Waves, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Eye, Info, Plus, Trash2, Waves, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FlowConfig, FlowResult, IdarrFlowJobConfig, MakerIdarrSyncTarget, Workflow } from '../../api/client'
 import ConfirmDialog from '../ConfirmDialog'
 import Toolbar from '../Toolbar'
+import SaveActions from '../../components/SaveActions'
 
 type FlowTabProps = {
   workflows: Workflow[]
@@ -24,6 +25,7 @@ type FlowTabProps = {
   onCreateWorkflow: () => Promise<void> | void
   onDeleteWorkflow: () => void
   onSaveFlowConfig: () => void
+  onCancelFlowConfig: () => void
   onRunFlow: (dryRun: boolean) => void
   onChangeFlowConfig: (job: keyof FlowConfig, field: 'enabled' | 'stop_on_error' | 'delete_unknown' | 'posters' | 'artwork', value: boolean) => void
   onChangeIdarrFlowConfig: (field: keyof IdarrFlowJobConfig, value: boolean | number[]) => void
@@ -49,6 +51,7 @@ function FlowTab({
   onCreateWorkflow,
   onDeleteWorkflow,
   onSaveFlowConfig,
+  onCancelFlowConfig,
   onRunFlow,
   onChangeFlowConfig,
   onChangeIdarrFlowConfig,
@@ -123,15 +126,12 @@ function FlowTab({
             Discord
           </button>
         </div>
-        <button className={`btn-toolbar ${hasUnsavedFlowChanges ? 'btn-unsaved' : ''}`} onClick={onSaveFlowConfig} disabled={idarrScopeError || !hasUnsavedFlowChanges || saving} title={idarrScopeError ? 'Select at least one IDarr scope' : hasUnsavedFlowChanges ? undefined : 'No changes to save'}>
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Workflow'}
-        </button>
+        <SaveActions dirty={hasUnsavedFlowChanges} saving={saving} disabled={idarrScopeError || !hasUnsavedFlowChanges || saving} onSave={onSaveFlowConfig} onCancel={onCancelFlowConfig} />
         <button className="btn-toolbar" onClick={() => onRunFlow(true)} disabled={flowRunning} title="Dry run workflow">
           <Eye size={16} />
           Dry Run
         </button>
-        <button className="btn-toolbar btn-primary run-flow-btn" onClick={() => onRunFlow(false)} disabled={flowRunning}>
+        <button className="btn-toolbar btn-primary" onClick={() => onRunFlow(false)} disabled={flowRunning}>
           <Waves size={16} />
           {flowRunning ? 'Running...' : 'Run Workflow'}
         </button>
@@ -340,7 +340,7 @@ function FlowTab({
               <span className="toggle-slider"></span>
             </label>
           </div>
-          <p className="job-description">Upload organized posters to your media server libraries. Automatically re-uploads when a better style poster (e.g. CL2K over MM2K) replaces an existing one.</p>
+          <p className="job-description">Upload organized posters to your media server libraries. Automatically re-uploads when a better style poster (e.g. CL2K over MM2K) replaces an existing one. With overlays on, posters go up badged and badges that went stale are refreshed.</p>
           {flowConfig.plex_upload.enabled && (
             <div className="job-options">
               <label className="checkbox-option">

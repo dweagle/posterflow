@@ -1,0 +1,115 @@
+/* Buttons: one base look, a few variants, a small size. A variant class is enough on its own
+   (markup mostly writes `btn-secondary`, not `btn btn-secondary`). Page stylesheets place buttons;
+   they do not restyle them. Toolbar buttons (`.btn-toolbar`, components/Toolbar.css) share these
+   metrics with their own colors. */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  height: 2rem;
+  padding: 0 var(--sp-16);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn svg,
+.btn-primary svg,
+.btn-secondary svg,
+.btn-danger svg {
+  flex-shrink: 0;
+}
+
+.btn:disabled,
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* The one action a form or dialog is for: the soft blue with white lettering. */
+.btn-primary {
+  background: var(--color-button-primary);
+  color: var(--color-text);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-button-primary-hover);
+}
+
+/* Everything beside it: Cancel, Reset, secondary actions. */
+.btn-secondary {
+  background: var(--color-surface-raised);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-border);
+}
+
+/* Destructive: delete, clear, remove. */
+.btn-danger {
+  background: var(--color-danger);
+  color: var(--color-text);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--color-danger-strong);
+}
+
+/* A button that reads as a link, inline with text. */
+.btn-link {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.btn-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+/* Sizes. */
+.btn-sm {
+  height: 1.75rem;
+  padding: 0 var(--sp-8);
+  font-size: var(--text-sm);
+}
+
+/* The smallest: a button beside a compact field, at the field's height (the Tools settings). */
+.btn-xs {
+  height: 1.5rem;
+  padding: 0 var(--sp-6);
+  gap: var(--sp-4);
+  font-size: var(--text-xs);
+}
+
+.btn-block {
+  width: 100%;
+}
+
+/* Unsaved edits: a Save button turns red until they are saved, whatever its base class. */
+.btn-unsaved {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-soft);
+  color: var(--color-text);
+}
+
+.btn-unsaved:hover:not(:disabled) {
+  background: var(--color-danger-strong);
+  border-color: var(--color-danger-strong);
+}

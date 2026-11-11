@@ -55,6 +55,46 @@ const DEFAULT_CONFIGS: SidebarItemConfig[] = NAV_ITEM_DEFS.map((item, i) => ({
   order: i,
 }))
 
+const SIDEBAR_CONFIG_CACHE_KEY = 'posterflow.sidebar.config'
+
+// A saved layout over the current item list: the saved items in their order, items added since at the end.
+export function mergeSidebarConfigs(saved: SidebarItemConfig[]): SidebarItemConfig[] {
+  const merged: SidebarItemConfig[] = []
+  let maxOrder = saved.reduce((m, c) => Math.max(m, c.order), -1)
+  for (const savedItem of [...saved].sort((a, b) => a.order - b.order)) {
+    if (NAV_ITEM_DEFS.find(d => d.id === savedItem.id)) merged.push(savedItem)
+  }
+  for (const def of NAV_ITEM_DEFS) {
+    if (!merged.find(c => c.id === def.id)) {
+      maxOrder++
+      merged.push({ id: def.id, visible: true, order: maxOrder })
+    }
+  }
+  return merged
+}
+
+// The layout this browser last saw, so the first paint already has the saved order and nothing
+// jumps when the settings arrive. The settings stay the source of truth and refresh the cache.
+export function readCachedSidebarConfigs(): SidebarItemConfig[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(SIDEBAR_CONFIG_CACHE_KEY) || 'null')
+    if (Array.isArray(parsed) && parsed.every((c) => c && typeof c.id === 'string' && typeof c.visible === 'boolean' && typeof c.order === 'number')) {
+      return mergeSidebarConfigs(parsed as SidebarItemConfig[])
+    }
+  } catch {
+    // no usable cache
+  }
+  return DEFAULT_CONFIGS
+}
+
+function cacheSidebarConfigs(configs: SidebarItemConfig[]) {
+  try {
+    localStorage.setItem(SIDEBAR_CONFIG_CACHE_KEY, JSON.stringify(configs))
+  } catch {
+    // storage unavailable: the next load paints the defaults first
+  }
+}
+
 function getNavIcon(id: string, color: string, size = 20) {
   switch (id) {
     case 'dashboard': return <LayoutDashboard size={size} color={color} />
@@ -84,8 +124,8 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const [version, setVersion] = useState<string>('0.1.0')
   // Sidebar customization
   const [isCustomizing, setIsCustomizing] = useState(false)
-  const [itemConfigs, setItemConfigs] = useState<SidebarItemConfig[]>(DEFAULT_CONFIGS)
-  const [pendingConfigs, setPendingConfigs] = useState<SidebarItemConfig[]>(DEFAULT_CONFIGS)
+  const [itemConfigs, setItemConfigs] = useState<SidebarItemConfig[]>(readCachedSidebarConfigs)
+  const [pendingConfigs, setPendingConfigs] = useState<SidebarItemConfig[]>(readCachedSidebarConfigs)
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [isSavingConfig, setIsSavingConfig] = useState(false)
@@ -288,26 +328,10 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
     const loadSidebarConfig = async () => {
       try {
         const allSettings = await getSettings()
-        if (allSettings.sidebar_config) {
-          const saved = JSON.parse(allSettings.sidebar_config) as SidebarItemConfig[]
-          const merged: SidebarItemConfig[] = []
-          let maxOrder = saved.reduce((m, c) => Math.max(m, c.order), -1)
-          // Preserve saved order/visibility
-          for (const savedItem of [...saved].sort((a, b) => a.order - b.order)) {
-            if (NAV_ITEM_DEFS.find(d => d.id === savedItem.id)) {
-              merged.push(savedItem)
-            }
-          }
-          // Add any new items that weren't in saved config
-          for (const def of NAV_ITEM_DEFS) {
-            if (!merged.find(c => c.id === def.id)) {
-              maxOrder++
-              merged.push({ id: def.id, visible: true, order: maxOrder })
-            }
-          }
-          setItemConfigs(merged)
-          setPendingConfigs(merged)
-        }
+        const merged = allSettings.sidebar_config ? mergeSidebarConfigs(JSON.parse(allSettings.sidebar_config) as SidebarItemConfig[]) : DEFAULT_CONFIGS
+        setItemConfigs(merged)
+        setPendingConfigs(merged)
+        cacheSidebarConfigs(merged)
       } catch {
         // Keep defaults on error
       }
@@ -332,6 +356,7 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
     try {
       const normalized = pendingConfigs.map((c, i) => ({ ...c, order: i }))
       await saveSettings({ sidebar_config: JSON.stringify(normalized) })
+      cacheSidebarConfigs(normalized)
       setItemConfigs(normalized)
       setIsCustomizing(false)
       setDraggedId(null)
@@ -542,7 +567,7 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
               {pendingConfigs.map(config => {
                 const def = NAV_ITEM_DEFS.find(d => d.id === config.id)
                 if (!def) return null
-                const iconColor = config.visible ? def.iconColor : '#555'
+                const iconColor = config.visible ? def.iconColor : 'var(--color-line-soft)'
                 return (
                   <div
                     key={config.id}
@@ -559,7 +584,7 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                     onDragEnd={handleCustomizeDragEnd}
                   >
                     <span className="sidebar-customize-grip">
-                      <GripVertical size={15} color="#666" />
+                      <GripVertical size={15} color="var(--color-text-disabled)" />
                     </span>
                     <span className="icon sidebar-customize-icon">{getNavIcon(def.id, iconColor, 18)}</span>
                     <span className="sidebar-customize-label">{def.label}</span>
@@ -570,8 +595,8 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                       type="button"
                     >
                       {config.visible
-                        ? <Eye size={15} color="#64b5f6" />
-                        : <EyeOff size={15} color="#555" />
+                        ? <Eye size={15} color="var(--color-accent)" />
+                        : <EyeOff size={15} color="var(--color-line-soft)" />
                       }
                     </button>
                   </div>
@@ -581,20 +606,20 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
               {/* Settings is always visible — not configurable */}
               <div className="sidebar-customize-item sidebar-customize-item--locked">
                 <span className="sidebar-customize-grip sidebar-customize-grip--locked">
-                  <GripVertical size={15} color="#444" />
+                  <GripVertical size={15} color="var(--color-border-strong)" />
                 </span>
-                <span className="icon sidebar-customize-icon"><Settings size={18} color="#666" /></span>
+                <span className="icon sidebar-customize-icon"><Settings size={18} color="var(--color-text-disabled)" /></span>
                 <span className="sidebar-customize-label sidebar-customize-label--locked">Settings</span>
                 <span className="sidebar-customize-locked-badge">locked</span>
               </div>
             </div>
 
             <div className="sidebar-customize-btn-row sidebar-customize-btn-row--active">
-              <button className="sidebar-customize-cancel" onClick={handleCancelCustomize} type="button">
+              <button className="btn-secondary btn-sm sidebar-customize-cancel" onClick={handleCancelCustomize} type="button">
                 Cancel
               </button>
               <button
-                className="sidebar-customize-done"
+                className="btn-primary btn-sm sidebar-customize-done"
                 onClick={() => void handleSaveCustomization()}
                 disabled={isSavingConfig}
                 type="button"

@@ -35,7 +35,14 @@ import { usePosterManagerSettings } from '../hooks/usePosterManagerSettings'
 import { usePosterManagerActions } from '../hooks/usePosterManagerActions'
 import { usePosterManagerLifecycle } from '../hooks/usePosterManagerLifecycle'
 import { usePosterManagerManualMedia } from '../hooks/usePosterManagerManualMedia'
-import './PosterManager.css'
+import './poster-manager/base.css'
+import './poster-manager/flow.css'
+import './poster-manager/renamer.css'
+import './poster-manager/settings.css'
+import './poster-manager/border.css'
+import './poster-manager/priority.css'
+import './poster-manager/unmatched.css'
+import './poster-manager/requests.css'
 
 // Limits to prevent performance issues
 const CARD_PREVIEW_LIMIT = 5 // Number of items to show in card preview
@@ -520,8 +527,8 @@ function PosterManager() {
 
   return (
     <CommunityClaimStatusProvider>
-    <div className="page-container poster-manager">
-      <div className="poster-manager-header">
+    <div className={`page-container poster-manager pm-tab-${activeTab}`}>
+      <div className="page-header poster-manager-header">
         <h1>Asset Manager</h1>
         <p>Rename, organize and upload posters and artwork</p>
       </div>
@@ -533,13 +540,13 @@ function PosterManager() {
       />
 
 
-
       {activeTab === 'settings' && (
         <SettingsTab
           config={config}
           hasUnsavedChanges={hasUnsavedChanges}
           saving={saving}
           onSaveConfig={handleSaveConfig}
+          onCancelConfig={resetConfigToOriginal}
           onConfigChange={handleConfigChange}
         />
       )}
@@ -557,6 +564,7 @@ function PosterManager() {
               hasUnsavedPriorityChanges={hasUnsavedPriorityChanges}
               saving={saving}
               onSavePriority={savePriority}
+              onCancelPriority={resetPriorityToOriginal}
               enabledStyles={enabledStyles}
               onToggleStyle={(style) => toggleStyle(style)}
               drives={drives}
@@ -601,6 +609,7 @@ function PosterManager() {
           onShowSettings={() => setShowUnmatchedSettings(true)}
           typeNoun={UNMATCHED_TYPE_NOUN[unmatchedScope]}
           onSaveSettings={saveRenameSettings}
+          onCancelSettings={resetLibrarySettingsToOriginal}
           onDetectUnmatched={handleDetectUnmatched}
           onDownloadReport={downloadCompleteReport}
           onToggleLibrarySelection={toggleLibrarySelection}
@@ -656,6 +665,7 @@ function PosterManager() {
           formImdbId={formImdbId}
           adding={adding}
           onSaveSettings={handleSaveAssetRenamerSettings}
+          onCancelSettings={() => { resetLibrarySettingsToOriginal(); resetBorderSettingsToOriginal(); setAssetInclude([...originalAssetInclude]) }}
           onRunRename={handleStartAssetRename}
           onSetAutoRunBorder={setAutoRunBorder}
           onSetAutoRunCleanup={setAutoRunCleanup}
@@ -693,6 +703,7 @@ function PosterManager() {
           seasonWidth={seasonWidth}
           seasonStyle={seasonStyle}
           onSaveSettings={saveBorderSettings}
+          onCancelSettings={resetBorderSettingsToOriginal}
           onResetBorderSettings={resetBorderSettingsToDefaults}
           onRunBorderReplacer={handleRunBorderReplacer}
           onSetBorderWidth={setBorderWidth}
@@ -762,6 +773,7 @@ function PosterManager() {
           onCreateWorkflow={createNewWorkflow}
           onDeleteWorkflow={deleteSelectedWorkflow}
           onSaveFlowConfig={handleSaveFlowConfig}
+          onCancelFlowConfig={resetFlowConfigToOriginal}
           onRunFlow={handleRunFlow}
           onChangeFlowConfig={handleFlowConfigChange}
           onChangeIdarrFlowConfig={handleIdarrFlowConfigChange}

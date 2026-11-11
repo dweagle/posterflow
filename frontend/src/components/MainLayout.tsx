@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import RouteLoading from './RouteLoading'
+import { Suspense, useState, useEffect } from 'react'
 import { BookOpen, Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
 import IdarrQuickAddNoticeHost from './IdarrQuickAddNotice'
@@ -64,7 +65,7 @@ function MainLayout() {
             </svg>
           </a>
         </div>
-        <Outlet />
+        <Suspense fallback={<RouteLoading />}><Outlet /></Suspense>
       </div>
       <IdarrQuickAddNoticeHost />
       <UpdateBanner />

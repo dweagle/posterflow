@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Trash2, RefreshCw, Download, FileText, ChevronDown, ChevronUp, Monitor, Briefcase, Radio, Search, X } from 'lucide-react'
 import './Logs.css'
+import Tabs from '../components/Tabs'
 
 const LOGS_TAB_STORAGE_KEY = 'posterflow.logs.activeTab'
 type LogsTab = 'system' | 'job'
@@ -36,11 +37,11 @@ const LogsHistoryHeader = ({ status }: { status: HistoryStatus }) => {
 
 const getLevelColor = (level: string) => {
   switch (level) {
-    case 'DEBUG': return '#64b5f6'
-    case 'INFO': return '#4caf50'
-    case 'WARNING': return '#ff9800'
-    case 'ERROR': return '#f44336'
-    default: return '#ccc'
+    case 'DEBUG': return 'var(--color-accent)'
+    case 'INFO': return 'var(--color-success)'
+    case 'WARNING': return 'var(--color-warning-strong)'
+    case 'ERROR': return 'var(--color-danger)'
+    default: return 'var(--color-text-secondary)'
   }
 }
 
@@ -697,73 +698,66 @@ function Logs() {
 
   return (
     <div className={`page-container logs-page${activeTab === 'system' ? ' logs-page-fill' : ''}`}>
-      <div className="logs-header">
+      <div className="page-header logs-header">
         <h1>Logs</h1>
         <p>View system and job logs</p>
-        <div className="tabs">
-          <button 
-            className={`tab ${activeTab === 'system' ? 'active' : ''}`}
-            onClick={() => setActiveTab('system')}
-          >
-            <Monitor size={16} className="tab-icon icon-system" />
-            System Logs
-          </button>
-          <button 
-            className={`tab ${activeTab === 'job' ? 'active' : ''}`}
-            onClick={() => setActiveTab('job')}
-          >
-            <Briefcase size={16} className="tab-icon icon-job" />
-            Job Logs
-          </button>
-        </div>
+        <Tabs
+          ariaLabel="Log kinds"
+          value={activeTab}
+          onChange={setActiveTab}
+          items={[
+            { key: 'system', label: 'System Logs', icon: <Monitor size={16} className="icon-system" /> },
+            { key: 'job', label: 'Job Logs', icon: <Briefcase size={16} className="icon-job" /> },
+          ]}
+        />
       </div>
 
       {activeTab === 'system' ? (
         <>
           <div className="logs-search-row">
-            <div className="logs-search">
-              <div className="logs-search-box">
-                <input
-                  type="text"
-                  placeholder="Search the log file…"
-                  value={searchInput}
-                  onChange={(e) => handleSearchChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') runFileSearch()
-                    if (e.key === 'Escape') clearSearch()
-                  }}
-                />
-                {(searchInput.trim() !== '' || fileSearch) && (
-                  <button className="logs-search-clear-inner" onClick={clearSearch} title="Clear search">
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-              <button className="btn-log-search" onClick={runFileSearch} disabled={fileSearchLoading || searchInput.trim().length < 2}>
-                <Search size={15} />
-                Search
-              </button>
-              <span className="logs-search-meta">
-                {fileSearch && fileSearchFiltered && (
-                  <span className="logs-match-nav" title={`${fileSearch.total.toLocaleString()} matches in file${fileSearch.truncated ? `, showing last ${fileSearch.entries.length.toLocaleString()}` : ''}`}>
-                    <button className="btn-match-nav" onClick={() => cycleFileMatch(-1)} title="Previous (older) match">
-                      <ChevronUp size={14} />
+              <div className="logs-search">
+                <div className="logs-search-box">
+                  <input
+                    type="text"
+                    placeholder="Search the log file…"
+                    value={searchInput}
+                    onChange={(e) => handleSearchChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') runFileSearch()
+                      if (e.key === 'Escape') clearSearch()
+                    }}
+                  />
+                  {(searchInput.trim() !== '' || fileSearch) && (
+                    <button className="btn-icon btn-icon-sm logs-search-clear-inner" onClick={clearSearch} title="Clear search">
+                      <X size={14} />
                     </button>
-                    <button className="btn-match-nav" onClick={() => cycleFileMatch(1)} title="Next (newer) match">
-                      <ChevronDown size={14} />
-                    </button>
-                    <span className="logs-match-counter">
-                      {fileSearchFiltered.length === 0 ? '0 / 0' : `${(fileMatchClamped + 1).toLocaleString()} / ${fileSearchFiltered.length.toLocaleString()}`}
-                      {` (${fileSearch.total.toLocaleString()})`}
+                  )}
+                </div>
+                <button className="btn-primary btn-log-search" onClick={runFileSearch} disabled={fileSearchLoading || searchInput.trim().length < 2}>
+                  <Search size={15} />
+                  Search
+                </button>
+                <span className="logs-search-meta">
+                  {fileSearch && fileSearchFiltered && (
+                    <span className="logs-match-nav" title={`${fileSearch.total.toLocaleString()} matches in file${fileSearch.truncated ? `, showing last ${fileSearch.entries.length.toLocaleString()}` : ''}`}>
+                      <button className="btn-icon btn-icon-sm btn-icon-outlined" onClick={() => cycleFileMatch(-1)} title="Previous (older) match">
+                        <ChevronUp size={14} />
+                      </button>
+                      <button className="btn-icon btn-icon-sm btn-icon-outlined" onClick={() => cycleFileMatch(1)} title="Next (newer) match">
+                        <ChevronDown size={14} />
+                      </button>
+                      <span className="logs-match-counter">
+                        {fileSearchFiltered.length === 0 ? '0 / 0' : `${(fileMatchClamped + 1).toLocaleString()} / ${fileSearchFiltered.length.toLocaleString()}`}
+                        {` (${fileSearch.total.toLocaleString()})`}
+                      </span>
                     </span>
-                  </span>
-                )}
-              </span>
-            </div>
+                  )}
+                </span>
+              </div>
           </div>
 
           <div className="logs-controls">
-            <div className="filter-buttons">
+            <div className="filter-buttons pf-subtabs">
               <button 
                 className={filter === 'all' ? 'active' : ''} 
                 onClick={() => setFilter('all')}
@@ -796,26 +790,28 @@ function Logs() {
               </button>
             </div>
 
-            <div className="auto-refresh">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.checked)}
-                />
-                Auto-refresh
-              </label>
+            <div className="logs-actions">
+              <div className="auto-refresh">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={autoRefresh}
+                    onChange={(e) => setAutoRefresh(e.target.checked)}
+                  />
+                  Auto-refresh
+                </label>
+              </div>
+
+              <button className="btn-secondary" onClick={fetchLogs}>
+                <RefreshCw size={16} />
+                Refresh
+              </button>
+
+              <button className="btn-danger" onClick={() => setShowConfirm(true)}>
+                <Trash2 size={16} />
+                Clear Logs
+              </button>
             </div>
-
-            <button className="btn-refresh" onClick={fetchLogs}>
-              <RefreshCw size={16} />
-              Refresh
-            </button>
-
-            <button className="btn-clear" onClick={() => setShowConfirm(true)}>
-              <Trash2 size={16} />
-              Clear Logs
-            </button>
           </div>
 
           <ConfirmDialog
@@ -878,7 +874,7 @@ function Logs() {
             </div>
 
             {!fileSearch && !followLatest && logs.length > 0 && (
-              <button className="btn-jump-latest btn-jump-latest-floating" onClick={jumpToLatest}>
+              <button className="btn-secondary btn-jump-latest-floating" onClick={jumpToLatest}>
                 <ChevronDown size={16} />
                 Jump to latest
               </button>
@@ -888,7 +884,7 @@ function Logs() {
       ) : (
         <div className="job-logs-content">
           <div className="job-logs-header-controls">
-            <button onClick={fetchJobLogs} disabled={jobLogsLoading} className="btn-refresh">
+            <button onClick={fetchJobLogs} disabled={jobLogsLoading} className="btn-secondary">
               <RefreshCw size={18} className={jobLogsLoading ? 'spinning' : ''} />
               Refresh
             </button>
@@ -928,7 +924,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('workflow', file.name)
@@ -977,7 +973,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('sync_one', file.name)
@@ -1026,7 +1022,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('sync_all', file.name)
@@ -1075,7 +1071,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('poster_renamer', file.name)
@@ -1124,7 +1120,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('border_replacer', file.name)
@@ -1173,7 +1169,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('unmatched_assets', file.name)
@@ -1222,7 +1218,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('idarr', file.name)
@@ -1271,7 +1267,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('artwork_pull', file.name)
@@ -1320,7 +1316,7 @@ function Logs() {
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
-                              className="btn-download-mini"
+                              className="btn-icon btn-icon-sm btn-download-mini"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('plex_upload', file.name)
@@ -1349,13 +1345,13 @@ function Logs() {
                         {liveConnected ? 'Connected' : 'Disconnected'}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <div className="row">
                       {!liveFollowLatest && (
-                        <button className="btn-jump-latest" onClick={jumpLiveToLatest} title="Resume following the latest output">
+                        <button className="btn-secondary" onClick={jumpLiveToLatest} title="Resume following the latest output">
                           <ChevronDown size={16} /> Jump to latest
                         </button>
                       )}
-                      <button className="btn-close-live" onClick={stopLiveTail} title="Close live view">
+                      <button className="btn-secondary" onClick={stopLiveTail} title="Close live view">
                         <X size={16} /> Close
                       </button>
                     </div>
@@ -1399,12 +1395,12 @@ function Logs() {
                           }}
                         />
                         {(jobSearch.trim() !== '' || jobFileSearch) && (
-                          <button className="logs-search-clear-inner" onClick={clearJobSearch} title="Clear search">
+                          <button className="btn-icon btn-icon-sm logs-search-clear-inner" onClick={clearJobSearch} title="Clear search">
                             <X size={12} />
                           </button>
                         )}
                       </div>
-                      <button className="btn-log-search" onClick={runJobSearch} disabled={jobSearch.trim().length < 2}>
+                      <button className="btn-primary btn-log-search" onClick={runJobSearch} disabled={jobSearch.trim().length < 2}>
                         <Search size={14} />
                         Search
                       </button>
@@ -1413,10 +1409,10 @@ function Logs() {
                           className="logs-match-nav"
                           title={`${jobFileSearch.total.toLocaleString()} matches in file${jobFileSearch.truncated ? `, showing last ${jobFileSearch.lines.length.toLocaleString()}` : ''}`}
                         >
-                          <button className="btn-match-nav" onClick={() => cycleJobMatch(-1)} title="Previous (older) match">
+                          <button className="btn-icon btn-icon-sm btn-icon-outlined" onClick={() => cycleJobMatch(-1)} title="Previous (older) match">
                             <ChevronUp size={14} />
                           </button>
-                          <button className="btn-match-nav" onClick={() => cycleJobMatch(1)} title="Next (newer) match">
+                          <button className="btn-icon btn-icon-sm btn-icon-outlined" onClick={() => cycleJobMatch(1)} title="Next (newer) match">
                             <ChevronDown size={14} />
                           </button>
                           <span className="logs-match-counter">
@@ -1427,7 +1423,7 @@ function Logs() {
                       )}
                     </div>
                     <button
-                      className="btn-download"
+                      className="btn-secondary"
                       onClick={() => handleDownload(selectedLog.type, selectedLog.file.name)}
                     >
                       <Download size={18} />

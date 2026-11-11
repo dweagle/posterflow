@@ -147,13 +147,13 @@ export default function ReminderToggle({ kind, item }: Props) {
           />
           <div className="tmdb-reminder-pop-actions">
             {active && (
-              <button type="button" className="tmdb-reminder-pop-btn tmdb-reminder-pop-btn--danger" onClick={() => void remove()} disabled={busy}>
+              <button type="button" className="btn-danger btn-sm" onClick={() => void remove()} disabled={busy}>
                 <Trash2 size={12} /> Remove
               </button>
             )}
             <span className="tmdb-reminder-pop-spacer" />
-            <button type="button" className="tmdb-reminder-pop-btn" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
-            <button type="button" className="tmdb-reminder-pop-btn tmdb-reminder-pop-btn--primary" onClick={() => void save()} disabled={busy}>
+            <button type="button" className="btn-secondary btn-sm" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
+            <button type="button" className="btn-primary btn-sm" onClick={() => void save()} disabled={busy}>
               {busy ? 'Saving…' : active ? 'Save' : 'Add reminder'}
             </button>
           </div>

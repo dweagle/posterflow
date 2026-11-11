@@ -1,0 +1,633 @@
+/* Maker Tools page shell: panel, scope row, tabs, cards, settings rows, stat cards, lists, badges, the IDarr drop target. */
+
+.maker-tools-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.maker-tools-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+}
+
+/* The panel's own gap spaces the toolbar; the shared margin would double it. */
+
+.maker-tools-panel .toolbar {
+  margin-bottom: 0;
+}
+
+/* Toolbar styling lives in styles/globals.css. This bar sits in .maker-tools-panel,
+   a flex column whose gap already spaces it, so it drops the baseline's bottom margin. */
+
+.maker-tools-page .toolbar {
+  margin-bottom: 0;
+}
+
+/* Unmatched: the Posters/Artwork subtabs and the artwork scope picker share one row,
+   with the picker sitting just to the right of the subtabs. */
+
+/* Sticky row above a card list (the Requests page's list header, ported): the page's sub-tabs
+   or filters on the left, the IDarr / artwork scope picker on the right. The scrolling .content
+   has 2rem padding and Chrome pins sticky boxes inside it, so the negative top lands the row
+   flush with the top edge. */
+
+.maker-scope-row {
+  position: sticky;
+  top: -2rem;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  flex-wrap: wrap;
+    background: var(--color-page-bg);
+  border-bottom: 1px solid var(--color-surface-raised);
+}
+
+.maker-scope-row-main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.maker-scope-row-control {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.maker-scope-row .artwork-scope-control {
+  margin-left: 0;
+}
+
+/* .maker-subtabs carries a 0.25rem top margin for its discovery-tab use (below the stat
+   cards); inside the row it already sits the standard 1rem below the toolbar. */
+
+.maker-scope-row .maker-subtabs {
+  margin-top: 0;
+}
+
+@media (max-width: 550px) {
+  /* Wraps to several rows on a phone; pinning it would eat the viewport. */
+  .maker-scope-row {
+    position: static;
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+}
+
+.artwork-scope-control {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-left: var(--sp-12);
+  color: var(--color-text-secondary);
+}
+
+.artwork-scope-control .artwork-scope-label {
+  font-weight: 600;
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+
+.artwork-scope-control select {
+  padding: var(--sp-6) var(--sp-8);
+  font-size: var(--text-md);
+  min-width: 200px;
+}
+
+/* Missing-artwork badges on unmatched cards — red-tinted so they don't read as the
+   blue/green/orange media-type badges. Page-scoped: appears on finder cards AND the
+   resolve-first cards. */
+
+.maker-tools-page .badge.artwork-missing-badge {
+  background: rgba(var(--rgb-danger), 0.16);
+  border: 1px solid rgba(var(--rgb-danger), 0.45);
+  color: var(--color-danger-text);
+}
+
+.maker-tools-page .artwork-missing-label {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.maker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--card-gap);
+}
+
+.maker-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.maker-card h3 {
+  margin: 0 0 var(--sp-12);
+  color: var(--color-title);
+  font-size: var(--text-base);
+}
+
+/* A field label is a wrapping row: the caption and its info icon share the first line, the
+   control takes a full line under them. */
+
+.maker-card label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-6);
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+  margin-bottom: var(--sp-12);
+}
+
+.maker-card label > input:not([type='checkbox']):not([type='radio']),
+.maker-card label > select {
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.maker-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.maker-help-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-raised);
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.maker-help-button:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.maker-card input {
+  padding: var(--sp-8) var(--sp-8);
+  font-size: var(--text-md);
+}
+
+.maker-tools-page .maker-card input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.maker-tools-page .maker-card input[type='number']::-webkit-outer-spin-button,
+.maker-tools-page .maker-card input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.maker-card label.maker-checkbox-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.maker-checkbox-row input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.maker-card select {
+  padding: var(--sp-8) var(--sp-8);
+  font-size: var(--text-md);
+}
+
+.maker-card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+}
+
+.maker-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  padding: var(--sp-4) 0;
+}
+
+/* Label + info icon on one line, vertically centred on the toggle. Rows with extra controls
+   (Default Editor) wrap below the label. */
+
+.maker-setting-row > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+/* Default Editor: the Photopea / Photoshop choice sits where the other rows keep their toggle. */
+
+.maker-setting-row .editor-choice {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-16);
+  flex-shrink: 0;
+  font-size: var(--text-md);
+}
+
+/* `.maker-card label` stacks labels as flex columns; these must stay radio-then-text on one line. */
+
+.modal-body .editor-choice label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-6);
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Outranks DriveEditModal's `.modal-body input:not([type='checkbox'])`, which would stretch the
+   radio to full width (text wraps under it) and pad it like a text field. */
+
+.modal-body .editor-choice input[type="radio"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  accent-color: var(--color-accent);
+}
+
+.maker-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.maker-list-item {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 90px 44px;
+  gap: var(--sp-8);
+}
+
+.maker-list-item.maker-drive-item {
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
+}
+
+.maker-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.maker-tools-page .stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-12);
+  background: var(--color-surface);
+}
+
+.maker-tools-page .stat-card span {
+  color: var(--color-accent);
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+
+.maker-tools-page .stat-card small {
+  color: var(--color-text-dim);
+}
+
+.maker-result-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--sp-12);
+}
+
+/* Category filter tabs (All | Movies) and the Monitor library result tabs. */
+
+.maker-result-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  padding: var(--sp-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.maker-library-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-12);
+}
+
+.maker-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  margin-top: var(--sp-4);
+}
+
+.maker-language-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.maker-language-group h4 {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+}
+
+.maker-show-list.full-width {
+  width: 100%;
+}
+
+.maker-show-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* Combined entry card: one box, the status color on the left bar, the header
+   row on top and the TMDB maker card flush inside it (like the request cards). */
+
+.maker-show-entry {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-inset);
+}
+
+.maker-show-entry.ready {
+  border-left-color: var(--color-success);
+}
+
+.maker-show-entry.todo {
+  border-left-color: var(--color-warning-strong);
+}
+
+/* Header row inside the combined card — no box of its own. */
+
+.maker-show-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-12);
+  padding: var(--sp-8) var(--sp-8);
+}
+
+/* Holds the TMDB maker card; just insets it, no separate box. */
+
+.maker-card-panel {
+  padding: 0 var(--sp-8) var(--sp-8);
+}
+
+.maker-show-item a {
+  color: var(--color-text);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.maker-show-item a:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.maker-show-item span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+}
+
+.maker-show-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.maker-show-title-row {
+  display: block;
+}
+
+.maker-badges {
+  display: flex;
+  gap: var(--sp-6);
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.maker-badges.wrap {
+  flex-wrap: wrap;
+}
+
+.maker-tools-page .badge {
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.maker-tools-page .badge svg {
+  flex-shrink: 0;
+}
+
+.maker-tools-page .badge-green {
+  background: rgba(var(--rgb-success), 0.14);
+  color: var(--color-text-body);
+  border-color: rgba(var(--rgb-success), 0.32);
+}
+
+.maker-tools-page .badge-orange {
+  background: rgba(var(--rgb-warning), 0.12);
+  color: var(--color-text-body);
+  border-color: rgba(var(--rgb-warning), 0.3);
+}
+
+.maker-tools-page .badge-blue {
+  background: rgba(var(--rgb-accent), 0.2);
+  color: var(--color-text-body);
+  border-color: var(--color-accent);
+}
+
+.maker-tools-page .badge-purple {
+  background: rgba(var(--rgb-purple), 0.14);
+  color: var(--color-text-body);
+  border-color: rgba(var(--rgb-purple), 0.32);
+}
+
+.maker-tools-page .badge-grey {
+  background: var(--tint);
+  color: var(--color-text-body);
+  border-color: var(--hairline);
+}
+
+@media (max-width: 1200px) {
+  .maker-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-library-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .maker-list-item {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-list-item.maker-drive-item {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-show-item {
+    flex-direction: column;
+  }
+
+  .maker-badges {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 550px) {
+  .maker-library-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.tmdb-search-bar .btn-toolbar {
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.unmatched-maker-controls .maker-result-tabs {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.unmatched-maker-empty .btn-toolbar {
+  margin-top: var(--sp-8);
+}
+
+.unmatched-maker-inline-resolve .text-dim {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+/* ── Reminders ──────────────────────────────────────────────────────────── */
+
+/* Count on the main Reminders tab: a small badge pinned to the bell icon's corner, out of the
+   flow, so appearing or growing never resizes the tab strip or nudges the tabs beside it. */
+
+.maker-tab-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.maker-tab-count {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 var(--sp-2);
+  box-sizing: border-box;
+  border-radius: var(--radius-pill);
+  background: var(--color-warning);
+  color: var(--color-surface-sunken);
+  font-size: var(--text-3xs);
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* ── IDarr drop target on the maker / artwork cards ─────────────────────── */
+
+/* The whole card accepts the drop (useIdarrDrop); this box is the visual cue, matching the
+   community request card's drop zone. pointer-events off so it never steals the drag events. */
+
+.idarr-drop-zone {
+  flex-shrink: 0;
+  width: 80px;
+  align-self: stretch;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  color: var(--color-line-soft);
+  font-size: var(--text-2xs);
+  text-align: center;
+  padding: var(--sp-8);
+  line-height: 1.3;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  pointer-events: none;
+}
+
+.idarr-drop-zone.drop-active {
+  border-color: var(--color-accent);
+  background: rgba(var(--rgb-accent), 0.07);
+  color: var(--color-accent);
+}
+
+.idarr-drop-zone--adding {
+  border-style: solid;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.idarr-drop-zone--done {
+  border-color: var(--color-success);
+  background: rgba(var(--rgb-success), 0.08);
+  color: var(--color-success-soft);
+}
+
+.art-gallery-actions > .btn-toolbar { min-width: 0; }
+
+.art-gallery-action-wrap > .btn-toolbar { flex: 1; min-width: 0; }
+
+/* Lists that load in pages. */
+
+.maker-list-loading { padding: var(--sp-16) 0; }
+
+.maker-list-sentinel { padding: var(--sp-12) 0; font-size: var(--text-sm); text-align: center; }
+
+.drive-items-filters { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-16); margin: var(--sp-6) 0; font-size: var(--text-sm); }
+
+.maker-subhead { margin: 0 0 var(--sp-8); font-weight: 600; }
+
+.maker-subhead--spaced { margin-top: var(--sp-20); }
+
+.tmdb-gallery-meta-row .badge,
+.art-gallery-head .badge { font-size: var(--text-3xs); }

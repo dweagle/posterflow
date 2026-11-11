@@ -1,0 +1,63 @@
+/* A checklist of media-server libraries (Plex library modal, Asset Upload, setup wizard). */
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.library-item {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-6) 0;
+  transition: all 0.2s ease;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--text-md);
+}
+
+.library-item:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+}
+
+.library-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  cursor: pointer;
+  width: 100%;
+  padding: var(--sp-8) var(--sp-12);
+}
+
+.library-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.library-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex: 1;
+  gap: var(--sp-12);
+}
+
+.library-name {
+  color: var(--color-text-body);
+  font-weight: 500;
+  font-size: var(--text-md);
+}
+
+.library-type {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+  text-transform: capitalize;
+  padding: var(--sp-4) var(--sp-8);
+  background: var(--tint-faint);
+  border-radius: var(--radius-sm);
+}

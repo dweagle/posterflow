@@ -260,7 +260,7 @@ export function GoogleDriveCredentialsGuide({ open, onToggle }: GuideProps) {
 
   return (
     <>
-      <button type="button" className="instructions-toggle" onClick={onToggle}>
+      <button type="button" className="btn-secondary btn-block instructions-toggle" onClick={onToggle}>
         {open ? '▼' : '▶'} How to set up Google Drive access
       </button>
 

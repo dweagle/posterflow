@@ -237,7 +237,7 @@ function PlexRulesSection({
               <div className="rule-config-popover">
                 <div className="rule-config-block">
                   <span className="rule-config-heading">Apply these rules during</span>
-                  <small style={{ display: 'block', marginBottom: '0.5rem' }}>
+                  <small className="block mb-sm">
                     Rules are skipped on any run type left off. With none selected, rules never run.
                   </small>
                   <div className="rule-runtype-list">
@@ -254,7 +254,7 @@ function PlexRulesSection({
                 </div>
                 <div className="rule-config-block">
                   <span className="rule-config-heading">Libraries to scan</span>
-                  <small style={{ display: 'block', marginBottom: '0.5rem' }}>
+                  <small className="block mb-sm">
                     Only checked libraries are scanned for matches. With none checked, rules never run.
                   </small>
                   {libraryConfigs.length === 0 ? (
@@ -277,7 +277,7 @@ function PlexRulesSection({
       </div>
 
       <div className="field-group">
-        <small style={{ marginBottom: '0.5rem', display: 'block' }}>
+        <small className="block mb-sm">
           Apply a specific border to only the items matching a Plex <strong>label</strong>, <strong>genre</strong>,
           or <strong>collection</strong> — everything else gets its normal treatment. Rules are checked top-to-bottom
           and the <em>first</em> matching rule wins, so order sets priority. Use <strong>Configure</strong> to choose
@@ -286,7 +286,7 @@ function PlexRulesSection({
       </div>
 
       {!enabled && rules.length > 0 && (
-        <div className="empty-config" style={{ marginBottom: '0.75rem' }}>
+        <div className="empty-config mb-md">
           <p>These rules are inactive — {inactiveReason}. Open <strong>Configure</strong> to fix it.</p>
         </div>
       )}
@@ -329,7 +329,7 @@ function PlexRulesSection({
             </div>
           </div>
 
-          <div className="rule-field" style={{ marginTop: '0.6rem' }}>
+          <div className="rule-field mt-sm">
             <label>When it matches</label>
             <div className="season-mode-options">
               {(['include', 'except', 'skip'] as RuleMode[]).map((mode) => (
@@ -347,7 +347,7 @@ function PlexRulesSection({
           </div>
 
           {current.mode !== 'skip' && (
-            <div style={{ marginTop: '0.75rem' }}>
+            <div className="mt-md">
               <BorderStyleControls
                 key={editIdx === null ? 'new' : `edit-${editIdx}`}
                 allowRemove
@@ -366,30 +366,30 @@ function PlexRulesSection({
             {editIdx === null ? (
               <>
                 <button
-                  className={`btn-secondary rule-btn rule-commit-btn ${draftRenderable ? 'is-ready' : ''}`}
+                  className={draftRenderable ? 'btn-primary' : 'btn-secondary'}
                   onClick={addRule}
                   disabled={!draftRenderable}
                   title={draftRenderable ? undefined : 'Set a value and a style first'}
                 >
                   <Plus size={16} /> Add Rule
                 </button>
-                <button className="btn-secondary rule-btn" onClick={cancelDraft}>
+                <button className="btn-secondary" onClick={cancelDraft}>
                   Cancel
                 </button>
               </>
             ) : (
               <>
-                <button className="btn-secondary rule-btn" onClick={cancelEdit}>
+                <button className="btn-secondary" onClick={cancelEdit}>
                   Cancel
                 </button>
-                <button className="btn-secondary rule-btn" onClick={stopEditing}>
+                <button className="btn-secondary" onClick={stopEditing}>
                   <Plus size={14} /> New rule
                 </button>
               </>
             )}
           </div>
           {editIdx !== null && (
-            <small style={{ marginTop: '0.45rem', display: 'block' }}>
+            <small className="block mt-sm">
               Changes apply live — use <strong>Save</strong> above to keep them, or <strong>Cancel</strong> to undo.
             </small>
           )}
@@ -421,20 +421,20 @@ function PlexRulesSection({
                     </div>
                     <div className="rule-row-actions">
                       <div className="rule-reorder">
-                        <button className="rule-arrow" onClick={() => moveRule(index, -1)} disabled={index === 0} title="Move up (higher priority)">
+                        <button className="btn-icon btn-icon-sm rule-arrow" onClick={() => moveRule(index, -1)} disabled={index === 0} title="Move up (higher priority)">
                           <ChevronUp size={14} />
                         </button>
-                        <button className="rule-arrow" onClick={() => moveRule(index, 1)} disabled={index === rules.length - 1} title="Move down (lower priority)">
+                        <button className="btn-icon btn-icon-sm rule-arrow" onClick={() => moveRule(index, 1)} disabled={index === rules.length - 1} title="Move down (lower priority)">
                           <ChevronDown size={14} />
                         </button>
                       </div>
                       <button
-                        className={`btn-secondary rule-btn ${editIdx === index ? 'rule-btn-active' : ''}`}
+                        className={editIdx === index ? 'btn-primary' : 'btn-secondary'}
                         onClick={() => editRule(index)}
                       >
                         Edit
                       </button>
-                      <button className="btn-remove-color" onClick={() => removeRule(index)} title="Remove rule">
+                      <button className="btn-icon btn-icon-outlined btn-icon-danger" onClick={() => removeRule(index)} title="Remove rule">
                         <Trash2 size={16} />
                       </button>
                     </div>

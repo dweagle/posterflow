@@ -182,7 +182,7 @@ export default function DriveItemsPanel({
   // Says what the buttons in the subtab row are showing, and — for every source but the drive
   // itself — that the gaps are still measured against the selected artwork scope.
   const sourceNote = (
-    <small className="muted" style={{ display: 'block', margin: '0 0 10px' }}>
+    <small className="text-dim block mb-sm">
       {sourceHint}
       {source !== 'scope' && ` Gaps are measured against ${scopeLabel || 'this scope'}.`}
     </small>
@@ -192,7 +192,7 @@ export default function DriveItemsPanel({
     return (
       <>
         {sourceNote}
-        <p className="muted" style={{ padding: '1rem 0' }}>
+        <p className="text-dim maker-list-loading">
           {source === 'scope' ? `Scanning ${scopeLabel || 'the drive'}…` : `Collecting items from ${sourceLabel}…`}
         </p>
       </>
@@ -220,7 +220,7 @@ export default function DriveItemsPanel({
     <>
       {sourceNote}
       <div className="unmatched-maker-controls">
-        <div className="maker-result-tabs" role="tablist" aria-label="Drive item category tabs">
+        <div className="maker-result-tabs pf-subtabs" role="tablist" aria-label="Drive item category tabs">
           {FILTER_TABS.filter((t) => t === 'all' || counts[t] > 0).map((t) => (
             <button
               key={t}
@@ -246,19 +246,19 @@ export default function DriveItemsPanel({
             onChange={(e) => setQuery(e.target.value)}
           />
           {query && (
-            <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
+            <button type="button" className="btn-icon btn-icon-sm unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
               <X size={15} />
             </button>
           )}
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', margin: '0.4rem 0' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer' }}>
+      <div className="drive-items-filters">
+        <label className="checkbox-label">
           <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} />
           Only items missing artwork
         </label>
-        <span className="muted" style={{ fontSize: '0.8rem' }}>
+        <span className="text-dim">
           {merged.length.toLocaleString()} items in {source === 'scope' ? 'the drive' : sourceLabel}
           {' · '}{gapCount.toLocaleString()} with gaps
           {visibleItems.length !== (missingOnly ? gapCount : merged.length) ? ` · showing ${visibleItems.length}` : ''}
@@ -272,7 +272,7 @@ export default function DriveItemsPanel({
             : 'No items match your filter.'}
         </p>
       ) : (
-        <div style={{ marginTop: 8 }}>
+        <div className="mt-sm">
           {shownItems.map((it) => (
             <LazyPosterCard
               key={it.key}
@@ -282,8 +282,8 @@ export default function DriveItemsPanel({
             />
           ))}
           {visibleCount < visibleItems.length && (
-            <div ref={sentinelRef} style={{ padding: '0.75rem 0', textAlign: 'center' }}>
-              <span className="muted" style={{ fontSize: '0.8rem' }}>
+            <div ref={sentinelRef} className="maker-list-sentinel">
+              <span className="text-dim">
                 Showing {shownItems.length.toLocaleString()} of {visibleItems.length.toLocaleString()} — scroll for more
               </span>
             </div>

@@ -1,0 +1,281 @@
+/* Workflow tab: the step cards, the workflow picker and the flow results.
+   The poster-manager sheets load in a fixed order (see App.tsx). */
+
+.flow-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.workflow-selector-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-12);
+  padding: var(--card-pad);
+  margin-bottom: var(--card-gap);
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent-deep);
+  border-radius: var(--radius-lg);
+}
+
+.workflow-selector-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.workflow-selector-field.grow {
+  flex: 1;
+  min-width: 180px;
+}
+
+.workflow-selector-field label {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+
+.workflow-select,
+.workflow-name-input {
+  padding: var(--sp-8) var(--sp-8);
+  font-size: var(--text-md);
+}
+
+.workflow-select {
+  min-width: 180px;
+}
+
+.workflow-name-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.workflow-select:focus,
+.workflow-name-input:focus {
+  outline: none;
+  border-color: var(--color-accent-deep);
+}
+
+.flow-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+}
+
+.flow-job-card {
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent-deep);
+  border-radius: var(--radius-lg);
+  transition: all 0.3s;
+}
+
+.flow-job-card:hover:not(.disabled) {
+  box-shadow: 0 4px 12px rgba(var(--rgb-accent-deep), 0.2);
+}
+
+.flow-job-card.disabled {
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-strong);
+}
+
+.flow-job-card.disabled.future {
+  opacity: 0.7;
+}
+
+.job-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  background: var(--color-button-primary);
+  border-radius: 50%;
+  color: var(--color-text);
+  font-weight: bold;
+  font-size: var(--text-md);
+  flex-shrink: 0;
+}
+
+.flow-job-card.disabled .job-number {
+  background: var(--color-slate-raised);
+}
+
+.job-title {
+  font-weight: 600;
+  color: var(--color-text-body);
+  font-size: var(--text-base);
+}
+
+.job-description {
+  color: var(--color-text-muted);
+  margin: 0 0 0 var(--sp-40);
+  font-size: var(--text-md);
+  line-height: 1.4;
+}
+
+.flow-job-card.disabled .job-description {
+  color: var(--color-text-faint);
+}
+
+.job-options {
+  margin: var(--sp-12) 0 0 var(--sp-40);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+/* Flow Results */
+
+.flow-results {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-16);
+  border-left: 4px solid var(--color-accent-deep);
+  margin-top: var(--sp-20);
+}
+
+.flow-results h3 {
+  color: var(--color-title);
+  margin-bottom: var(--sp-12);
+}
+
+.flow-results h4 {
+  color: var(--color-text-body);
+  margin-bottom: var(--sp-12);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--text-base);
+}
+
+.results-section {
+  margin-bottom: var(--sp-16);
+}
+
+.results-section:last-child {
+  margin-bottom: 0;
+}
+
+.result-item {
+  padding: var(--sp-8) var(--sp-12);
+  margin-bottom: var(--sp-6);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+}
+
+.result-item.compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+}
+
+.result-item .result-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.result-item .result-metrics span:not(:last-child)::after {
+  content: "•";
+  margin-left: var(--sp-8);
+  color: var(--color-text-disabled);
+}
+
+.flow-job-meta {
+  margin-top: var(--sp-6);
+  margin-bottom: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.result-item.success {
+  background: rgba(var(--rgb-success), 0.1);
+  border-left: 3px solid var(--color-success);
+  color: var(--color-text-body);
+}
+
+.result-item.skipped {
+  background: rgba(var(--rgb-warning), 0.1);
+  border-left: 3px solid var(--color-warning);
+  color: var(--color-text-body);
+}
+
+.result-item.error {
+  background: rgba(var(--rgb-danger), 0.1);
+  border-left: 3px solid var(--color-danger-soft);
+  color: var(--color-text-body);
+}
+
+.result-item strong {
+  text-transform: capitalize;
+  color: var(--color-text-body);
+}
+
+@media (max-width: 768px) {
+  .job-description {
+    margin-left: 0;
+    margin-top: var(--sp-12);
+  }
+
+  .job-options {
+    margin-left: 0;
+    margin-top: var(--sp-12);
+  }
+
+  .job-header-left {
+    flex-wrap: wrap;
+  }
+}
+
+/* IDarr scope checklist under the IDarr step: a column, and a row beside the other step options
+   on wide screens (below). */
+.idarr-scope-selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-8);
+  border-top: 1px solid var(--color-border);
+}
+
+.scope-selector-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+  margin-bottom: var(--sp-2);
+}
+
+.scope-error {
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+}
+
+@media (min-width: 1000px) {
+  .job-options {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-6) var(--sp-20);
+  }
+
+  .idarr-scope-selector {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+    padding-left: var(--sp-16);
+    border-left: 1px solid var(--color-border);
+    gap: var(--sp-6) var(--sp-12);
+  }
+
+  .scope-selector-label {
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+}

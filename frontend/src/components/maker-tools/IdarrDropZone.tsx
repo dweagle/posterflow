@@ -19,7 +19,7 @@ export default function IdarrDropZone({ active, state, targetLabel, what = 'post
       className={`idarr-drop-zone${active ? ' drop-active' : ''}${state !== 'idle' ? ` idarr-drop-zone--${state}` : ''}`}
       title={title}
     >
-      {state === 'adding' ? <Loader2 size={22} className="spin-icon" /> : state === 'done' ? <Check size={22} /> : <Upload size={22} />}
+      {state === 'adding' ? <Loader2 size={22} className="spinning" /> : state === 'done' ? <Check size={22} /> : <Upload size={22} />}
       <span>{state === 'adding' ? 'Adding…' : state === 'done' ? 'Added!' : `Drop ${what} to add to IDarr`}</span>
     </div>
   )

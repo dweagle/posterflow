@@ -1,0 +1,78 @@
+/* The content card (`.settings-section`): the surface every page lays its settings and panels on.
+   Card titles are the title blue, like the page title.
+   A page stylesheet arranges cards and styles what is inside; the frame, the title and the
+   description read the same everywhere. */
+.settings-section {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--card-pad);
+  margin-bottom: var(--card-gap);
+}
+
+/* The page cards share the primitive's inset; a panel inside a card takes the smaller one. A card's
+   last child drops its bottom margin, so the inset reads the same at the top and the bottom. */
+.flow-job-card,
+.unmatched-card,
+.plex-upload-card,
+.tools-card,
+.maker-card,
+.stat-card,
+.style-usage-panel,
+.overlays-global,
+.overlays-editor,
+.overlays-libraries,
+.poster-coverage-card,
+.available-drives,
+.priority-list-container {
+  padding: var(--card-pad);
+}
+
+.rule-setup-card,
+.backup-item,
+.overlay-panel,
+.overlays-def-panel {
+  padding: var(--card-pad-inner);
+}
+
+.settings-section h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: 0 0 var(--sp-8);
+  font-size: var(--text-xl);
+  color: var(--color-title);
+}
+
+/* Title row with actions on the right (Settings cards). */
+.settings-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-16);
+  margin-bottom: var(--sp-4);
+}
+
+.settings-section-header > div {
+  flex: 1;
+}
+
+/* The muted line under a card title. */
+.section-description,
+.card-description {
+  margin: 0 0 var(--sp-16);
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+  line-height: 1.4;
+}
+
+@media (max-width: 550px) {
+  .settings-section-header {
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+
+  .settings-section-header h2 {
+    margin-bottom: 0;
+  }
+}

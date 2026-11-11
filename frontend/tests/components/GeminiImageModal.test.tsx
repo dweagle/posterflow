@@ -52,7 +52,7 @@ describe('GeminiImageModal', () => {
     })
     const img = screen.getByTestId('gemini-result')
     expect(img.getAttribute('src')).toBe('data:image/jpeg;base64,AAAA')
-    expect(img.className).toBe('')
+    expect(img.className).toBe('gemini-img')
     expect(screen.getByText(/rendered at 1365×2048 in 12.3s/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /download/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /run again/i })).toBeTruthy()

@@ -45,12 +45,12 @@ function UpdateBanner() {
       <span className="update-banner-text">
         A new version of Posterflow is available ({serverVersion})
       </span>
-      <button className="update-banner-refresh" onClick={() => window.location.reload()}>
+      <button className="btn-primary btn-sm" onClick={() => window.location.reload()}>
         <RefreshCw size={14} />
         Refresh
       </button>
       <button
-        className="update-banner-dismiss"
+        className="btn-icon btn-icon-sm update-banner-dismiss"
         onClick={dismiss}
         aria-label="Remind me tomorrow"
         title="Remind me tomorrow"

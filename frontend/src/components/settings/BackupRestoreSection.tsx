@@ -1,5 +1,6 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react'
 import { getBackupStorage, saveBackupStorage, saveBackupToLocation, getApiErrorMessage } from '../../api/client'
+import SaveActions from '../SaveActions'
 
 type ToastType = 'success' | 'error' | 'info'
 
@@ -25,6 +26,8 @@ function BackupRestoreSection({
   const [defaultPath, setDefaultPath] = useState('/config/backups')
   const [isDocker, setIsDocker] = useState(true)
   const [storageSaving, setStorageSaving] = useState(false)
+  // What the server has, so Save knows when there is something to save and Cancel can go back.
+  const [savedStorage, setSavedStorage] = useState({ path: '', retention: '7' })
   const [savingToLocation, setSavingToLocation] = useState(false)
 
   useEffect(() => {
@@ -36,6 +39,7 @@ function BackupRestoreSection({
         if (mounted) {
           setBackupPath(storage.path)
           setRetention(String(storage.retention))
+          setSavedStorage({ path: storage.path, retention: String(storage.retention) })
           setDefaultPath(storage.default_path)
           if (storage.is_docker !== undefined) setIsDocker(storage.is_docker)
         }
@@ -63,6 +67,7 @@ function BackupRestoreSection({
       const saved = await saveBackupStorage(backupPath.trim(), retentionValue)
       setBackupPath(saved.path)
       setRetention(String(saved.retention))
+      setSavedStorage({ path: saved.path, retention: String(saved.retention) })
       showToast('Backup settings saved', 'success')
     } catch (error) {
       console.error('Error saving backup storage settings:', error)
@@ -155,9 +160,12 @@ function BackupRestoreSection({
                   Oldest backups in the folder are deleted beyond this count. 0 keeps everything.
                 </p>
               </div>
-              <button className="btn-primary" onClick={handleSaveBackupStorage} disabled={storageSaving}>
-                {storageSaving ? 'Saving...' : 'Save Backup Settings'}
-              </button>
+              <SaveActions
+                dirty={backupPath !== savedStorage.path || retention !== savedStorage.retention}
+                saving={storageSaving}
+                onSave={handleSaveBackupStorage}
+                onCancel={() => { setBackupPath(savedStorage.path); setRetention(savedStorage.retention) }}
+              />
             </div>
           </div>
         </div>
@@ -173,11 +181,11 @@ function BackupRestoreSection({
             ref={fileInputRef}
             type="file"
             accept=".zip"
-            style={{ display: 'none' }}
+            hidden
             onChange={handleFileChange}
           />
           <button
-            className="btn-secondary"
+            className="btn-primary"
             onClick={() => fileInputRef.current?.click()}
             disabled={restoreLoading}
           >

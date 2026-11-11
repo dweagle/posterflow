@@ -1,0 +1,67 @@
+/* The page tab strip (components/Tabs.tsx). One row under a rule; the tabs tighten on narrower
+   screens and wrap into left-packed rows when they must, so every page reads the same. */
+.pf-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-16);
+  border-bottom: 2px solid var(--color-border);
+}
+
+.pf-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex: 0 0 auto;
+  padding: var(--sp-12) var(--sp-24);
+  background: transparent;
+  color: var(--pf-tab-text);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: var(--text-base);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.pf-tabs button svg {
+  flex-shrink: 0;
+}
+
+.pf-tabs button:hover {
+  color: var(--pf-tab-text-hover);
+  background: var(--pf-tab-hover-bg);
+}
+
+.pf-tabs button.active {
+  color: var(--pf-tab-text-active);
+  border-bottom-color: var(--pf-tab-active-border);
+}
+
+/* A count beside a tab label (Unmatched Assets). */
+.tab-badge {
+  margin-left: var(--sp-8);
+  white-space: nowrap;
+  background-color: rgba(var(--rgb-danger), 0.1);
+  color: var(--color-text-body);
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(var(--rgb-danger), 0.28);
+}
+
+@media (max-width: 1200px) {
+  .pf-tabs button {
+    padding: var(--sp-12) var(--sp-16);
+    font-size: var(--text-md);
+  }
+}
+
+@media (max-width: 550px) {
+  .pf-tabs button {
+    padding: var(--sp-8) var(--sp-8);
+    font-size: var(--text-xs);
+    gap: var(--sp-4);
+  }
+}

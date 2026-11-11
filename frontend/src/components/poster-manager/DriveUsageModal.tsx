@@ -18,6 +18,7 @@ import { useFloatTip } from '../FloatTip'
 import { OverrideTarget, fileBaseName } from '../../utils/posterOverrideTarget'
 import { SLOT_LABELS, SLOT_ORDER, sortItems, useSortPrefs } from './itemSort'
 import { useToast } from '../Toast'
+import Modal from '../Modal'
 
 type UsageView = 'used' | 'outranked'
 
@@ -108,10 +109,6 @@ export default function DriveUsageModal({
   const [previewIndex, setPreviewIndex] = useState<number | null>(null)
 
   const isAllDrives = drive.drive_id === ALL_DRIVES_ID
-
-  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose()
-  }
 
   // Drive switch: close the lightbox and flip an empty view to the populated one.
   useEffect(() => {
@@ -350,6 +347,7 @@ export default function DriveUsageModal({
     const onKey = (e: KeyboardEvent) => {
       if (pickTarget) return  // the stacked search modal owns Escape
       if (e.key === 'Escape') {
+        e.preventDefault()
         if (comparePreview) setComparePreview(null)
         else setCompare(null)
       }
@@ -374,7 +372,10 @@ export default function DriveUsageModal({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') setPreviewIndex((i) => (i == null ? i : Math.max(0, i - 1)))
       else if (e.key === 'ArrowRight') setPreviewIndex((i) => (i == null ? i : Math.min(last, i + 1)))
-      else if (e.key === 'Escape') setPreviewIndex(null)
+      else if (e.key === 'Escape') {
+        e.preventDefault()
+        setPreviewIndex(null)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -601,15 +602,16 @@ export default function DriveUsageModal({
   ), [sortedItems, visibleCount, overrides, overrideBusy, view, isAllDrives, previewSequence, drive.drive_id, drive.name, compareForItem, availableCountFor, overrideDomain, noun, showRowTip, hideRowTip, toggleOverride, openPicker])
 
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content schedule-modal list-items-modal drive-usage-modal">
-        <div className="modal-header">
-          <h2 className="drive-usage-modal-title">
+    <>
+    <Modal onClose={onClose} size="lg" className="list-items-modal drive-usage-modal">
+      <Modal.Header
+        title={(
+          <>
             {onNavigateDrive && (
               <span className="drive-usage-drive-nav-group">
                 <button
                   type="button"
-                  className="drive-usage-drive-nav"
+                  className="btn-icon btn-icon-sm btn-icon-outlined drive-usage-drive-nav"
                   onClick={() => onNavigateDrive(-1)}
                   disabled={!hasPrevDrive}
                   title="Previous drive"
@@ -618,7 +620,7 @@ export default function DriveUsageModal({
                 </button>
                 <button
                   type="button"
-                  className="drive-usage-drive-nav"
+                  className="btn-icon btn-icon-sm btn-icon-outlined drive-usage-drive-nav"
                   onClick={() => onNavigateDrive(1)}
                   disabled={!hasNextDrive}
                   title="Next drive"
@@ -630,12 +632,12 @@ export default function DriveUsageModal({
             <span>
               {drive.name}{drive.style && <> <span className={`style-badge style-${styleKey}`}>{drive.style}</span></>}
             </span>
-          </h2>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
+          </>
+        )}
+      />
 
-        <div className="modal-body">
-          <div className="drive-usage-view-tabs" role="group" aria-label="Used or not used">
+        <Modal.Body>
+          <div className="drive-usage-view-tabs pf-subtabs" role="group" aria-label="Used or not used">
             <button
               type="button"
               className={`drive-usage-view-tab${view === 'used' ? ' active' : ''}`}
@@ -679,7 +681,7 @@ export default function DriveUsageModal({
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             {searchQuery && (
-              <button className="search-clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
+              <button className="btn-icon btn-icon-sm search-clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
                 <X size={14} />
               </button>
             )}
@@ -695,9 +697,9 @@ export default function DriveUsageModal({
             </p>
             {renderedRows}
           </div>
-        </div>
+        </Modal.Body>
 
-        <div className="modal-footer">
+        <Modal.Footer>
           <div className="modal-footer-actions">
             <button className="btn-secondary" onClick={onClose}>Close</button>
             <button className="btn-primary" onClick={() => onDownload(view)} disabled={activeItems.length === 0}>
@@ -705,8 +707,8 @@ export default function DriveUsageModal({
               Download List
             </button>
           </div>
-        </div>
-      </div>
+        </Modal.Footer>
+    </Modal>
 
       {preview && previewIndex != null && (
         <div
@@ -816,10 +818,10 @@ export default function DriveUsageModal({
           </div>
           {/* Preload neighbors so arrowing feels instant. */}
           {activeSequence[previewIndex + 1] && (
-            <img src={getDriveImageUrl(activeSequence[previewIndex + 1].file)} alt="" style={{ display: 'none' }} />
+            <img src={getDriveImageUrl(activeSequence[previewIndex + 1].file)} alt="" hidden />
           )}
           {previewIndex > 0 && activeSequence[previewIndex - 1] && (
-            <img src={getDriveImageUrl(activeSequence[previewIndex - 1].file)} alt="" style={{ display: 'none' }} />
+            <img src={getDriveImageUrl(activeSequence[previewIndex - 1].file)} alt="" hidden />
           )}
         </div>
       )}
@@ -1165,6 +1167,6 @@ export default function DriveUsageModal({
           onClose={() => setPickTarget(null)}
         />
       )}
-    </div>
+    </>
   )
 }

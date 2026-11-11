@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { AlertCircle, Check, ExternalLink, Link2, Loader2, Search, User, X } from 'lucide-react'
 import { type TmdbCandidate, searchUnmatchedTmdb, tmdbCandidateKey, tmdbCandidateLink, isTmdbKeyMissingError } from '../../api/posterManager'
 import type { CommunityRequest, RequestMatch } from '../../api/community'
+import Modal from '../../components/Modal'
 
 type SearchType = RequestMatch['media_type']
 
@@ -87,155 +88,148 @@ export default function MatchRequestModal({ request, submitting, onCancel, onCon
   const resultType = selected ? (isSeason ? 'season' : selected.media_type) : null
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !submitting) onCancel() }}>
-      <div className="modal-content schedule-modal community-req-modal">
-        <div className="modal-header">
-          <h2>Match Request</h2>
-          <button className="modal-close" onClick={onCancel} disabled={submitting}>×</button>
+    <Modal onClose={onCancel} className="community-req-modal" busy={submitting}>
+      <Modal.Header title="Match Request" />
+      <Modal.Body>
+        <div className="creq-item-label">
+          <strong className="creq-item-title">{request.title}</strong>
+          {request.year && <span className="creq-item-year"> ({request.year})</span>}
+          <span className={`tmdb-type-badge tmdb-type-badge--${request.media_type}`}>{request.media_type}</span>
+          {request.requested_by && <> · requested by <strong>{request.requested_by}</strong></>}
         </div>
-
-        <div className="modal-body">
-          <div className="creq-item-label">
-            <strong className="creq-item-title">{request.title}</strong>
-            {request.year && <span className="creq-item-year"> ({request.year})</span>}
-            <span className={`tmdb-type-badge tmdb-type-badge--${request.media_type}`}>{request.media_type}</span>
-            {request.requested_by && <> · requested by <strong>{request.requested_by}</strong></>}
-          </div>
-          <div className="creq-field-hint">
-            This request has no TMDB or TVDB id. Pick the matching entry to fill in its ids, poster and title.
-            The Discord thread is updated too.
-          </div>
-          {isSeason && <div className="creq-field-hint">Season request: pick the series it belongs to.</div>}
-
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>Search TMDB</div>
-          <div className="new-creq-search-row">
-            <div className="new-creq-search-bar">
-              <Search size={15} className="search-bar-icon" />
-              <input
-                type="text"
-                className="new-creq-search-input"
-                placeholder="Search TMDB…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void runSearch(query, searchType) }}
-                maxLength={200}
-              />
-              {query && (
-                <button type="button" className="search-clear-btn" onClick={() => setQuery('')} title="Clear">
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <select
-              className="new-creq-type-select"
-              aria-label="Search type"
-              value={searchType}
-              disabled={isSeason}
-              onChange={(e) => setSearchType(e.target.value as SearchType)}
-            >
-              {SEARCH_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="new-creq-search-btn"
-              onClick={() => void runSearch(query, searchType)}
-              disabled={searching || !query.trim()}
-            >
-              {searching ? <Loader2 size={14} className="spin-icon" /> : <Search size={14} />}
-              Search
-            </button>
-          </div>
-
-          {searchError && (
-            <div className="tmdb-candidates-warning" role="alert" style={{ marginTop: '0.5rem' }}>
-              <AlertCircle size={14} />
-              <span>{searchError}</span>
-            </div>
-          )}
-
-          {hasSearched && !searchError && (
-            candidates.length === 0 ? (
-              <div className="creq-no-results" style={{ marginTop: '0.75rem' }}>
-                No results. Try another spelling or type.
-              </div>
-            ) : (
-              <>
-                <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>Pick the correct match:</div>
-                <div className={`creq-candidates${candidates.length === 1 ? ' creq-candidates--single' : ''}`}>
-                  {candidates.map((c) => {
-                    const isSelected = selected != null && tmdbCandidateKey(selected) === tmdbCandidateKey(c)
-                    const isPerson = c.media_type === 'person'
-                    const link = tmdbCandidateLink(c)
-                    return (
-                      <button
-                        key={tmdbCandidateKey(c)}
-                        type="button"
-                        className={`creq-candidate${isSelected ? ' selected' : ''}`}
-                        onClick={() => setSelected(isSelected ? null : c)}
-                      >
-                        {c.poster_url ? (
-                          <img src={c.poster_url} alt="" className="creq-candidate-poster" loading="lazy" />
-                        ) : (
-                          <div className={`creq-candidate-poster creq-candidate-poster--empty${isPerson ? ' creq-candidate-poster--person' : ''}`}>
-                            {isPerson && <User size={22} style={{ opacity: 0.4 }} />}
-                          </div>
-                        )}
-                        <div className="creq-candidate-info">
-                          <div className="creq-candidate-title">
-                            {c.title}
-                            {c.year && <span className="creq-candidate-year"> ({c.year})</span>}
-                          </div>
-                          {isPerson && <span className="tmdb-type-badge tmdb-type-badge--person">Person</span>}
-                          <a
-                            href={link.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="creq-tmdb-link"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <ExternalLink size={11} />
-                            {link.label}
-                          </a>
-                        </div>
-                        {isSelected && <Check size={16} className="creq-selected-check" />}
-                      </button>
-                    )
-                  })}
-                </div>
-              </>
-            )
-          )}
-
-          {selected && resultType && (
-            <div className="creq-item-label" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
-              Will become:
-              <strong className="creq-item-title"> {selected.title}</strong>
-              {selected.year && <span className="creq-item-year"> ({selected.year})</span>}
-              <span className={`tmdb-type-badge tmdb-type-badge--${resultType}`}>{resultType}</span>
-              {typeChanges && (
-                <div className="creq-field-hint" style={{ color: '#ff9800' }}>
-                  Type changes from {request.media_type} to {selected.media_type}.
-                </div>
-              )}
-            </div>
-          )}
+        <div className="creq-field-hint">
+          This request has no TMDB or TVDB id. Pick the matching entry to fill in its ids, poster and title.
+          The Discord thread is updated too.
         </div>
+        {isSeason && <div className="creq-field-hint">Season request: pick the series it belongs to.</div>}
 
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onCancel} disabled={submitting}>Cancel</button>
-          <button
-            className="btn-primary"
-            onClick={() => { if (selected) onConfirm(matchFromCandidate(selected)) }}
-            disabled={!canConfirm}
-            title={!selected ? 'Pick a match first' : undefined}
+        <div className="creq-section-label mt-md">Search TMDB</div>
+        <div className="new-creq-search-row">
+          <div className="new-creq-search-bar">
+            <Search size={15} className="search-bar-icon" />
+            <input
+              type="text"
+              className="new-creq-search-input"
+              placeholder="Search TMDB…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void runSearch(query, searchType) }}
+              maxLength={200}
+            />
+            {query && (
+              <button type="button" className="btn-icon btn-icon-sm search-clear-btn" onClick={() => setQuery('')} title="Clear">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <select
+            className="new-creq-type-select"
+            aria-label="Search type"
+            value={searchType}
+            disabled={isSeason}
+            onChange={(e) => setSearchType(e.target.value as SearchType)}
           >
-            {submitting ? <Loader2 size={13} className="spin-icon" /> : <Link2 size={13} />}
-            {' '}Match
+            {SEARCH_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => void runSearch(query, searchType)}
+            disabled={searching || !query.trim()}
+          >
+            {searching ? <Loader2 size={14} className="spinning" /> : <Search size={14} />}
+            Search
           </button>
         </div>
-      </div>
-    </div>
+
+        {searchError && (
+          <div className="tmdb-candidates-warning mt-sm" role="alert">
+            <AlertCircle size={14} />
+            <span>{searchError}</span>
+          </div>
+        )}
+
+        {hasSearched && !searchError && (
+          candidates.length === 0 ? (
+            <div className="creq-no-results mt-md">
+              No results. Try another spelling or type.
+            </div>
+          ) : (
+      <>
+              <div className="creq-section-label mt-md">Pick the correct match:</div>
+              <div className={`creq-candidates${candidates.length === 1 ? ' creq-candidates--single' : ''}`}>
+                {candidates.map((c) => {
+                  const isSelected = selected != null && tmdbCandidateKey(selected) === tmdbCandidateKey(c)
+                  const isPerson = c.media_type === 'person'
+                  const link = tmdbCandidateLink(c)
+                  return (
+                    <button
+                      key={tmdbCandidateKey(c)}
+                      type="button"
+                      className={`creq-candidate${isSelected ? ' selected' : ''}`}
+                      onClick={() => setSelected(isSelected ? null : c)}
+                    >
+                      {c.poster_url ? (
+                        <img src={c.poster_url} alt="" className="creq-candidate-poster" loading="lazy" />
+                      ) : (
+                        <div className={`creq-candidate-poster creq-candidate-poster--empty${isPerson ? ' creq-candidate-poster--person' : ''}`}>
+                          {isPerson && <User size={22} className="is-dimmed" />}
+                        </div>
+                      )}
+                      <div className="creq-candidate-info">
+                        <div className="creq-candidate-title">
+                          {c.title}
+                          {c.year && <span className="creq-candidate-year"> ({c.year})</span>}
+                        </div>
+                        {isPerson && <span className="tmdb-type-badge tmdb-type-badge--person">Person</span>}
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="creq-tmdb-link"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink size={11} />
+                          {link.label}
+                        </a>
+                      </div>
+                      {isSelected && <Check size={16} className="creq-selected-check" />}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )
+        )}
+
+        {selected && resultType && (
+          <div className="creq-item-label mt-md mb-0">
+            Will become:
+            <strong className="creq-item-title"> {selected.title}</strong>
+            {selected.year && <span className="creq-item-year"> ({selected.year})</span>}
+            <span className={`tmdb-type-badge tmdb-type-badge--${resultType}`}>{resultType}</span>
+            {typeChanges && (
+              <div className="creq-field-hint text-warning-strong">
+                Type changes from {request.media_type} to {selected.media_type}.
+              </div>
+            )}
+          </div>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        <button className="btn-secondary" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button
+          className="btn-primary"
+          onClick={() => { if (selected) onConfirm(matchFromCandidate(selected)) }}
+          disabled={!canConfirm}
+          title={!selected ? 'Pick a match first' : undefined}
+        >
+          {submitting ? <Loader2 size={13} className="spinning" /> : <Link2 size={13} />}
+          {' '}Match
+        </button>
+      </Modal.Footer>
+    </Modal>
   )
 }

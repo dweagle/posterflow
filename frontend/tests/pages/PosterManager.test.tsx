@@ -186,7 +186,7 @@ describe('PosterManager', () => {
 
     expect(screen.getByText('Flow Tab Mock')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: /Settings/i }))
+    await user.click(screen.getByRole('tab', { name: /Settings/i }))
 
     expect(screen.getByText('Settings Tab Mock')).toBeTruthy()
   })
@@ -195,7 +195,7 @@ describe('PosterManager', () => {
     const user = userEvent.setup()
     render(<PosterManager />)
 
-    await user.click(screen.getByRole('button', { name: /Asset Renamer/i }))
+    await user.click(screen.getByRole('tab', { name: /Asset Renamer/i }))
     expect(screen.getByText('Rename Tab Mock')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Run Rename' }))
@@ -206,7 +206,7 @@ describe('PosterManager', () => {
     const user = userEvent.setup()
     render(<PosterManager />)
 
-    await user.click(screen.getByRole('button', { name: /Border Replacer/i }))
+    await user.click(screen.getByRole('tab', { name: /Border Replacer/i }))
     await user.click(screen.getByRole('button', { name: 'Discard Changes' }))
 
     expect(mockResetBorderSettingsToOriginal).toHaveBeenCalledTimes(1)

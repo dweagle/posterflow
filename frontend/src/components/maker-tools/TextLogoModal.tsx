@@ -11,6 +11,7 @@ import {
   type TmdbSearchResult,
 } from '../../api/client'
 import { useToast } from '../Toast'
+import Modal from '../../components/Modal'
 
 // Mirrors the server's default metrics (the PSD values, except main tracking preferred at 100).
 const TUNING_DEFAULTS = { top_tracking: '50', top_scale: '100', main_tracking: '100', main_scale: '100' }
@@ -145,123 +146,111 @@ export default function TextLogoModal({ item, syncTargetIndex, scopeLabel, onClo
     setFields((f) => ({ ...f, [key]: value }))
 
   return (
-    <>
-      <div className="modal-overlay">
-        <div className="modal-content schedule-modal">
-          <div className="modal-header">
-            <h2>Text logo — {item.year ? `${item.title} (${item.year})` : item.title}</h2>
-            <button className="modal-close" onClick={onClose}>×</button>
-          </div>
-          <div className="modal-body">
-            <div className="text-logo-form">
-              {([
-                ['top', 'Top line', 'Optional — e.g. THE'],
-                ['main', 'Main line', 'The big line'],
-              ] as const).map(([key, label, placeholder]) => (
-                <div key={key} className="text-logo-field">
-                  <label>
-                    {label}
-                    <input
-                      type="text"
-                      value={fields[key]}
-                      onChange={(e) => setField(key)(e.target.value)}
-                      placeholder={placeholder}
-                    />
-                  </label>
-                  <div className="text-logo-tuning">
-                    <label className="text-logo-tuning-font">
-                      Font
-                      <select value={fontSel[key]} onChange={(e) => setFontSel((s) => ({ ...s, [key]: e.target.value }))}>
-                        <option value="">{DEFAULT_FONT_LABEL[key]}</option>
-                        {fontList.map((f) => (
-                          <option key={f.id} value={f.id}>{f.label}{f.source === 'config' ? ' •' : ''}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Tracking
-                      <input type="number" value={tuning[`${key}_tracking`]} onChange={(e) => setTuning((t) => ({ ...t, [`${key}_tracking`]: e.target.value }))} />
-                    </label>
-                    <label>
-                      Width %
-                      <input type="number" value={tuning[`${key}_scale`]} onChange={(e) => setTuning((t) => ({ ...t, [`${key}_scale`]: e.target.value }))} />
-                    </label>
-                  </div>
-                </div>
-              ))}
-              <div className="text-logo-field">
-                <span className="text-logo-field-title">Bottom line</span>
-                <label className="checkbox-label text-logo-collection">
+  <>
+      <Modal onClose={onClose} closeOnOverlay={false}>
+        <Modal.Header title={<>Text logo — {item.year ? `${item.title} (${item.year})` : item.title}</>} />
+        <Modal.Body>
+          <div className="text-logo-form">
+            {([
+              ['top', 'Top line', 'Optional — e.g. THE'],
+              ['main', 'Main line', 'The big line'],
+            ] as const).map(([key, label, placeholder]) => (
+              <div key={key} className="text-logo-field">
+                <label>
+                  {label}
                   <input
-                    type="checkbox"
-                    checked={fields.suffix === 'COLLECTION'}
-                    onChange={(e) => setField('suffix')(e.target.checked ? 'COLLECTION' : '')}
+                    type="text"
+                    value={fields[key]}
+                    onChange={(e) => setField(key)(e.target.value)}
+                    placeholder={placeholder}
                   />
-                  COLLECTION
                 </label>
+                <div className="text-logo-tuning">
+                  <label className="text-logo-tuning-font">
+                    Font
+                    <select value={fontSel[key]} onChange={(e) => setFontSel((s) => ({ ...s, [key]: e.target.value }))}>
+                      <option value="">{DEFAULT_FONT_LABEL[key]}</option>
+                      {fontList.map((f) => (
+                        <option key={f.id} value={f.id}>{f.label}{f.source === 'config' ? ' •' : ''}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Tracking
+                    <input type="number" value={tuning[`${key}_tracking`]} onChange={(e) => setTuning((t) => ({ ...t, [`${key}_tracking`]: e.target.value }))} />
+                  </label>
+                  <label>
+                    Width %
+                    <input type="number" value={tuning[`${key}_scale`]} onChange={(e) => setTuning((t) => ({ ...t, [`${key}_scale`]: e.target.value }))} />
+                  </label>
+                </div>
               </div>
+            ))}
+            <div className="text-logo-field">
+              <span className="text-logo-field-title">Bottom line</span>
+              <label className="checkbox-label text-logo-collection">
+                <input
+                  type="checkbox"
+                  checked={fields.suffix === 'COLLECTION'}
+                  onChange={(e) => setField('suffix')(e.target.checked ? 'COLLECTION' : '')}
+                />
+                COLLECTION
+              </label>
             </div>
-            <div className="text-logo-preview">
-              {preview && !previewError
-                ? <img src={preview} alt="Logo preview" />
-                : <span className="muted">{previewError ?? (fields.main.trim() ? 'Rendering…' : 'Enter a main line to preview.')}</span>}
-            </div>
-            <p style={{ fontSize: '0.75rem', color: '#777', margin: '10px 0 0' }}>
-              Rendered server-side with the CollectionMain styling{rendering ? ' — updating…' : ''}.
-              {scopeLabel && <> Saves into scope: <strong>{scopeLabel}</strong> as the item&apos;s logo.</>}
-            </p>
           </div>
-          <div className="modal-footer">
-            <button className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button
-              className="btn-primary"
-              style={{ justifyContent: 'center' }}
-              disabled={saving || !fields.main.trim() || !!previewError}
-              onClick={() => void doSave()}
-            >
-              {saving ? 'Saving…' : 'Add to scope'}
-            </button>
+          <div className="text-logo-preview">
+            {preview && !previewError
+              ? <img src={preview} alt="Logo preview" />
+              : <span className="text-dim">{previewError ?? (fields.main.trim() ? 'Rendering…' : 'Enter a main line to preview.')}</span>}
           </div>
-        </div>
-      </div>
+          <p className="field-hint mt-sm">
+            Rendered server-side with the CollectionMain styling{rendering ? ' — updating…' : ''}.
+            {scopeLabel && <> Saves into scope: <strong>{scopeLabel}</strong> as the item&apos;s logo.</>}
+          </p>
+        </Modal.Body>
+        <Modal.Footer>
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            disabled={saving || !fields.main.trim() || !!previewError}
+            onClick={() => void doSave()}
+          >
+            {saving ? 'Saving…' : 'Add to scope'}
+          </button>
+        </Modal.Footer>
+      </Modal>
 
       {overwrite && (
-        <div className="modal-overlay">
-          <div className="modal-content schedule-modal">
-            <div className="modal-header">
-              <h2>Overwrite existing logo?</h2>
-              <button className="modal-close" onClick={() => setOverwrite(null)}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ color: '#ccc', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                This scope already has a file with this name:
-              </p>
-              <div className="psd-not-found-filename"><code>{overwrite}</code></div>
-              {scopeLabel && (
-                <div className="psd-not-found-folder">
-                  <span className="psd-not-found-folder-label">Scope:</span>
-                  <code>{scopeLabel}</code>
-                </div>
-              )}
-              <p style={{ marginTop: '1rem', color: '#ffb74d', fontSize: '0.85rem', lineHeight: 1.6 }}>
-                Overwriting moves the existing file to the IDarr duplicates folder and saves this one in its place.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setOverwrite(null)}>Cancel</button>
-              <button
-                className="btn-primary"
-                style={{ justifyContent: 'center', background: '#f44336' }}
-                onClick={() => {
-                  setOverwrite(null)
-                  void doSave(true)
-                }}
-              >
-                Overwrite
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal onClose={() => setOverwrite(null)} closeOnOverlay={false}>
+          <Modal.Header title="Overwrite existing logo?" />
+          <Modal.Body>
+            <p className="modal-text">
+              This scope already has a file with this name:
+            </p>
+            <div className="psd-not-found-filename"><code>{overwrite}</code></div>
+            {scopeLabel && (
+              <div className="psd-not-found-folder">
+                <span className="psd-not-found-folder-label">Scope:</span>
+                <code>{scopeLabel}</code>
+              </div>
+            )}
+            <p className="modal-note text-warning">
+              Overwriting moves the existing file to the IDarr duplicates folder and saves this one in its place.
+            </p>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={() => setOverwrite(null)}>Cancel</button>
+            <button
+              className="btn-danger"
+              onClick={() => {
+                setOverwrite(null)
+                void doSave(true)
+              }}
+            >
+              Overwrite
+            </button>
+          </Modal.Footer>
+        </Modal>
       )}
     </>
   )

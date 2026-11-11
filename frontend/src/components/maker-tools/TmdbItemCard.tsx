@@ -73,6 +73,7 @@ import tvdbIcon from '../../assets/service-icons/tvdb.png'
 import fanartIcon from '../../assets/service-icons/fanart.png'
 import appleTvIcon from '../../assets/service-icons/appletv.png'
 import { MATCHED_BY_ID_GENERIC } from '../../utils/mediaServer'
+import Modal from '../../components/Modal'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1012,7 +1013,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // Style toggle + New/Use-Existing export buttons — shared by the gallery bar and, when there's
   // no TMDB match, the standalone group on the card body (see hasTmdb branch below).
   const psdExportControls = (
-    <>
+  <>
       <div className="tmdb-psd-style-toggle" role="group" aria-label="Export poster style">
         {(['CL2K', 'MM2K'] as const).filter((s) => !hiddenStyles.has(s)).map((s) => (
           <button
@@ -1048,7 +1049,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       )}
       <button
         type="button"
-        className="tmdb-psd-export-btn tmdb-psd-export-btn--new"
+        className="btn-primary btn-sm"
         onClick={() => void handlePsdExport(false)}
         disabled={psdExporting}
         title="Create a new PSD from the selected images, or a blank template if none are selected"
@@ -1058,7 +1059,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       </button>
       <button
         type="button"
-        className="tmdb-psd-export-btn tmdb-psd-export-btn--existing"
+        className="btn-secondary btn-sm"
         onClick={() => void handlePsdExport(true)}
         disabled={psdExporting}
         title="Open an existing PSD from your export folder and add any selected images to it"
@@ -1118,7 +1119,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               {item.media_type === 'movie' ? 'Movie' : item.media_type === 'tv' ? (isMiniseries ? 'Miniseries' : 'Series') : item.media_type === 'person' ? 'Person' : 'Collection'}
             </span>
             {item.media_type === 'tv' && tvDetails && (
-              <>
+       <>
                 <span
                   className={`badge badge-grey${seasonAirState ? ` badge-air-${seasonAirState}` : ''}`}
                   title={(tvDetails.season_source === 'tvdb'
@@ -1365,7 +1366,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                   : seasonList.length === 0
                     ? <p className="tmdb-gallery-empty">No seasons available.</p>
                     : (
-                      <>
+           <>
                         <div className="tmdb-season-chips">
                           {seasonList.map((s) => (
                             <button
@@ -1402,9 +1403,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                         <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" style={tileStyle(img, 'poster')} />
                                       </button>
                                       {img.gemini && (
-                                        <>
+                    <>
                                           <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom tmdb-gemini-badge" title="Made with Gemini">Gemini</span>
-                                          <button type="button" className="tmdb-gemini-remove" onClick={() => void handleGeminiRemove(img.file_path)} title="Remove this Gemini image (deletes the kept file)">
+                                          <button type="button" className="btn-icon btn-icon-sm btn-icon-filled btn-icon-danger tmdb-gemini-remove" onClick={() => void handleGeminiRemove(img.file_path)} title="Remove this Gemini image (deletes the kept file)">
                                             <X size={13} />
                                           </button>
                                         </>
@@ -1491,9 +1492,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                             <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom" title={`From ${img.origin}`}>{img.origin}</span>
                           )}
                           {img.gemini && (
-                            <>
+              <>
                               <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom tmdb-gemini-badge" title="Made with Gemini">Gemini</span>
-                              <button type="button" className="tmdb-gemini-remove" onClick={() => void handleGeminiRemove(img.file_path)} title="Remove this Gemini image (deletes the kept file)">
+                              <button type="button" className="btn-icon btn-icon-sm btn-icon-filled btn-icon-danger tmdb-gemini-remove" onClick={() => void handleGeminiRemove(img.file_path)} title="Remove this Gemini image (deletes the kept file)">
                                 <X size={13} />
                               </button>
                             </>
@@ -1589,7 +1590,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             alt="Poster preview"
             onClick={(e) => e.stopPropagation()}
           />
-          <button type="button" className="tmdb-lightbox-close" onClick={() => setPreviewPoster(null)}>×</button>
+          <button type="button" className="btn-icon btn-icon-filled tmdb-lightbox-close" onClick={() => setPreviewPoster(null)}>×</button>
         </div>
       )}
 
@@ -1603,15 +1604,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               setGeminiTarget({ mode, image: galleryPreview, role: galleryPreviewRole === 'backdrop' ? 'background' : 'poster', season: galleryPreviewSeason, source: imageSource })
               setGalleryPreview(null)
             }
-            const geminiStyle = { fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#fff' }
             return (
           <div className={`tmdb-gallery-lightbox${geminiRow ? ' tmdb-gallery-lightbox--toolbar' : ''}`} onClick={(e) => e.stopPropagation()}>
             {geminiRow && (
               <div className="tmdb-gallery-lightbox-actions tmdb-gallery-lightbox-actions--top">
-                <button type="button" className="btn-toolbar" style={geminiStyle} title="Ask Gemini to redraw this image without its text (experimental, billed to your key)" onClick={() => openGemini('remove_text')}>
+                <button type="button" className="btn-toolbar lightbox-btn" title="Ask Gemini to redraw this image without its text (experimental, billed to your key)" onClick={() => openGemini('remove_text')}>
                   <WandSparkles size={13} /> Remove Text
                 </button>
-                <button type="button" className="btn-toolbar" style={geminiStyle} title="Ask Gemini to lift the title logo out as a white PNG (experimental, billed to your key)" onClick={() => openGemini('extract_logo')}>
+                <button type="button" className="btn-toolbar lightbox-btn" title="Ask Gemini to lift the title logo out as a white PNG (experimental, billed to your key)" onClick={() => openGemini('extract_logo')}>
                   <TypeIcon size={13} /> Make Logo
                 </button>
               </div>
@@ -1626,8 +1626,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               <span className="tmdb-gallery-dims">{galleryPreview.width}×{galleryPreview.height}</span>
               <button
                 type="button"
-                className="btn-toolbar btn-primary"
-                style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
+                className="btn-toolbar btn-primary lightbox-btn"
                 onClick={() => void handleGalleryDownload(galleryPreview.file_path, galleryPreviewRole, galleryPreviewSeason)}
               >
                 <Download size={13} /> Download
@@ -1638,8 +1637,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                 return (
                   <button
                     type="button"
-                    className="btn-toolbar"
-                    style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#fff' }}
+                    className="btn-toolbar lightbox-btn"
                     title={`Save to the ${subtype} export folder, named for artwork drives`}
                     onClick={() => void handleSaveArtwork(subtype, galleryPreview.file_path)}
                     disabled={!!artworkSaving[key] || !!artworkSaved[key]}
@@ -1651,8 +1649,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               {galleryPreviewRole === 'poster' && galleryPreviewSeason == null && psdConfig.squareartFolderSet && (
                 <button
                   type="button"
-                  className="btn-toolbar"
-                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#fff' }}
+                  className="btn-toolbar lightbox-btn"
                   title="Crop into square art → saves to the square art export folder, named for artwork drives"
                   onClick={() => { setSquareCropTarget(galleryPreview); setGalleryPreview(null) }}
                 >
@@ -1663,7 +1660,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           </div>
             )
           })()}
-          <button type="button" className="tmdb-lightbox-close" onClick={() => setGalleryPreview(null)}>×</button>
+          <button type="button" className="btn-icon btn-icon-filled tmdb-lightbox-close" onClick={() => setGalleryPreview(null)}>×</button>
         </div>
       )}
 
@@ -1696,128 +1693,111 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       {artworkOverwriteConfirm && (() => {
         const label = artworkOverwriteConfirm.subtype === 'squareart' ? 'square art' : artworkOverwriteConfirm.subtype
         return (
-          <div className="modal-overlay">
-            <div className="modal-content schedule-modal">
-              <div className="modal-header">
-                <h2>Overwrite Existing {label === 'square art' ? 'Square Art' : label === 'logo' ? 'Logo' : 'Background'}?</h2>
-                <button className="modal-close" onClick={() => setArtworkOverwriteConfirm(null)}>×</button>
+          <Modal onClose={() => setArtworkOverwriteConfirm(null)} closeOnOverlay={false}>
+            <Modal.Header title={<>Overwrite Existing {label === 'square art' ? 'Square Art' : label === 'logo' ? 'Logo' : 'Background'}?</>} />
+            <Modal.Body>
+              <p className="modal-text">
+                Your {label} export folder already has a file with this name:
+              </p>
+              <div className="psd-not-found-filename">
+                <code>{artworkOverwriteConfirm.filename}</code>
               </div>
-              <div className="modal-body">
-                <p style={{ color: '#ccc', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                  Your {label} export folder already has a file with this name:
-                </p>
-                <div className="psd-not-found-filename">
-                  <code>{artworkOverwriteConfirm.filename}</code>
-                </div>
-                <p style={{ marginTop: '1rem', color: '#ffb74d', fontSize: '0.85rem', lineHeight: 1.6 }}>
-                  Continuing will replace it with this {label}.
-                </p>
-              </div>
-              <div className="modal-footer">
-                <button className="btn-secondary" onClick={() => setArtworkOverwriteConfirm(null)}>Cancel</button>
-                <button
-                  className="btn-primary"
-                  style={{ justifyContent: 'center', background: '#f44336' }}
-                  onClick={() => {
-                    const o = artworkOverwriteConfirm
-                    setArtworkOverwriteConfirm(null)
-                    void handleSaveArtwork(o.subtype, o.path, { confirmOverwrite: true, crop: o.crop })
-                  }}
-                >
-                  Overwrite
-                </button>
-              </div>
-            </div>
-          </div>
+              <p className="modal-note text-warning">
+                Continuing will replace it with this {label}.
+              </p>
+            </Modal.Body>
+            <Modal.Footer>
+              <button className="btn-secondary" onClick={() => setArtworkOverwriteConfirm(null)}>Cancel</button>
+              <button
+                className="btn-danger"
+                onClick={() => {
+                  const o = artworkOverwriteConfirm
+                  setArtworkOverwriteConfirm(null)
+                  void handleSaveArtwork(o.subtype, o.path, { confirmOverwrite: true, crop: o.crop })
+                }}
+              >
+                Overwrite
+              </button>
+            </Modal.Footer>
+          </Modal>
         )
       })()}
 
       {/* PSD overwrite confirm modal */}
       {psdOverwriteConfirm && (
-        <div className="modal-overlay">
-          <div className="modal-content schedule-modal">
-            <div className="modal-header">
-              <h2>Overwrite Existing PSD?</h2>
-              <button className="modal-close" onClick={() => setPsdOverwriteConfirm(null)}>×</button>
+        <Modal onClose={() => setPsdOverwriteConfirm(null)} closeOnOverlay={false}>
+          <Modal.Header title="Overwrite Existing PSD?" />
+          <Modal.Body>
+            <p className="modal-text">
+              A PSD for this title already exists in your export folder:
+            </p>
+            <div className="psd-not-found-filename">
+              <code>{psdOverwriteConfirm.filename}</code>
             </div>
-            <div className="modal-body">
-              <p style={{ color: '#ccc', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                A PSD for this title already exists in your export folder:
-              </p>
-              <div className="psd-not-found-filename">
-                <code>{psdOverwriteConfirm.filename}</code>
+            {activeExportFolder && (
+              <div className="psd-not-found-folder">
+                <span className="psd-not-found-folder-label">Export folder:</span>
+                <code>{activeExportFolder}</code>
               </div>
-              {activeExportFolder && (
-                <div className="psd-not-found-folder">
-                  <span className="psd-not-found-folder-label">Export folder:</span>
-                  <code>{activeExportFolder}</code>
-                </div>
-              )}
-              <p style={{ marginTop: '1rem', color: '#ffb74d', fontSize: '0.85rem', lineHeight: 1.6 }}>
-                Continuing will overwrite it with a fresh PSD. Any edits you have made to the existing file will be lost.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setPsdOverwriteConfirm(null)}>Cancel</button>
-              <button
-                className="btn-primary"
-                style={{ justifyContent: 'center', background: '#f44336' }}
-                onClick={() => {
-                  setPsdOverwriteConfirm(null)
-                  void handlePsdExport(false, true)
-                }}
-              >
-                Overwrite
-              </button>
-            </div>
-          </div>
-        </div>
+            )}
+            <p className="modal-note text-warning">
+              Continuing will overwrite it with a fresh PSD. Any edits you have made to the existing file will be lost.
+            </p>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={() => setPsdOverwriteConfirm(null)}>Cancel</button>
+            <button
+              className="btn-danger"
+              onClick={() => {
+                setPsdOverwriteConfirm(null)
+                void handlePsdExport(false, true)
+              }}
+            >
+              Overwrite
+            </button>
+          </Modal.Footer>
+        </Modal>
       )}
 
       {/* PSD not found modal */}
       {psdNotFound && (
-        <div className="modal-overlay">
-          <div className="modal-content schedule-modal">
-            <div className="modal-header">
-              <h2>PSD Not Found</h2>
-              <button className="modal-close" onClick={() => setPsdNotFound(null)}>×</button>
+        <Modal onClose={() => setPsdNotFound(null)} closeOnOverlay={false}>
+          <Modal.Header title="PSD Not Found" />
+          <Modal.Body>
+            <p className="modal-text mb-lg">
+              No existing PSD was found in your export folder. To use this feature the file must be named exactly:
+            </p>
+            <div className="psd-not-found-filename">
+              <code>{psdNotFound.expectedFilename}</code>
             </div>
-            <div className="modal-body">
-              <p style={{ marginBottom: '1rem', color: '#ccc', lineHeight: 1.6 }}>
-                No existing PSD was found in your export folder. To use this feature the file must be named exactly:
-              </p>
-              <div className="psd-not-found-filename">
-                <code>{psdNotFound.expectedFilename}</code>
+            {activeExportFolder && (
+              <div className="psd-not-found-folder">
+                <span className="psd-not-found-folder-label">Export folder:</span>
+                <code>{activeExportFolder}</code>
               </div>
-              {activeExportFolder && (
-                <div className="psd-not-found-folder">
-                  <span className="psd-not-found-folder-label">Export folder:</span>
-                  <code>{activeExportFolder}</code>
-                </div>
-              )}
-              <p style={{ marginTop: '1rem', color: '#aaa', fontSize: '0.85rem', lineHeight: 1.6 }}>
-                Place the file in your export folder{activeExportFolder ? ' shown above' : ''}, or use the button below to upload it directly from your computer.
-                After uploading, the export will run automatically.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setPsdNotFound(null)}>Cancel</button>
-              <label className={`btn-primary psd-upload-label${psdUploading ? ' disabled' : ''}`}>
-                <input
-                  type="file"
-                  accept=".psd"
-                  style={{ display: 'none' }}
-                  disabled={psdUploading}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) void handlePsdNotFoundUpload(file)
-                  }}
-                />
-                {psdUploading ? 'Uploading…' : 'Browse for PSD…'}
-              </label>
-            </div>
-          </div>
-        </div>
+            )}
+            <p className="modal-note text-muted">
+              Place the file in your export folder{activeExportFolder ? ' shown above' : ''}, or use the button below to upload it directly from your computer.
+              After uploading, the export will run automatically.
+            </p>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={() => setPsdNotFound(null)}>Cancel</button>
+            <label className={`btn-primary psd-upload-label${psdUploading ? ' disabled' : ''}`}>
+              <input
+                type="file"
+                accept=".psd"
+                hidden
+                disabled={psdUploading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void handlePsdNotFoundUpload(file)
+                }}
+              />
+              {psdUploading ? 'Uploading…' : 'Browse for PSD…'}
+            </label>
+          </Modal.Footer>
+        </Modal>
       )}
 
       {/* In-place drive poster search */}

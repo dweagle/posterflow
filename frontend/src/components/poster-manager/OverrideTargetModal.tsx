@@ -60,7 +60,10 @@ export default function OverrideTargetModal({ pick, onClose, onSaved }: Override
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -140,7 +143,7 @@ export default function OverrideTargetModal({ pick, onClose, onSaved }: Override
       <div className="drive-search-modal override-target-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="drive-search-modal-header">
           <h2>Use Poster For…</h2>
-          <button type="button" className="drive-search-modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="btn-icon drive-search-modal-close" onClick={onClose} aria-label="Close">
             <X size={20} />
           </button>
         </div>
@@ -174,16 +177,16 @@ export default function OverrideTargetModal({ pick, onClose, onSaved }: Override
                 autoFocus
               />
             </div>
-            <button type="submit" className="poster-search-button" disabled={loading}>
+            <button type="submit" className="btn-primary" disabled={loading}>
               {loading ? 'Searching...' : 'Search'}
             </button>
           </form>
-          <div className="poster-search-filter-row">
+          <div className="poster-search-filter-row pf-subtabs">
             {FILTERS.map((f) => (
               <button
                 key={f.key}
                 type="button"
-                className={`poster-filter-btn${filter === f.key ? ' active' : ''}`}
+                className={filter === f.key ? 'active' : ''}
                 onClick={() => setFilter(f.key)}
               >
                 {f.label}
@@ -191,7 +194,7 @@ export default function OverrideTargetModal({ pick, onClose, onSaved }: Override
             ))}
             <button
               type="button"
-              className="poster-filter-btn override-target-refresh"
+              className="btn-secondary btn-sm override-target-refresh"
               onClick={() => { hideTip(); runSearch(query, true) }}
               disabled={loading}
               onPointerEnter={(e) => showTip(e, 'Re-read the media sources (the library list is cached for a few minutes)')}
@@ -255,7 +258,7 @@ export default function OverrideTargetModal({ pick, onClose, onSaved }: Override
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button
             type="button"
-            className="poster-search-button"
+            className="btn-primary"
             onClick={() => { hideTip(); handleSave() }}
             disabled={!target || saving}
             onPointerEnter={(e) => showTip(e, target ? `Pin this file for ${targetLabel}` : 'Pick an item first')}

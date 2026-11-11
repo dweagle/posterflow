@@ -1,8 +1,8 @@
-import { useState, type MouseEvent } from 'react'
+import { useState } from 'react'
 import { useToast } from './Toast'
 import ArtworkTypePicker from './ArtworkTypePicker'
 import { type ArtworkType } from '../api/client'
-import './DriveEditModal.css'
+import Modal from '../components/Modal'
 
 interface DriveEditModalProps {
   drive: {
@@ -55,112 +55,99 @@ function DriveEditModal({ drive, artworkTypeCounts, onClose, onSave }: DriveEdit
     onClose()
   }
 
-  const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) {
-      onClose()
-    }
-  }
-
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content schedule-modal">
-        <div className="modal-header">
-          <h2>Edit Drive Settings</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
+    <Modal onClose={onClose}>
+      <Modal.Header title="Edit Drive Settings" />
+      <Modal.Body>
+        <div className="form-group checkbox-group">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={syncEnabled}
+              onChange={(e) => setSyncEnabled(e.target.checked)}
+            />
+            Sync from Google Drive
+          </label>
+          <small>
+            When enabled, rclone downloads posters from Google Drive to the local folder on each sync job.
+          </small>
+          {drive.is_custom && syncEnabled && (
+            <small className="text-muted">
+              Tip: disable this if you want a local override folder — drop posters in manually instead of syncing from Google Drive.
+            </small>
+          )}
+          {!drive.is_custom && !syncEnabled && (
+            <small className="text-danger">
+              ⚠ Not recommended for community drives. Only disable sync if this is your own personal Google Drive
+              and you want to manage its local folder directly (e.g. you are a poster maker publishing your own content).
+            </small>
+          )}
+          {!syncEnabled && (
+            <small className="text-warning">
+              GDrive sync is off — posters you place manually in this drive's local folder will be tracked,
+              but only after a sync job runs. Use the sync button on the drive card, or schedule regular syncs,
+              to keep the index up to date.
+            </small>
+          )}
         </div>
 
-        <div className="modal-body">
-          <div className="form-group checkbox-group">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={syncEnabled}
-                onChange={(e) => setSyncEnabled(e.target.checked)}
-              />
-              Sync from Google Drive
-            </label>
-            <small>
-              When enabled, rclone downloads posters from Google Drive to the local folder on each sync job.
+        <div className="form-group">
+          <label className="field-label">Drive Name</label>
+          <input type="text" value={drive.name} disabled />
+        </div>
+
+        {isArtwork && (
+          <div className="form-group">
+            <label className="field-label">Artwork to sync</label>
+            <ArtworkTypePicker value={syncedTypes} onChange={setSyncedTypes} counts={artworkTypeCounts} />
+            <small>Only the folders you pick are downloaded on the next sync.</small>
+            <small className="text-warning">
+              Unchecking a type deletes its already-synced files from this drive's local folder.
             </small>
-            {drive.is_custom && syncEnabled && (
-              <small style={{ color: '#aaa' }}>
-                Tip: disable this if you want a local override folder — drop posters in manually instead of syncing from Google Drive.
-              </small>
-            )}
-            {!drive.is_custom && !syncEnabled && (
-              <small style={{ color: '#f44336' }}>
-                ⚠ Not recommended for community drives. Only disable sync if this is your own personal Google Drive
-                and you want to manage its local folder directly (e.g. you are a poster maker publishing your own content).
-              </small>
-            )}
-            {!syncEnabled && (
-              <small style={{ color: '#ffb74d' }}>
-                GDrive sync is off — posters you place manually in this drive's local folder will be tracked,
-                but only after a sync job runs. Use the sync button on the drive card, or schedule regular syncs,
-                to keep the index up to date.
-              </small>
-            )}
           </div>
+        )}
 
+        {drive.is_custom && syncEnabled && (
           <div className="form-group">
-            <label className="field-label">Drive Name</label>
-            <input type="text" value={drive.name} disabled />
-          </div>
-
-          {isArtwork && (
-            <div className="form-group">
-              <label className="field-label">Artwork to sync</label>
-              <ArtworkTypePicker value={syncedTypes} onChange={setSyncedTypes} counts={artworkTypeCounts} />
-              <small>Only the folders you pick are downloaded on the next sync.</small>
-              <small style={{ color: '#ffb74d' }}>
-                Unchecking a type deletes its already-synced files from this drive's local folder.
-              </small>
-            </div>
-          )}
-
-          {drive.is_custom && syncEnabled && (
-            <div className="form-group">
-              <label className="field-label">Google Drive ID *</label>
-              <input
-                type="text"
-                value={driveId}
-                onChange={(e) => setDriveId(e.target.value)}
-                placeholder="1ABC...xyz"
-              />
-              <small>Required for synced drives (found in the Google Drive share link).</small>
-            </div>
-          )}
-
-          <div className="form-group">
-            <label className="field-label">{syncEnabled ? 'Custom Sync Path (optional)' : 'Custom Folder Path (optional)'}</label>
+            <label className="field-label">Google Drive ID *</label>
             <input
               type="text"
-              value={customPath}
-              onChange={(e) => setCustomPath(e.target.value)}
-              placeholder="e.g., /media/posters or subfolders/name"
+              value={driveId}
+              onChange={(e) => setDriveId(e.target.value)}
+              placeholder="1ABC...xyz"
             />
-            {syncEnabled ? (
-              <>
-                <small>Leave empty to sync into the default location: <code>{'<storage>/<style>/<drive name>'}</code>.</small>
-                <small><strong>Absolute path</strong> (starts with <code>/</code>): syncs directly into that folder — e.g. <code>/media/posters/movies</code>.</small>
-                <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>overrides/movies</code> → <code>/config/posters/gdrive/overrides/movies</code>.</small>
-              </>
-            ) : (
-              <>
-                <small>Leave empty to use the default location inside your configured GDrive storage folder.</small>
-                <small><strong>Absolute path</strong> (starts with <code>/</code>): files go exactly there — e.g. <code>/media/posters/manual</code>.</small>
-                <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>manual/overrides</code> → <code>/config/posters/gdrive/manual/overrides</code>.</small>
-              </>
-            )}
+            <small>Required for synced drives (found in the Google Drive share link).</small>
           </div>
-        </div>
+        )}
 
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSave}>Save Changes</button>
+        <div className="form-group">
+          <label className="field-label">{syncEnabled ? 'Custom Sync Path (optional)' : 'Custom Folder Path (optional)'}</label>
+          <input
+            type="text"
+            value={customPath}
+            onChange={(e) => setCustomPath(e.target.value)}
+            placeholder="e.g., /media/posters or subfolders/name"
+          />
+          {syncEnabled ? (
+      <>
+              <small>Leave empty to sync into the default location: <code>{'<storage>/<style>/<drive name>'}</code>.</small>
+              <small><strong>Absolute path</strong> (starts with <code>/</code>): syncs directly into that folder — e.g. <code>/media/posters/movies</code>.</small>
+              <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>overrides/movies</code> → <code>/config/posters/gdrive/overrides/movies</code>.</small>
+            </>
+          ) : (
+      <>
+              <small>Leave empty to use the default location inside your configured GDrive storage folder.</small>
+              <small><strong>Absolute path</strong> (starts with <code>/</code>): files go exactly there — e.g. <code>/media/posters/manual</code>.</small>
+              <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>manual/overrides</code> → <code>/config/posters/gdrive/manual/overrides</code>.</small>
+            </>
+          )}
         </div>
-      </div>
-    </div>
+      </Modal.Body>
+      <Modal.Footer>
+        <button className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button className="btn-primary" onClick={handleSave}>Save Changes</button>
+      </Modal.Footer>
+    </Modal>
   )
 }
 

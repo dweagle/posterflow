@@ -173,6 +173,18 @@ export const useArtworkDrivePriority = ({ drives, showToast }: UseArtworkDrivePr
     setDragOverIndex(endIndex)
   }
 
+  // Drop the unsaved reordering and go back to the saved list.
+  const resetPriorityToOriginal = () => {
+    if (originalRef.current === null) return
+    const ordered: ArtworkDrive[] = []
+    for (const id of originalRef.current) {
+      const drive = drives.find(d => d.id === id)
+      if (drive) ordered.push(drive)
+    }
+    setPriorityList(ordered)
+    setHasUnsavedChanges(false)
+  }
+
   const savePriority = async () => {
     try {
       const ids = priorityList.map(d => d.id)
@@ -355,5 +367,6 @@ export const useArtworkDrivePriority = ({ drives, showToast }: UseArtworkDrivePr
     handleDragOverEnd,
     handleDriveTouchStart,
     savePriority,
+    resetPriorityToOriginal,
   }
 }

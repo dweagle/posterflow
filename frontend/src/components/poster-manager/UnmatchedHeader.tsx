@@ -1,7 +1,8 @@
-import { Download, RefreshCw, Save, Search } from 'lucide-react'
+import { Download, RefreshCw, Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Toolbar from '../Toolbar'
 import UnmatchedTypeSelector, { UnmatchedScope } from './UnmatchedTypeSelector'
+import SaveActions from '../../components/SaveActions'
 
 type UnmatchedHeaderProps = {
   scope: UnmatchedScope
@@ -13,6 +14,7 @@ type UnmatchedHeaderProps = {
   detecting: boolean
   hasResults: boolean
   onSaveSettings: () => void
+  onCancelSettings: () => void
   onDetect: () => void
   onViewSearch: () => void
   onDownloadReport: () => void
@@ -32,6 +34,7 @@ function UnmatchedHeader({
   detecting,
   hasResults,
   onSaveSettings,
+  onCancelSettings,
   onDetect,
   onViewSearch,
   onDownloadReport,
@@ -59,22 +62,14 @@ function UnmatchedHeader({
             Discord
           </button>
         </div>
-        <button
-          className={`btn-toolbar ${hasUnsavedChanges ? 'btn-unsaved' : ''}`}
-          onClick={onSaveSettings}
-          disabled={saving || !hasUnsavedChanges}
-          title={hasUnsavedChanges ? 'Save changes' : 'No changes to save'}
-        >
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
+        <SaveActions dirty={hasUnsavedChanges} saving={saving} disabled={saving || !hasUnsavedChanges} onSave={onSaveSettings} onCancel={onCancelSettings} />
         <button className="btn-toolbar btn-primary" onClick={onDetect} disabled={detecting}>
           <RefreshCw size={16} />
           {detecting ? 'Detecting...' : 'Detect Unmatched'}
         </button>
         {hasResults && (
           <>
-            <button className="btn-toolbar btn-primary" onClick={onViewSearch} title="View and search missing items">
+            <button className="btn-toolbar" onClick={onViewSearch} title="View and search missing items">
               <Search size={16} />
               View / Search
             </button>

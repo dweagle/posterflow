@@ -110,7 +110,7 @@ export function OverlaySelect({
   onChange: (name: string) => void
 }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ maxWidth: '240px' }}>
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="field-w-md">
       <option value="">No border image</option>
       {overlays.map((overlay) => (
         <option key={overlay.name} value={overlay.name}>
@@ -202,7 +202,7 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
       <div className="field-group">
       <label>{label}</label>
       {verbose && (
-        <small style={{ marginBottom: '0.75rem', display: 'block' }}>
+        <small className="block mb-md">
           How the replaced border is rendered. <strong>Solid</strong> uses the colors below;
           <strong> Gradient</strong> blends colors across the band; <strong>Image overlay</strong> composites a PNG frame you design.
         </small>
@@ -210,7 +210,7 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
       <select
         value={value.style}
         onChange={(e) => onChange({ style: e.target.value as BorderStyle })}
-        style={{ maxWidth: '240px', display: 'block' }}
+        className="block field-w-md"
       >
         <option value="solid">Solid color</option>
         <option value="gradient">Gradient band</option>
@@ -219,18 +219,18 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
       </select>
 
       {value.style === 'remove' && (
-        <small style={{ marginTop: '0.5rem', display: 'block' }}>
+        <small className="block mt-sm">
           Matched items have their existing border stripped — exactly like Remove Borders mode
           (top/left/right cropped, black title bar). No new border or inner effect is applied.
         </small>
       )}
 
       {value.style === 'solid' && (
-        <div style={{ marginTop: '0.75rem' }}>
+        <div className="mt-md">
           {verbose && (
             <>
               <label>Colors</label>
-              <small style={{ marginBottom: '0.5rem', display: 'block' }}>Add one or more hex colors. Colors cycle through posters.</small>
+              <small className="block mb-sm">Add one or more hex colors. Colors cycle through posters.</small>
             </>
           )}
           <div className="color-input-row">
@@ -239,12 +239,12 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
             <button className="btn-secondary" onClick={addColor} disabled={!newColor || value.colors.includes(newColor)}>Add Color</button>
           </div>
           {value.colors.length > 0 ? (
-            <div className="color-list" style={{ marginTop: '0.5rem' }}>
+            <div className="color-list mt-sm">
               {value.colors.map((color, index) => (
                 <div key={index} className="color-item">
                   <div className="color-preview" style={{ background: color }} />
                   <span className="color-value">{color}</span>
-                  <button className="btn-remove-color" onClick={() => removeColor(color)} title="Remove color"><Trash2 size={16} /></button>
+                  <button className="btn-icon btn-icon-sm btn-icon-danger" onClick={() => removeColor(color)} title="Remove color"><Trash2 size={16} /></button>
                 </div>
               ))}
             </div>
@@ -255,33 +255,33 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
       )}
 
       {value.style === 'gradient' && (
-        <div style={{ marginTop: '0.75rem' }}>
+        <div className="mt-md">
           <label>Gradient Colors</label>
-          {verbose && <small style={{ marginBottom: '0.5rem', display: 'block' }}>Two or more colors, blended in order across the border.</small>}
+          {verbose && <small className="block mb-sm">Two or more colors, blended in order across the border.</small>}
           <div className="color-input-row">
             <input type="color" value={newGradientColor} onChange={(e) => setNewGradientColor(e.target.value)} className="color-picker" />
             <input type="text" value={newGradientColor} onChange={(e) => setNewGradientColor(e.target.value)} placeholder="#000000" />
             <button className="btn-secondary" onClick={addGradientColor} disabled={!newGradientColor || value.gradientColors.includes(newGradientColor)}>Add Color</button>
           </div>
           {value.gradientColors.length > 0 ? (
-            <div className="color-list" style={{ marginTop: '0.5rem' }}>
+            <div className="color-list mt-sm">
               {value.gradientColors.map((color, index) => (
                 <div key={index} className="color-item">
                   <div className="color-preview" style={{ background: color }} />
                   <span className="color-value">{color}</span>
-                  <button className="btn-remove-color" onClick={() => removeGradientColor(color)} title="Remove color"><Trash2 size={16} /></button>
+                  <button className="btn-icon btn-icon-sm btn-icon-danger" onClick={() => removeGradientColor(color)} title="Remove color"><Trash2 size={16} /></button>
                 </div>
               ))}
             </div>
           ) : (
             <div className="empty-config"><p>Add at least two colors for a gradient.</p></div>
           )}
-          <div style={{ marginTop: '0.5rem' }}>
+          <div className="mt-sm">
             <label>Direction</label>
             <select
               value={value.gradientDirection}
               onChange={(e) => onChange({ gradientDirection: e.target.value as GradientDirection })}
-              style={{ maxWidth: '200px', display: 'block' }}
+              className="block field-w-sm"
             >
               <option value="vertical">Vertical</option>
               <option value="horizontal">Horizontal</option>
@@ -292,28 +292,28 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
       )}
 
       {value.style === 'image' && (
-        <div style={{ marginTop: '0.75rem' }}>
+        <div className="mt-md">
           <label>Border Frame Image</label>
           {verbose && (
-            <small style={{ marginBottom: '0.5rem', display: 'block' }}>
+            <small className="block mb-sm">
               Choose a 1000×1500 PNG frame (transparent center). Bundled presets and your uploads are listed.
             </small>
           )}
           <div className="border-overlay-row">
             <OverlaySelect overlays={overlays} value={value.overlayImage} onChange={(name) => onChange({ overlayImage: name })} />
-            <input ref={fileInputRef} type="file" accept="image/png" style={{ display: 'none' }} onChange={handleUploadOverlay} />
+            <input ref={fileInputRef} type="file" accept="image/png" hidden onChange={handleUploadOverlay} />
             <button className="btn-secondary" onClick={() => fileInputRef.current?.click()}><Upload size={16} /> Upload</button>
             {value.overlayImage && overlays.find((o) => o.name === value.overlayImage)?.source === 'user' && (
-              <button className="btn-remove-color" onClick={() => handleDeleteOverlay(value.overlayImage)} title="Delete uploaded overlay"><Trash2 size={16} /></button>
+              <button className="btn-icon btn-icon-outlined btn-icon-danger" onClick={() => handleDeleteOverlay(value.overlayImage)} title="Delete uploaded overlay"><Trash2 size={16} /></button>
             )}
           </div>
-          {overlayError && <small style={{ color: 'var(--error, #e55)', display: 'block' }}>{overlayError}</small>}
+          {overlayError && <small className="block text-danger">{overlayError}</small>}
         </div>
       )}
 
       {value.style !== 'remove' && (
       <>
-      <div className="toggle-field" style={{ marginTop: '0.75rem' }}>
+      <div className="toggle-field mt-md">
         <label className="toggle-switch">
           <input type="checkbox" checked={value.removeExisting} onChange={(e) => onChange({ removeExisting: e.target.checked })} />
           <span className="toggle-slider"></span>
@@ -321,7 +321,7 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
         <span className="toggle-label">Remove existing border first</span>
       </div>
       {verbose && (
-        <small style={{ display: 'block' }}>
+        <small className="block">
           Strip the existing border first — exactly like Remove Borders mode (top/left/right cropped, black title bar) — before applying the new border.
         </small>
       )}
@@ -336,7 +336,7 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
       <div className="field-group">
         <label>Inner Edge Effect</label>
         {verbose && (
-          <small style={{ marginBottom: '0.75rem', display: 'block' }}>
+          <small className="block mb-md">
             Adds a soft transition just inside the border. Source posters already carry some baked-in inner glow, so keep these subtle.
           </small>
         )}
@@ -346,25 +346,25 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
           <label className="radio-label"><input type="radio" name={`${idPrefix}-inner`} checked={value.innerEffect === 'fade'} onChange={() => onChange({ innerEffect: 'fade' })} /><span>Border-color fade</span></label>
         </div>
         {value.innerEffect === 'glow' && (
-          <div style={{ marginTop: '0.5rem' }}>
+          <div className="mt-sm">
             <div className="color-input-row">
               <input type="color" value={value.innerColor} onChange={(e) => onChange({ innerColor: e.target.value })} className="color-picker" />
               <input type="text" value={value.innerColor} onChange={(e) => onChange({ innerColor: e.target.value })} placeholder="#000000" />
             </div>
-            <div style={{ marginTop: '0.5rem' }}>
+            <div className="mt-sm">
               <label>Opacity: {value.innerOpacity}%</label>
-              <input type="range" min="0" max="100" value={value.innerOpacity} onChange={(e) => onChange({ innerOpacity: parseInt(e.target.value) || 0 })} style={{ display: 'block', maxWidth: '240px' }} />
+              <input type="range" min="0" max="100" value={value.innerOpacity} onChange={(e) => onChange({ innerOpacity: parseInt(e.target.value) || 0 })} className="block field-w-md" />
             </div>
-            <div style={{ marginTop: '0.5rem' }}>
+            <div className="mt-sm">
               <label>Glow Width (pixels)</label>
-              <NumberField value={value.innerWidth} onChange={(n) => onChange({ innerWidth: n })} fallback={1} min={1} max={200} style={{ maxWidth: '120px' }} />
+              <NumberField value={value.innerWidth} onChange={(n) => onChange({ innerWidth: n })} fallback={1} min={1} max={200} className="field-w-xs" />
             </div>
           </div>
         )}
         {value.innerEffect === 'fade' && (
-          <div style={{ marginTop: '0.5rem' }}>
+          <div className="mt-sm">
             <label>Fade Width (pixels)</label>
-            <NumberField value={value.fadeWidth} onChange={(n) => onChange({ fadeWidth: n })} fallback={1} min={1} max={200} style={{ maxWidth: '120px' }} />
+            <NumberField value={value.fadeWidth} onChange={(n) => onChange({ fadeWidth: n })} fallback={1} min={1} max={200} className="field-w-xs" />
           </div>
         )}
       </div>
@@ -375,14 +375,14 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
           <RoundedCornersHint />
         </div>
         {verbose && (
-          <small style={{ marginBottom: '0.5rem', display: 'block' }}>
+          <small className="block mb-sm">
             For players that round poster corners. Fills each corner with the border and carries the poster's own
             inner glow around the curve, so the frame stays one width. Set the radius the player uses on a 1000×1500
             poster; the preview clips its corners by the same amount. 0 = off. Players that don't round corners show
             the filled corners as a thicker border there; the preview hides this.
           </small>
         )}
-        <NumberField value={value.cornerRadius} onChange={(n) => onChange({ cornerRadius: n })} fallback={0} min={0} max={400} style={{ maxWidth: '120px' }} />
+        <NumberField value={value.cornerRadius} onChange={(n) => onChange({ cornerRadius: n })} fallback={0} min={0} max={400} className="field-w-xs" />
       </div>
       )}
       </div>

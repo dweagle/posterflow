@@ -1,4 +1,5 @@
-import { Edit2, Eye, EyeOff, List, Lock, Save, Trash2, Zap } from 'lucide-react'
+import { Edit2, Eye, EyeOff, List, Lock, Trash2, Zap } from 'lucide-react'
+import SaveActions from '../SaveActions'
 import { MEDIA_SERVER_COPY, instanceServerType, isJellyfinInstance } from '../../utils/mediaServer'
 
 type ServerInstance = {
@@ -102,7 +103,7 @@ function SettingsMediaSection({
         <div className="server-section">
           <div className="server-section-header">
             <h3>Media Servers</h3>
-            <button type="button" className="btn-add-instance" onClick={onAddPlexInstance}>
+            <button type="button" className="btn-primary" onClick={onAddPlexInstance}>
               + Add Instance
             </button>
           </div>
@@ -119,31 +120,23 @@ function SettingsMediaSection({
                     <span className="card-title">{instance.name || `Plex ${index + 1}`}</span>
                     <div className="card-actions">
                       {hasSettings && (
-                        <button type="button" className="btn-edit-instance" onClick={() => onToggleEditPlex(index)} title={isEditing ? 'Lock instance' : 'Edit instance'}>
+                        <button type="button" className="btn-icon btn-icon-filled" onClick={() => onToggleEditPlex(index)} title={isEditing ? 'Lock instance' : 'Edit instance'}>
                           {isEditing ? <Lock size={16} /> : <Edit2 size={16} />}
                         </button>
                       )}
                       {hasSettings && (
-                        <button type="button" className="btn-test-instance" onClick={() => onTestPlexConnection(index)} disabled={testingPlex.has(index)} title="Test connection">
+                        <button type="button" className="btn-icon btn-icon-filled" onClick={() => onTestPlexConnection(index)} disabled={testingPlex.has(index)} title="Test connection">
                           <Zap size={16} />
                         </button>
                       )}
                       {hasSettings && (
-                        <button type="button" className="btn-test-instance" onClick={() => onOpenLibraryModal(index)} title="Manage libraries">
+                        <button type="button" className="btn-icon btn-icon-filled" onClick={() => onOpenLibraryModal(index)} title="Manage libraries">
                           <List size={16} />
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className={`btn-save-instance ${hasUnsaved ? 'btn-unsaved' : ''}`}
-                        onClick={onSaveMediaSettings}
-                        disabled={saving || !hasUnsaved}
-                        title={hasUnsaved ? 'Save all settings' : 'No changes to save for this instance'}
-                      >
-                        <Save size={16} />
-                      </button>
+                      <SaveActions dirty={hasUnsaved} saving={saving} onSave={onSaveMediaSettings} />
                       {mediaSettings.plex_instances.length > 1 && (
-                        <button type="button" className="btn-remove-instance" onClick={() => onConfirmRemovePlexInstance(index)} title="Remove instance">
+                        <button type="button" className="btn-icon btn-icon-filled btn-icon-danger" onClick={() => onConfirmRemovePlexInstance(index)} title="Remove instance">
                           <Trash2 size={16} />
                         </button>
                       )}
@@ -235,7 +228,7 @@ function SettingsMediaSection({
         <div className="server-section">
           <div className="server-section-header">
             <h3>Sonarr Instances</h3>
-            <button type="button" className="btn-add-instance" onClick={onAddSonarrInstance}>
+            <button type="button" className="btn-primary" onClick={onAddSonarrInstance}>
               + Add Instance
             </button>
           </div>
@@ -255,25 +248,17 @@ function SettingsMediaSection({
                     <span className="card-title">{instance.name || `Sonarr ${index + 1}`}</span>
                     <div className="card-actions">
                       {hasSettings && (
-                        <button type="button" className="btn-edit-instance" onClick={() => onToggleEditSonarr(index)} title={isEditing ? 'Lock instance' : 'Edit instance'}>
+                        <button type="button" className="btn-icon btn-icon-filled" onClick={() => onToggleEditSonarr(index)} title={isEditing ? 'Lock instance' : 'Edit instance'}>
                           {isEditing ? <Lock size={16} /> : <Edit2 size={16} />}
                         </button>
                       )}
                       {hasSettings && (
-                        <button type="button" className="btn-test-instance" onClick={() => onTestSonarrConnection(index)} disabled={testingSonarr.has(index)} title="Test connection">
+                        <button type="button" className="btn-icon btn-icon-filled" onClick={() => onTestSonarrConnection(index)} disabled={testingSonarr.has(index)} title="Test connection">
                           <Zap size={16} />
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className={`btn-save-instance ${hasUnsaved ? 'btn-unsaved' : ''}`}
-                        onClick={onSaveMediaSettings}
-                        disabled={saving || !hasUnsaved}
-                        title={hasUnsaved ? 'Save all settings' : 'No changes to save for this instance'}
-                      >
-                        <Save size={16} />
-                      </button>
-                      <button type="button" className="btn-remove-instance" onClick={() => onConfirmRemoveSonarrInstance(index)} title="Remove instance">
+                      <SaveActions dirty={hasUnsaved} saving={saving} onSave={onSaveMediaSettings} />
+                      <button type="button" className="btn-icon btn-icon-filled btn-icon-danger" onClick={() => onConfirmRemoveSonarrInstance(index)} title="Remove instance">
                         <Trash2 size={16} />
                       </button>
                     </div>
@@ -330,7 +315,7 @@ function SettingsMediaSection({
         <div className="server-section">
           <div className="server-section-header">
             <h3>Radarr Instances</h3>
-            <button type="button" className="btn-add-instance" onClick={onAddRadarrInstance}>
+            <button type="button" className="btn-primary" onClick={onAddRadarrInstance}>
               + Add Instance
             </button>
           </div>
@@ -350,25 +335,17 @@ function SettingsMediaSection({
                     <span className="card-title">{instance.name || `Radarr ${index + 1}`}</span>
                     <div className="card-actions">
                       {hasSettings && (
-                        <button type="button" className="btn-edit-instance" onClick={() => onToggleEditRadarr(index)} title={isEditing ? 'Lock instance' : 'Edit instance'}>
+                        <button type="button" className="btn-icon btn-icon-filled" onClick={() => onToggleEditRadarr(index)} title={isEditing ? 'Lock instance' : 'Edit instance'}>
                           {isEditing ? <Lock size={16} /> : <Edit2 size={16} />}
                         </button>
                       )}
                       {hasSettings && (
-                        <button type="button" className="btn-test-instance" onClick={() => onTestRadarrConnection(index)} disabled={testingRadarr.has(index)} title="Test connection">
+                        <button type="button" className="btn-icon btn-icon-filled" onClick={() => onTestRadarrConnection(index)} disabled={testingRadarr.has(index)} title="Test connection">
                           <Zap size={16} />
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className={`btn-save-instance ${hasUnsaved ? 'btn-unsaved' : ''}`}
-                        onClick={onSaveMediaSettings}
-                        disabled={saving || !hasUnsaved}
-                        title={hasUnsaved ? 'Save all settings' : 'No changes to save for this instance'}
-                      >
-                        <Save size={16} />
-                      </button>
-                      <button type="button" className="btn-remove-instance" onClick={() => onConfirmRemoveRadarrInstance(index)} title="Remove instance">
+                      <SaveActions dirty={hasUnsaved} saving={saving} onSave={onSaveMediaSettings} />
+                      <button type="button" className="btn-icon btn-icon-filled btn-icon-danger" onClick={() => onConfirmRemoveRadarrInstance(index)} title="Remove instance">
                         <Trash2 size={16} />
                       </button>
                     </div>

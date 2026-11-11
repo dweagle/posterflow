@@ -139,8 +139,7 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
   // A candidate the user picked, which outranks whatever the item itself resolves to.
   const [picked, setPicked] = useState<TmdbSearchResult | null>(null)
   // Derived rather than seeded into state on mount: the drive browser fills a card's poster in
-  // after the fact, and state seeded at mount would ignore it — which previously forced a
-  // remount to apply, resetting the card and re-fetching its poster and description mid-scroll.
+  // after the fact, and state seeded at mount would ignore it.
   const resolved = useMemo(
     () => picked ?? (item.tmdb_id
       ? buildResult(item, item.tmdb_id, item.poster_url, item.imdb_id, item.tvdb_id)
@@ -176,14 +175,13 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
 
   // Shared by the resolve-first card and the id-less-collection slot inside the finder card.
   const resolveControls = candidates === null ? (
-    // alignSelf keeps it content-sized — the flex column would otherwise stretch it
-    // across the whole card (and .btn-toolbar's 185px min-width needs zeroing).
-    <button type="button" className="btn-toolbar" style={{ alignSelf: 'flex-start', minWidth: 0, fontSize: '0.8rem', padding: '0.35rem 0.9rem' }} onClick={() => void handleResolve()} disabled={loading}>
-      {loading ? <Loader2 size={14} className="spin-icon" /> : <Search size={14} />}
+    // Content-sized; the flex column would otherwise stretch it across the whole card.
+    <button type="button" className="btn-toolbar unmatched-maker-resolve-btn" onClick={() => void handleResolve()} disabled={loading}>
+      {loading ? <Loader2 size={14} className="spinning" /> : <Search size={14} />}
       {loading ? 'Searching…' : 'Find on TMDB'}
     </button>
   ) : candidates.length === 0 ? (
-    <p className="muted">No matches found.</p>
+    <p className="text-dim">No matches found.</p>
   ) : (
     <div className="unmatched-maker-candidates">
       {candidates.map((c) => (
@@ -208,7 +206,7 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
         missing={TYPE_ORDER.filter((t) => item.missing.includes(t))}
         infoExtra={!resolved.tmdb_id ? (
           <div className="unmatched-maker-inline-resolve">
-            <p className="muted">
+            <p className="text-dim">
               {item.mediaType === 'collection'
                 ? 'Custom collection? Add artwork with From folder. If it does exist on TMDB, resolve it to browse online artwork:'
                 : 'No TMDB id — only TheTVDB, fanart.tv and Apple TV artwork is browsable. Resolve it to add TMDB artwork and Plex square art:'}
@@ -221,9 +219,7 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
   }
 
   return (
-    // marginBottom matches ArtworkFinderCard's spacing — these lists have no grid gap, so
-    // without it a resolve card butts against the card below.
-    <div className="unmatched-maker-item" style={{ marginBottom: 16 }}>
+    <div className="unmatched-maker-item">
       <div className="unmatched-maker-resolve">
         <div className="unmatched-maker-resolve-poster">
           {item.poster_url
@@ -244,7 +240,7 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
               </>
             )}
           </div>
-          <p className="muted unmatched-maker-resolve-note">No TMDB id on this item — find it to browse artwork and add it to your scope.</p>
+          <p className="text-dim unmatched-maker-resolve-note">No TMDB id on this item — find it to browse artwork and add it to your scope.</p>
           {resolveControls}
         </div>
       </div>
@@ -318,7 +314,7 @@ export default function ArtworkUnmatchedMakerPanel({ selected }: { selected: Ass
   }
 
   if (loading) {
-    return <p className="muted" style={{ padding: '1rem 0' }}>Loading unmatched artwork…</p>
+    return <p className="text-dim maker-list-loading">Loading unmatched artwork…</p>
   }
 
   if (!stats || !stats.last_run) {
@@ -345,7 +341,7 @@ export default function ArtworkUnmatchedMakerPanel({ selected }: { selected: Ass
       ) : (
         <>
           <div className="unmatched-maker-controls">
-            <div className="maker-result-tabs" role="tablist" aria-label="Unmatched artwork category tabs">
+            <div className="maker-result-tabs pf-subtabs" role="tablist" aria-label="Unmatched artwork category tabs">
               {FILTER_TABS.filter((t) => t === 'all' || counts[t] > 0).map((t) => (
                 <button
                   key={t}
@@ -371,21 +367,21 @@ export default function ArtworkUnmatchedMakerPanel({ selected }: { selected: Ass
                 onChange={(e) => setQuery(e.target.value)}
               />
               {query && (
-                <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
+                <button type="button" className="btn-icon btn-icon-sm unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
                   <X size={15} />
                 </button>
               )}
             </div>
           </div>
 
-          <p className="muted unmatched-maker-count">
+          <p className="text-dim unmatched-maker-count">
             {visibleItems.length === items.length ? `${items.length} items` : `${visibleItems.length} of ${items.length} items`}
           </p>
 
           {visibleItems.length === 0 ? (
             <p className="tmdb-empty">No items match your filter.</p>
           ) : (
-            <div style={{ marginTop: 8 }}>
+            <div className="mt-sm">
               {shownItems.map((it) => (
                 <ArtworkUnmatchedCard
                   key={it.key}
@@ -395,8 +391,8 @@ export default function ArtworkUnmatchedMakerPanel({ selected }: { selected: Ass
                 />
               ))}
               {visibleCount < visibleItems.length && (
-                <div ref={sentinelRef} style={{ padding: '0.75rem 0', textAlign: 'center' }}>
-                  <span className="muted" style={{ fontSize: '0.8rem' }}>
+                <div ref={sentinelRef} className="maker-list-sentinel">
+                  <span className="text-dim">
                     Showing {shownItems.length.toLocaleString()} of {visibleItems.length.toLocaleString()} — scroll for more
                   </span>
                 </div>

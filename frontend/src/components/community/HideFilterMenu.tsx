@@ -36,7 +36,7 @@ export default function HideFilterMenu({ value, onChange, omit = [] }: Props) {
     <div className="community-hide-menu" ref={rootRef}>
       <button
         type="button"
-        className={`community-tab-btn community-hide-menu-btn${activeCount > 0 ? ' active' : ''}`}
+        className={`pf-subtab community-hide-menu-btn${activeCount > 0 ? ' active' : ''}`}
         aria-haspopup="true"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}

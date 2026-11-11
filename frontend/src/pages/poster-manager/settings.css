@@ -1,0 +1,193 @@
+/* Settings tab: library selection grids, publish style toggle, settings sections.
+   The poster-manager sheets load in a fixed order (see App.tsx). */
+
+.settings-grid {
+  display: grid;
+  gap: var(--card-gap);
+}
+
+/* Two-column layout for library selection pages */
+
+.settings-grid.library-layout {
+  grid-template-columns: 1fr 400px;
+  gap: var(--sp-32);
+  align-items: start;
+}
+
+.settings-grid.library-layout .field-group {
+  align-self: start;
+  gap: var(--sp-6);
+}
+
+.settings-grid.library-layout .field-group > label:first-child {
+  margin-bottom: var(--sp-4);
+}
+
+.settings-note {
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+  margin-top: var(--sp-16);
+  margin-bottom: 0;
+  font-style: italic;
+}
+
+/* Poster Manager config toggles (Rename/Border tabs) */
+
+.poster-manager .settings-section .toggle-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.poster-manager .settings-section .toggle-label {
+  margin-left: var(--sp-2);
+}
+
+.library-stats {
+  display: flex;
+  gap: var(--sp-8);
+  align-items: center;
+}
+
+.library-missing {
+  color: var(--color-danger-soft);
+  font-weight: 500;
+}
+
+.library-configs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-24);
+}
+
+/* Compact Library Grid Layout */
+
+.library-compact-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-16);
+  background: var(--color-surface-sunken);
+  padding: var(--sp-16);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  max-height: 500px;
+  overflow-y: auto;
+  margin-top: 0;
+}
+
+.library-instance-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.library-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-6) var(--sp-8);
+  cursor: pointer;
+  transition: background 0.2s;
+  border-radius: var(--radius-sm);
+}
+
+.library-checkbox:hover {
+  background: var(--tint-faint);
+}
+
+.library-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.library-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+  flex: 1;
+}
+
+/* Required CL2K/MM2K style toggle shown beside the publish actions (Unmatched
+   footer + Create List picker). Keeps the publish buttons grouped to the right. */
+
+.publish-style-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-right: auto;
+}
+
+.publish-style-toggle-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.publish-style-toggle-options {
+  display: inline-flex;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.publish-style-toggle-btn {
+  padding: var(--sp-6) var(--sp-12);
+  background: var(--color-surface-raised);
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.publish-style-toggle-btn + .publish-style-toggle-btn {
+  border-left: 1px solid var(--color-border-strong);
+}
+
+.publish-style-toggle-btn:hover:not(.selected):not(:disabled) {
+  color: var(--color-accent);
+}
+
+.publish-style-toggle-btn.selected {
+  background: rgba(var(--rgb-accent), 0.15);
+  color: var(--color-accent);
+}
+
+.publish-style-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Toggle text is not interactive (only the switch toggles) */
+
+.poster-manager .settings-section .toggle-label {
+  cursor: default;
+}
+
+/* Radio options: clickable on the dot AND the words (plus a little area around
+   them), but only as wide as their content — never the whole row. */
+
+.poster-manager .settings-section .radio-label {
+  align-self: flex-start;
+  padding: var(--sp-4) var(--sp-6);
+  margin: -0.2rem -0.4rem;
+  border-radius: var(--radius-sm);
+}
+
+.poster-manager .settings-section .radio-label:hover {
+  background: var(--tint-faint);
+}
+
+.library-select-empty {
+  margin: var(--sp-4) 0;
+  font-size: var(--text-md);
+  font-style: italic;
+  color: var(--color-text-faint);
+}

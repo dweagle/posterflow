@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Eye, Info, Play, RotateCcw, Save, Trash2, Upload } from 'lucide-react'
+import { Eye, Info, Play, RotateCcw, Trash2, Upload } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Toolbar from '../Toolbar'
 import BorderStyleControls, { BorderStyleValue, OverlaySelect, RoundedCornersHint, StyleValuePreview, supportsRoundedCorners } from './BorderStyleControls'
@@ -14,6 +14,7 @@ import {
   listBorderOverlays,
   uploadBorderOverlay,
 } from '../../api/posterManager'
+import SaveActions from '../../components/SaveActions'
 
 type HolidayPreset = {
   name: string
@@ -56,6 +57,14 @@ const HOLIDAY_PRESETS: HolidayPreset[] = [
   { name: '🎄 Christmas', schedule: 'range(12/01-12/31)', colors: ['#FF0000', '#00FF00'] },
 ]
 
+type BorderSubtab = 'borders' | 'holidays' | 'rules'
+const BORDER_SUBTAB_KEY = 'posterflow.posterManager.borderSubtab'
+const BORDER_SUBTABS: { key: BorderSubtab; label: string }[] = [
+  { key: 'borders', label: 'Borders' },
+  { key: 'holidays', label: 'Holidays' },
+  { key: 'rules', label: 'Rules' },
+]
+
 type BorderTabProps = {
   hasUnsavedBorderChanges: boolean
   saving: boolean
@@ -91,6 +100,7 @@ type BorderTabProps = {
   onToggleRuleRunType: (type: RuleRunType) => void
   onToggleRuleLibrary: (fullKey: string) => void
   onSaveSettings: () => void
+  onCancelSettings: () => void
   onResetBorderSettings: () => void
   onRunBorderReplacer: (dryRun: boolean) => void
   onSetBorderWidth: (width: number) => void
@@ -156,6 +166,7 @@ function BorderTab({
   onToggleRuleRunType,
   onToggleRuleLibrary,
   onSaveSettings,
+  onCancelSettings,
   onResetBorderSettings,
   onRunBorderReplacer,
   onSetBorderWidth,
@@ -260,6 +271,16 @@ function BorderTab({
   }
 
   const [selectedPresetName, setSelectedPresetName] = useState('')
+  const [borderSubtab, setBorderSubtabState] = useState<BorderSubtab>(() => {
+    try {
+      const saved = localStorage.getItem(BORDER_SUBTAB_KEY)
+      return saved === 'holidays' || saved === 'rules' ? saved : 'borders'
+    } catch { return 'borders' }
+  })
+  const setBorderSubtab = (tab: BorderSubtab) => {
+    setBorderSubtabState(tab)
+    try { localStorage.setItem(BORDER_SUBTAB_KEY, tab) } catch { /* fine */ }
+  }
   const [editingHolidayName, setEditingHolidayName] = useState<string | null>(null)
   const [editFromMonth, setEditFromMonth] = useState('01')
   const [editFromDay, setEditFromDay] = useState('01')
@@ -413,15 +434,7 @@ function BorderTab({
 
   // Reused in each section header so users can save without scrolling to the toolbar.
   const sectionSaveButton = (
-    <button
-      className={`btn-toolbar section-save-btn ${hasUnsavedBorderChanges ? 'btn-unsaved' : ''}`}
-      onClick={onSaveSettings}
-      disabled={!hasUnsavedBorderChanges || saving}
-      title={hasUnsavedBorderChanges ? 'Save changes' : 'No changes to save'}
-    >
-      <Save size={16} />
-      {saving ? 'Saving...' : 'Save Settings'}
-    </button>
+    <SaveActions dirty={hasUnsavedBorderChanges} saving={saving} disabled={!hasUnsavedBorderChanges || saving} onSave={onSaveSettings} onCancel={onCancelSettings} />
   )
 
   return (
@@ -435,28 +448,30 @@ function BorderTab({
             Discord
           </button>
         </div>
-        <button
-          className={`btn-toolbar ${hasUnsavedBorderChanges ? 'btn-unsaved' : ''}`}
-          onClick={onSaveSettings}
-          disabled={!hasUnsavedBorderChanges || saving}
-          title={hasUnsavedBorderChanges ? 'Save changes' : 'No changes to save'}
-        >
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
+        <SaveActions dirty={hasUnsavedBorderChanges} saving={saving} disabled={!hasUnsavedBorderChanges || saving} onSave={onSaveSettings} onCancel={onCancelSettings} />
         <button className="btn-toolbar" onClick={() => onRunBorderReplacer(true)} disabled={runningBorderReplacer} title="Dry run border replacer">
           <Eye size={16} />
           Dry Run
         </button>
         <button className="btn-toolbar btn-primary" onClick={() => onRunBorderReplacer(false)} disabled={runningBorderReplacer}>
           <Play size={16} />
-          {runningBorderReplacer ? 'Running...' : 'Run Border Replacer'}
+          {runningBorderReplacer ? 'Running...' : 'Run Replacer'}
         </button>
       </Toolbar>
+
+      <div className="pf-subtabs border-subtabs" role="tablist" aria-label="Border replacer sections">
+        {BORDER_SUBTABS.map((t) => (
+          <button key={t.key} type="button" role="tab" aria-selected={borderSubtab === t.key} className={borderSubtab === t.key ? 'active' : ''} onClick={() => setBorderSubtab(t.key)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
 
       {!settingsLoaded ? (
         <div className="settings-section"><p className="section-description">Loading border settings…</p></div>
       ) : (
+      <>
+      {borderSubtab === 'borders' && (
       <>
       <div className="settings-section border-settings-card">
         <div className="section-header-row">
@@ -499,7 +514,7 @@ function BorderTab({
                 <div className="toolbar-tooltip">How many pixels to strip when removing borders (the Remove Borders toggle). The width of an ADDED border is set separately in the Border Style section below. Recommended: 26px (DAPS standard).</div>
               </span>
             </div>
-            <NumberField value={borderWidth} onChange={onSetBorderWidth} fallback={26} min={1} max={200} style={{ maxWidth: '120px' }} />
+            <NumberField value={borderWidth} onChange={onSetBorderWidth} fallback={26} min={1} max={200} className="field-w-xs" />
           </div>
 
           <div className="field-group">
@@ -556,14 +571,14 @@ function BorderTab({
                 <div className="toolbar-tooltip">How thick the added border is (band, gradient, or frame edge). A band thinner than the poster's own 26 px border replaces the whole border, so the visible border is exactly this thick. The width at the top of the page applies only to border removal.</div>
               </span>
             </div>
-            <NumberField value={bandWidth} onChange={onSetBandWidth} fallback={26} min={1} max={200} style={{ maxWidth: '120px' }} />
+            <NumberField value={bandWidth} onChange={onSetBandWidth} fallback={26} min={1} max={200} className="field-w-xs" />
           </div>
           )}
 
           {!removeBorders && (
           <div className="field-group">
             <label>Border Style</label>
-            <small style={{ marginBottom: '0.75rem', display: 'block' }}>
+            <small className="block mb-md">
               How the replaced border is rendered. <strong>Solid</strong> uses the Border Colors below;
               <strong> Gradient</strong> blends colors across the band; <strong>Image overlay</strong> composites a PNG frame you design;
               <strong> Remove borders</strong> strips the border — but unlike the Remove Borders toggle above, an active holiday still applies its border.
@@ -571,7 +586,7 @@ function BorderTab({
             <select
               value={borderStyle}
               onChange={(e) => onSetBorderStyle(e.target.value as BorderStyle)}
-              style={{ maxWidth: '240px' }}
+              className="field-w-md"
             >
               <option value="solid">Solid color</option>
               <option value="gradient">Gradient band</option>
@@ -580,9 +595,9 @@ function BorderTab({
             </select>
 
             {borderStyle === 'gradient' && (
-              <div style={{ marginTop: '1rem' }}>
+              <div className="mt-lg">
                 <label>Gradient Colors</label>
-                <small style={{ marginBottom: '0.5rem', display: 'block' }}>Two or more colors, blended in order across the border.</small>
+                <small className="block mb-sm">Two or more colors, blended in order across the border.</small>
                 <div className="color-input-row">
                   <input type="color" value={newGradientColor} onChange={(e) => onSetNewGradientColor(e.target.value)} className="color-picker" />
                   <input type="text" value={newGradientColor} onChange={(e) => onSetNewGradientColor(e.target.value)} placeholder="#000000" />
@@ -596,7 +611,7 @@ function BorderTab({
                       <div key={index} className="color-item">
                         <div className="color-preview" style={{ background: color }} />
                         <span className="color-value">{color}</span>
-                        <button className="btn-remove-color" onClick={() => onRemoveGradientColor(color)} title="Remove color">
+                        <button className="btn-icon btn-icon-sm btn-icon-danger" onClick={() => onRemoveGradientColor(color)} title="Remove color">
                           <Trash2 size={16} />
                         </button>
                       </div>
@@ -605,12 +620,12 @@ function BorderTab({
                 ) : (
                   <div className="empty-config"><p>Add at least two colors for a gradient.</p></div>
                 )}
-                <div style={{ marginTop: '0.75rem' }}>
+                <div className="mt-md">
                   <label>Direction</label>
                   <select
                     value={gradientDirection}
                     onChange={(e) => onSetGradientDirection(e.target.value as GradientDirection)}
-                    style={{ maxWidth: '200px', display: 'block' }}
+                    className="block field-w-sm"
                   >
                     <option value="vertical">Vertical</option>
                     <option value="horizontal">Horizontal</option>
@@ -621,24 +636,24 @@ function BorderTab({
             )}
 
             {borderStyle === 'image' && (
-              <div style={{ marginTop: '1rem' }}>
+              <div className="mt-lg">
                 <label>Border Frame Image</label>
-                <small style={{ marginBottom: '0.5rem', display: 'block' }}>
+                <small className="block mb-sm">
                   Choose a 1000×1500 PNG frame (transparent center). Bundled presets and your uploads are listed.
                 </small>
                 <div className="border-overlay-row">
                   <OverlaySelect overlays={overlays} value={overlayImage} onChange={onSetOverlayImage} />
-                  <input ref={fileInputRef} type="file" accept="image/png" style={{ display: 'none' }} onChange={handleUploadOverlay} />
+                  <input ref={fileInputRef} type="file" accept="image/png" hidden onChange={handleUploadOverlay} />
                   <button className="btn-secondary" onClick={() => fileInputRef.current?.click()}>
                     <Upload size={16} /> Upload
                   </button>
                   {overlayImage && overlays.find((o) => o.name === overlayImage)?.source === 'user' && (
-                    <button className="btn-remove-color" onClick={() => handleDeleteOverlay(overlayImage)} title="Delete uploaded overlay">
+                    <button className="btn-icon btn-icon-outlined btn-icon-danger" onClick={() => handleDeleteOverlay(overlayImage)} title="Delete uploaded overlay">
                       <Trash2 size={16} />
                     </button>
                   )}
                 </div>
-                {overlayError && <small style={{ color: 'var(--error, #e55)', display: 'block' }}>{overlayError}</small>}
+                {overlayError && <small className="block text-danger">{overlayError}</small>}
               </div>
             )}
 
@@ -648,7 +663,7 @@ function BorderTab({
           {!removeBorders && borderStyle === 'solid' && (
           <div className="field-group">
             <label>Border Colors</label>
-            <small style={{ marginBottom: '1rem', display: 'block' }}>
+            <small className="block mb-lg">
               Add one or more hex colors. Colors will cycle through posters.
             </small>
 
@@ -666,7 +681,7 @@ function BorderTab({
                   <div key={index} className="color-item">
                     <div className="color-preview" style={{ background: color }} />
                     <span className="color-value">{color}</span>
-                    <button className="btn-remove-color" onClick={() => onRemoveBorderColor(color)} title="Remove color">
+                    <button className="btn-icon btn-icon-sm btn-icon-danger" onClick={() => onRemoveBorderColor(color)} title="Remove color">
                       <Trash2 size={16} />
                     </button>
                   </div>
@@ -689,7 +704,7 @@ function BorderTab({
               </label>
               <span className="toggle-label">Remove existing border first</span>
             </div>
-            <small style={{ display: 'block' }}>
+            <small className="block">
               Strip the existing border first — exactly like Remove Borders mode (top/left/right cropped, black title bar) — before applying the new border.
             </small>
           </div>
@@ -702,7 +717,7 @@ function BorderTab({
           {!removeBorders && borderStyle !== 'remove' && (
           <div className="field-group">
             <label>Inner Edge Effect</label>
-            <small style={{ marginBottom: '0.75rem', display: 'block' }}>
+            <small className="block mb-md">
               Adds a soft transition just inside the border. Source posters already carry some baked-in inner glow,
               so keep these subtle. Applies on top of image-overlay frames too.
             </small>
@@ -723,13 +738,13 @@ function BorderTab({
             </div>
 
             {innerEffect === 'glow' && (
-              <div style={{ marginTop: '1rem' }}>
+              <div className="mt-lg">
                 <label>Glow Color</label>
                 <div className="color-input-row">
                   <input type="color" value={innerColor} onChange={(e) => onSetInnerColor(e.target.value)} className="color-picker" />
                   <input type="text" value={innerColor} onChange={(e) => onSetInnerColor(e.target.value)} placeholder="#000000" />
                 </div>
-                <div style={{ marginTop: '0.75rem' }}>
+                <div className="mt-md">
                   <label>Opacity: {innerOpacity}%</label>
                   <input
                     type="range"
@@ -737,22 +752,22 @@ function BorderTab({
                     max="100"
                     value={innerOpacity}
                     onChange={(e) => onSetInnerOpacity(parseInt(e.target.value) || 0)}
-                    style={{ display: 'block', maxWidth: '240px' }}
+                    className="block field-w-md"
                   />
                   <small>Lower = lighter glow, higher = darker.</small>
                 </div>
-                <div style={{ marginTop: '0.5rem' }}>
+                <div className="mt-sm">
                   <label>Glow Width (pixels)</label>
-                  <NumberField value={innerWidth} onChange={onSetInnerWidth} fallback={1} min={1} max={200} style={{ maxWidth: '120px' }} />
+                  <NumberField value={innerWidth} onChange={onSetInnerWidth} fallback={1} min={1} max={200} className="field-w-xs" />
                 </div>
               </div>
             )}
 
             {innerEffect === 'fade' && (
-              <div style={{ marginTop: '1rem' }}>
+              <div className="mt-lg">
                 <label>Fade Width (pixels)</label>
-                <NumberField value={fadeWidth} onChange={onSetFadeWidth} fallback={1} min={1} max={200} style={{ maxWidth: '120px' }} />
-                <small style={{ display: 'block' }}>The border color fades into the poster over this many pixels.</small>
+                <NumberField value={fadeWidth} onChange={onSetFadeWidth} fallback={1} min={1} max={200} className="field-w-xs" />
+                <small className="block">The border color fades into the poster over this many pixels.</small>
               </div>
             )}
           </div>
@@ -764,7 +779,7 @@ function BorderTab({
               <label>Rounded Corners (pixels)</label>
               <RoundedCornersHint />
             </div>
-            <small style={{ marginBottom: '0.75rem', display: 'block' }}>
+            <small className="block mb-md">
               For players that round poster corners (Plex TV apps, for example). Fills each corner with the border and
               carries the poster's own inner glow around the curve, so the frame stays one width instead of thinning at the
               corners. Set the radius the player uses on a 1000×1500 poster. The preview clips its corners by the same
@@ -772,7 +787,7 @@ function BorderTab({
               frame instead. The file itself keeps square corners, so players that don't round them show the filled corners
               as a thicker border there. The preview hides this.
             </small>
-            <NumberField value={cornerRadius} onChange={onSetCornerRadius} fallback={0} min={0} max={400} style={{ maxWidth: '120px' }} />
+            <NumberField value={cornerRadius} onChange={onSetCornerRadius} fallback={0} min={0} max={400} className="field-w-xs" />
           </div>
           )}
               </div>
@@ -787,7 +802,7 @@ function BorderTab({
           {sectionSaveButton}
         </div>
           <div className="field-group">
-            <small style={{ marginBottom: '0.5rem', display: 'block' }}>
+            <small className="block mb-sm">
               Control how borders are applied to TV season posters (files named like <code>Season01.jpg</code>).
               Overrides the main poster setting for season files only.
             </small>
@@ -826,17 +841,17 @@ function BorderTab({
             </div>
 
             {seasonMode !== 'inherit' && (
-              <div style={{ marginTop: '0.5rem' }}>
+              <div className="mt-sm">
                 <label>Season Border Width (pixels)</label>
-                <NumberField value={seasonWidth} onChange={onSetSeasonWidth} fallback={26} min={1} max={200} style={{ maxWidth: '120px' }} />
-                <small style={{ display: 'block' }}>
+                <NumberField value={seasonWidth} onChange={onSetSeasonWidth} fallback={26} min={1} max={200} className="field-w-xs" />
+                <small className="block">
                   Border width applied to season posters. Independent of the main poster width above.
                 </small>
               </div>
             )}
 
             {seasonMode === 'custom' && (
-              <div style={{ marginTop: '1rem' }}>
+              <div className="mt-lg">
                 <BorderStyleControls
                   verbose
                   value={{ ...seasonStyle, colors: seasonColors }}
@@ -844,15 +859,21 @@ function BorderTab({
                   overlays={overlays}
                   refreshOverlays={refreshOverlays}
                   idPrefix="season"
-                  label="Season Border Style"
                   preview={<StyleValuePreview value={{ ...seasonStyle, colors: seasonColors }} borderWidth={seasonWidth} />}
                 />
               </div>
             )}
           </div>
       </div>
+      </>
+      )}
 
-      {!removeBorders && (
+      {borderSubtab === 'holidays' && (removeBorders ? (
+        <div className="settings-section">
+          <h2>Holiday Schedules</h2>
+          <p className="section-description">Holiday borders are not applied while Remove Borders is on. Turn it off under Borders to use them.</p>
+        </div>
+      ) : (
       <div className="settings-section">
         <div className="section-header-row">
           <h2>Holiday Schedules</h2>
@@ -875,20 +896,18 @@ function BorderTab({
                       <div className="holiday-actions">
                         {editingHolidayName === holiday.name ? (
                           <>
-                            <button
-                              className={`btn-secondary holiday-action-btn ${editHolidayHasChanges(holiday) ? 'btn-unsaved' : ''}`}
-                              onClick={() => handleSaveEditHoliday(holiday)}
-                              disabled={!holidayStyleHasRenderable(editHolidayColors, editHolidayStyle) || !editHolidayHasChanges(holiday)}
-                            >
-                              Save
-                            </button>
-                            <button className="btn-secondary holiday-action-btn" onClick={() => setEditingHolidayName(null)}>
+                            <SaveActions
+                              dirty={editHolidayHasChanges(holiday)}
+                              disabled={!holidayStyleHasRenderable(editHolidayColors, editHolidayStyle)}
+                              onSave={() => handleSaveEditHoliday(holiday)}
+                            />
+                            <button className="btn-secondary" onClick={() => setEditingHolidayName(null)}>
                               Cancel
                             </button>
                           </>
                         ) : (
                           <button
-                            className="btn-secondary holiday-action-btn"
+                            className="btn-secondary"
                             onClick={() => handleStartEditHoliday(holiday)}
                             title="Edit holiday date range"
                           >
@@ -896,7 +915,7 @@ function BorderTab({
                           </button>
                         )}
                         <button
-                          className="btn-remove-color"
+                          className="btn-icon btn-icon-outlined btn-icon-danger"
                           onClick={() => onRemoveHolidaySchedule(holiday.name)}
                           title="Remove holiday schedule"
                         >
@@ -938,7 +957,6 @@ function BorderTab({
                           overlays={overlays}
                           refreshOverlays={refreshOverlays}
                           idPrefix={`holiday-edit-${holiday.name}`}
-                          label="Holiday Border Style"
                           preview={<StyleValuePreview value={{ ...editHolidayStyle, colors: editHolidayColors }} borderWidth={bandWidth} />}
                         />
                       </div>
@@ -968,7 +986,7 @@ function BorderTab({
           {!removeBorders && (
           <div className="field-group">
             <label>Holiday Preset Schedules</label>
-            <small style={{ marginBottom: '1rem', display: 'block' }}>
+            <small className="block mb-lg">
               Add preset holiday date ranges and color palettes. If a holiday is active, these colors override the default border colors.
             </small>
 
@@ -1001,7 +1019,7 @@ function BorderTab({
                   placeholder="Holiday name"
                 />
                 <button
-                  className="btn-secondary btn-add-holiday"
+                  className="btn-primary"
                   onClick={handleAddCustomHoliday}
                   disabled={!customHolidayName.trim() || !holidayStyleHasRenderable(customHolidayColors.length > 0 ? customHolidayColors : borderColors, customHolidayStyle)}
                 >
@@ -1041,7 +1059,6 @@ function BorderTab({
                 overlays={overlays}
                 refreshOverlays={refreshOverlays}
                 idPrefix="holiday-custom"
-                label="Holiday Border Style"
                 preview={<StyleValuePreview value={{ ...customHolidayStyle, colors: customHolidayColors }} borderWidth={bandWidth} />}
               />
             </div>
@@ -1049,8 +1066,9 @@ function BorderTab({
           )}
         </div>
       </div>
-      )}
+      ))}
 
+      {borderSubtab === 'rules' && (
       <PlexRulesSection
         rules={plexRules}
         runTypes={ruleRunTypes}
@@ -1063,6 +1081,7 @@ function BorderTab({
         onToggleRunType={onToggleRuleRunType}
         onToggleLibrary={onToggleRuleLibrary}
       />
+      )}
       </>
       )}
 

@@ -1,0 +1,19 @@
+/* The page header: the title and one line under it. Whatever the page starts with (tabs, a
+   toolbar, a card) sits 1rem below on every page. A page adds its own class beside this one for
+   layout only (a button or notice beside the title). */
+.page-header {
+  margin-bottom: var(--sp-16);
+  font-size: var(--text-base); /* a dense page (Overlays) scales its own text, never the header */
+}
+
+.page-header h1 {
+  color: var(--color-title);
+  margin: 0 0 var(--sp-8);
+  font-size: var(--text-4xl);
+}
+
+.page-header p {
+  color: var(--color-text-muted);
+  margin: 0;
+  font-size: var(--text-base);
+}

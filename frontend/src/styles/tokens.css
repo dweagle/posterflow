@@ -1,0 +1,129 @@
+/* Design tokens. Every color the app draws with is named here; page stylesheets use the names,
+   never a literal, so a token is the only place a color is decided. */
+:root {
+  /* colors */
+  --color-page-bg: #121212;  /* the page behind everything */
+  --color-surface: #1e1e1e;  /* cards, panels, inputs */
+  --color-surface-raised: #2a2a2a;  /* hover rows, nested boxes */
+  --color-border: #333;  /* hairlines on cards and inputs */
+  --color-border-strong: #424242;  /* stronger lines and dividers */
+  --color-text: #fff;  /* headings and primary text */
+  --color-text-body: #e5e7eb;  /* body copy */
+  --color-text-secondary: #ccc;  /* labels */
+  --color-text-muted: #aaa;  /* descriptions */
+  --color-text-dim: #999;  /* hints */
+  --color-text-faint: #888;  /* placeholders and meta */
+  --color-text-disabled: #666;  /* disabled text */
+  --color-line-soft: #555;  /* soft lines, scrollbars */
+  --color-accent: #64b5f6;  /* links, active tabs, primary buttons */
+  --color-accent-deep: #5b89c4;  /* filled primary surfaces */
+  --color-success: #4caf50;
+  --color-success-soft: #81c784;
+  --color-warning: #ffb74d;
+  --color-danger: #f44336;
+  --color-danger-soft: #ef5350;
+
+  /* corner radii */
+  --radius-xs: 2px;  /* hairline highlights */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;  /* pills and badges */
+
+  /* cards: one inset for a content card, a smaller one for a panel inside a card, one gap between cards */
+  --card-pad: 1rem 1.25rem;
+  --card-pad-inner: 0.75rem 1rem;
+  --card-gap: 0.75rem;
+
+  /* Recurring roles shared by the page sheets. */
+  --color-surface-sunken: #1a1a1a;  /* wells: inputs on dark panels, log panes */
+  --color-surface-inset: #252525;  /* a panel inside a card, tooltips */
+  --color-accent-hover: #42a5f5;
+  --color-accent-soft: #90caf9;  /* accent for small text and links */
+  --color-accent-deep-hover: #6c9bd4;
+  --color-button-primary: #4a6d9a;  /* filled action buttons: the softer blue, white lettering */
+  --color-button-primary-hover: #567ba8;
+  --color-title: var(--color-accent);  /* headings and card titles: the bright blue */
+  --color-slate: #3d4556;  /* toolbars and summary bars */
+  --color-slate-raised: #5c6882;  /* toolbar buttons */
+  --color-slate-hover: #6c7892;
+  --color-slate-deep: #2a2f3c;  /* card headers on slate */
+  --color-success-text: #a5d6a7;
+  --color-warning-strong: #ff9800;
+  --color-warning-soft: #ffcc80;
+  --color-danger-strong: #d32f2f;
+  --color-danger-text: #ef9a9a;
+
+  /* Hues several pages share. */
+  --color-success-strong: #2e7d32;
+  --color-teal: #4db6ac;  /* ids and sources that are neither the blue nor the green */
+  --color-purple: #ce93d8;  /* custom styles, collections, seasons */
+  --color-purple-strong: #9c27b0;
+  --color-discord: #5865f2;
+  --color-discord-hover: #4752c4;
+
+  /* Translucent layers. Scrims darken what is under them, shadow colors sit under cards and
+     popovers, tints lift a dark surface, hairlines rule it off. */
+  --scrim-faint: rgba(0, 0, 0, 0.2);
+  --scrim-soft: rgba(0, 0, 0, 0.35);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --scrim-strong: rgba(0, 0, 0, 0.8);
+  --shadow-color-soft: rgba(0, 0, 0, 0.35);
+  --shadow-color: rgba(0, 0, 0, 0.5);
+  --shadow-color-strong: rgba(0, 0, 0, 0.7);
+  --tint-faint: rgba(255, 255, 255, 0.04);
+  --tint: rgba(255, 255, 255, 0.08);
+  --tint-strong: rgba(255, 255, 255, 0.12);
+  --hairline-faint: rgba(255, 255, 255, 0.1);
+  --hairline: rgba(255, 255, 255, 0.22);
+  --hairline-strong: rgba(255, 255, 255, 0.35);
+
+  /* Hue channels for tints: rgba(var(--rgb-accent), 0.12) keeps the alpha, takes the hue from the token. */
+  --rgb-accent: 100, 181, 246;
+  --rgb-accent-deep: 91, 137, 196;
+  --rgb-success: 76, 175, 80;
+  --rgb-warning: 255, 183, 77;
+  --rgb-warning-strong: 255, 152, 0;
+  --rgb-danger: 244, 67, 54;
+  --rgb-purple: 156, 39, 176;
+  --rgb-teal: 77, 182, 172;
+  --rgb-discord: 88, 101, 242;
+
+  /* Stacking layers. Values under 50 stay literal in the sheets: they only order siblings. */
+  --z-popover: 100;  /* dropdowns, tooltips and popovers inside the page */
+  --z-drawer: 500;  /* the phone sidebar drawer; its scrim sits one below */
+  --z-modal: 1000;  /* modal overlays, toasts, lightboxes */
+  --z-modal-2: 1100;  /* a modal or lightbox opened above another */
+  --z-modal-3: 1200;
+  --z-tip: 1300;  /* the floating tip, above any modal */
+  --z-top: 9999;  /* the lock screen and tips that must beat everything */
+
+  /* Type scale: every font-size in the sheets is one of these. */
+  --text-3xs: 0.625rem;  /* 10px: the smallest badges */
+  --text-2xs: 0.6875rem;  /* 11px: counts, chips */
+  --text-xs: 0.75rem;  /* 12px: hints */
+  --text-sm: 0.8125rem;  /* 13px: card copy, small controls */
+  --text-md: 0.875rem;  /* 14px: labels, body */
+  --text-base: 1rem;  /* 16px */
+  --text-lg: 1.125rem;  /* 18px: card titles */
+  --text-xl: 1.25rem;  /* 20px: section headings */
+  --text-2xl: 1.5rem;  /* 24px */
+  --text-3xl: 1.75rem;  /* 28px */
+  --text-4xl: 2rem;  /* 32px */
+  --text-5xl: 2.5rem;  /* 40px: the page title */
+
+  /* Spacing scale: gaps, margins and padding snap to these. */
+  --sp-2: 0.125rem;
+  --sp-4: 0.25rem;
+  --sp-6: 0.375rem;
+  --sp-8: 0.5rem;
+  --sp-12: 0.75rem;
+  --sp-16: 1rem;
+  --sp-20: 1.25rem;
+  --sp-24: 1.5rem;
+  --sp-32: 2rem;
+  --sp-40: 2.5rem;
+  --sp-48: 3rem;
+  --sp-64: 4rem;
+}

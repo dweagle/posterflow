@@ -1,0 +1,6 @@
+.route-loading {
+  padding: var(--sp-48) var(--sp-16);
+  text-align: center;
+  color: var(--color-text-faint);
+  font-size: var(--text-md);
+}

@@ -10,6 +10,7 @@ import {
 } from '../../api/makerTools'
 import { getApiErrorMessage } from '../../api/client'
 import { uploadActionButtonLabel, type CommunityUploadAction } from './useIdarrQuickAdd'
+import Modal from '../../components/Modal'
 
 type View = 'matching' | 'all'
 
@@ -147,101 +148,95 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
   const heading = `${title}${year ? ` (${year})` : ''}${slotLabel ? ` · ${slotLabel}` : ''}`
 
   return (
-    <>
-      <div className="modal-overlay">
-        <div className="modal-content schedule-modal request-export-picker">
-          <div className="modal-header">
-            <h2>Upload poster · {heading}</h2>
-            <button className="modal-close" onClick={onClose}>×</button>
-          </div>
-          <div className="modal-body">
-            {configured && (
-              <div className="export-picker-tabs">
-                <button type="button" className={view === 'matching' ? 'active' : ''} onClick={() => setView('matching')}>
-                  Matching <span>{matching.length}</span>
-                </button>
-                <button type="button" className={view === 'all' ? 'active' : ''} onClick={() => setView('all')}>
-                  All exports <span>{all.length}</span>
-                </button>
-              </div>
-            )}
-            {error && <p className="tmdb-error">{error}</p>}
-            {loading && <p className="export-picker-note">Loading exports…</p>}
-            {!loading && autoCount > 0 && (
-              <p className="export-picker-note ok">
-                {autoCount === 1 ? 'Selected the newest matching export.' : `Selected the newest export for ${autoCount} posters.`}
-                {' '}Change the selection if needed.
-              </p>
-            )}
-            {!loading && data && !configured && (
-              <p className="export-picker-note">
-                No export folder is set. Add a poster export folder in Maker Tools and posters exported from the
-                Photoshop and Photopea panels will show up here.
-              </p>
-            )}
-            {missingFolders.map((f) => (
-              <p key={f.source} className="export-picker-note warn">Folder not found on the server: {f.folder}</p>
-            ))}
-            {!loading && data && configured && shown.length === 0 && (
-              <p className="export-picker-note">
-                {view === 'matching' ? 'Nothing here matches this request. Check All exports.' : 'No exports found.'}
-              </p>
-            )}
-            {data?.truncated && (
-              <p className="export-picker-note warn">Large folder. Showing the newest 400 files only.</p>
-            )}
-            {shown.length > 0 && (
-              <div className="tmdb-gallery-grid tmdb-gallery-grid--posters">
-                {shown.map((f) => {
-                  const k = fileKey(f)
-                  const isSel = selected.has(k)
-                  const badge = seasonLabel(f.season)
-                  return (
-                    <div key={k} className="tmdb-gallery-item">
-                      <div className="tmdb-gallery-thumb-wrapper">
-                        <button
-                          type="button"
-                          className={`tmdb-gallery-thumb-btn${isSel ? ' export-picker-thumb--selected' : ''}`}
-                          onClick={() => toggle(f)}
-                          title={isSel ? 'Click to deselect' : 'Click to select'}
-                          aria-pressed={isSel}
-                          aria-label={f.name}
-                        >
-                          <img className="tmdb-gallery-thumb" src={getPosterExportUrl(f, true)} alt="" loading="lazy" />
-                        </button>
-                        {isSel && <span className="export-picker-check"><Check size={12} /></span>}
-                        {badge && <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom">{badge}</span>}
-                      </div>
-                      <div className="tmdb-gallery-item-meta">
-                        <span className="export-picker-name" title={f.name}>{f.name}</span>
-                        <span className="export-picker-age">
-                          {ageLabel(f.mtime)}{f.match && slots !== 'all' && !slots.has(f.season) ? ' · not requested' : ''}
-                        </span>
-                        <button type="button" className="export-picker-preview" onClick={() => setPreview(f)}>Preview</button>
-                      </div>
+  <>
+      <Modal onClose={onClose} className="request-export-picker" closeOnOverlay={false}>
+        <Modal.Header title={<>Upload poster · {heading}</>} />
+        <Modal.Body>
+          {configured && (
+            <div className="export-picker-tabs pf-subtabs">
+              <button type="button" className={view === 'matching' ? 'active' : ''} onClick={() => setView('matching')}>
+                Matching <span>{matching.length}</span>
+              </button>
+              <button type="button" className={view === 'all' ? 'active' : ''} onClick={() => setView('all')}>
+                All exports <span>{all.length}</span>
+              </button>
+            </div>
+          )}
+          {error && <p className="tmdb-error">{error}</p>}
+          {loading && <p className="export-picker-note">Loading exports…</p>}
+          {!loading && autoCount > 0 && (
+            <p className="export-picker-note ok">
+              {autoCount === 1 ? 'Selected the newest matching export.' : `Selected the newest export for ${autoCount} posters.`}
+              {' '}Change the selection if needed.
+            </p>
+          )}
+          {!loading && data && !configured && (
+            <p className="export-picker-note">
+              No export folder is set. Add a poster export folder in Maker Tools and posters exported from the
+              Photoshop and Photopea panels will show up here.
+            </p>
+          )}
+          {missingFolders.map((f) => (
+            <p key={f.source} className="export-picker-note warn">Folder not found on the server: {f.folder}</p>
+          ))}
+          {!loading && data && configured && shown.length === 0 && (
+            <p className="export-picker-note">
+              {view === 'matching' ? 'Nothing here matches this request. Check All exports.' : 'No exports found.'}
+            </p>
+          )}
+          {data?.truncated && (
+            <p className="export-picker-note warn">Large folder. Showing the newest 400 files only.</p>
+          )}
+          {shown.length > 0 && (
+            <div className="tmdb-gallery-grid tmdb-gallery-grid--posters">
+              {shown.map((f) => {
+                const k = fileKey(f)
+                const isSel = selected.has(k)
+                const badge = seasonLabel(f.season)
+                return (
+                  <div key={k} className="tmdb-gallery-item">
+                    <div className="tmdb-gallery-thumb-wrapper">
+                      <button
+                        type="button"
+                        className={`tmdb-gallery-thumb-btn${isSel ? ' export-picker-thumb--selected' : ''}`}
+                        onClick={() => toggle(f)}
+                        title={isSel ? 'Click to deselect' : 'Click to select'}
+                        aria-pressed={isSel}
+                        aria-label={f.name}
+                      >
+                        <img className="tmdb-gallery-thumb" src={getPosterExportUrl(f, true)} alt="" loading="lazy" />
+                      </button>
+                      {isSel && <span className="export-picker-check"><Check size={12} /></span>}
+                      {badge && <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom">{badge}</span>}
                     </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-          <div className="modal-footer export-picker-footer">
-            <button type="button" className="btn-secondary export-picker-computer" onClick={onPickFromComputer}>
-              <FolderOpen size={14} /> From computer…
-            </button>
-            <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button
-              type="button"
-              className="btn-primary"
-              style={{ justifyContent: 'center' }}
-              disabled={preparing || selected.size === 0}
-              onClick={() => void handlePost()}
-            >
-              {preparing ? 'Preparing…' : uploadActionButtonLabel(action, selected.size)}
-            </button>
-          </div>
-        </div>
-      </div>
+                    <div className="tmdb-gallery-item-meta">
+                      <span className="export-picker-name" title={f.name}>{f.name}</span>
+                      <span className="export-picker-age">
+                        {ageLabel(f.mtime)}{f.match && slots !== 'all' && !slots.has(f.season) ? ' · not requested' : ''}
+                      </span>
+                      <button type="button" className="btn-link" onClick={() => setPreview(f)}>Preview</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Modal.Body>
+        <Modal.Footer className="export-picker-footer">
+          <button type="button" className="btn-secondary export-picker-computer" onClick={onPickFromComputer}>
+            <FolderOpen size={14} /> From computer…
+          </button>
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={preparing || selected.size === 0}
+            onClick={() => void handlePost()}
+          >
+            {preparing ? 'Preparing…' : uploadActionButtonLabel(action, selected.size)}
+          </button>
+        </Modal.Footer>
+      </Modal>
 
       {preview && (
         <div className="tmdb-lightbox-overlay" onClick={() => setPreview(null)}>
@@ -251,7 +246,7 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
               <span className="tmdb-gallery-dims">{preview.name}</span>
             </div>
           </div>
-          <button type="button" className="tmdb-lightbox-close" onClick={() => setPreview(null)}>×</button>
+          <button type="button" className="btn-icon btn-icon-filled tmdb-lightbox-close" onClick={() => setPreview(null)}>×</button>
         </div>
       )}
     </>

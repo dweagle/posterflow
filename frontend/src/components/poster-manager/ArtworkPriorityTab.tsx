@@ -40,6 +40,7 @@ function ArtworkPriorityTab({ scope, onScopeChange }: ArtworkPriorityTabProps) {
     handleDragOverEnd,
     handleDriveTouchStart,
     savePriority,
+    resetPriorityToOriginal,
   } = useArtworkDrivePriority({ drives, showToast })
 
   useEffect(() => {
@@ -98,6 +99,7 @@ function ArtworkPriorityTab({ scope, onScopeChange }: ArtworkPriorityTabProps) {
         saving={saving}
         hasUnsavedChanges={hasUnsavedChanges}
         onSave={onSave}
+        onCancel={resetPriorityToOriginal}
       />
 
       <div className="priority-tab">
@@ -150,7 +152,7 @@ function ArtworkPriorityTab({ scope, onScopeChange }: ArtworkPriorityTabProps) {
             <div className={`priority-drop-zone ${priorityList.length === 0 ? 'empty' : ''}`} onDragOver={handleDragOver} onDrop={(e) => handleDropInPriority(e)} onDragLeave={handleDragLeave}>
               {priorityList.length === 0 ? (
                 <div className="empty-message">
-                  <GripVertical size={32} color="#666" />
+                  <GripVertical size={32} color="var(--color-text-disabled)" />
                   <p>Drag drives here to set priority</p>
                 </div>
               ) : (
@@ -198,7 +200,7 @@ function ArtworkPriorityTab({ scope, onScopeChange }: ArtworkPriorityTabProps) {
                             <span className={`drive-badge drive-badge-${drive.is_custom ? 'custom' : 'artwork'}`}>
                               {drive.is_custom ? 'Custom' : 'Artwork'}
                             </span>
-                            <button className="btn-remove" onClick={() => handleRemoveFromPriority(drive.id)} title="Remove from priority">
+                            <button className="btn-icon btn-icon-sm btn-icon-outlined btn-icon-danger" onClick={() => handleRemoveFromPriority(drive.id)} title="Remove from priority">
                               <Trash2 size={14} />
                             </button>
                           </div>

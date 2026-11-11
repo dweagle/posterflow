@@ -2,6 +2,8 @@ import { Edit2, Plus, Trash2 } from 'lucide-react'
 import { ReactNode, useEffect, useMemo, useState } from 'react'
 import { Schedule, getTimezones } from '../../api/client'
 import { browserTimeZone, sameTimeZone } from '../../utils/datetime'
+import Modal from '../../components/Modal'
+import SaveActions from '../SaveActions'
 
 type SettingsSchedulingSectionProps = {
   schedules: Schedule[]
@@ -64,21 +66,16 @@ function SettingsSchedulingSection({
   return (
     <div className="settings-section">
       {confirmDeleteIndex !== null && (
-        <div className="modal-overlay">
-          <div className="modal-content schedule-modal confirmation-modal">
-            <div className="modal-header">
-              <h2>Delete Schedule</h2>
-              <button className="modal-close" onClick={handleCancelDelete}>×</button>
-            </div>
-            <div className="modal-body">
-              <p>Are you sure you want to delete <strong>{pendingScheduleName}</strong>? This action cannot be undone.</p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={handleCancelDelete}>Cancel</button>
-              <button className="btn-danger" onClick={handleConfirmDelete}>Delete</button>
-            </div>
-          </div>
-        </div>
+        <Modal onClose={handleCancelDelete} size="sm" closeOnOverlay={false}>
+          <Modal.Header title="Delete Schedule" />
+          <Modal.Body>
+            <p>Are you sure you want to delete <strong>{pendingScheduleName}</strong>? This action cannot be undone.</p>
+          </Modal.Body>
+          <Modal.Footer>
+            <button className="btn-secondary" onClick={handleCancelDelete}>Cancel</button>
+            <button className="btn-danger" onClick={handleConfirmDelete}>Delete</button>
+          </Modal.Footer>
+        </Modal>
       )}
       <div className="server-section">
         <div className="server-section-header">
@@ -100,21 +97,14 @@ function SettingsSchedulingSection({
                 <option key={name} value={name}>{name}</option>
               ))}
             </select>
-            <button
-              type="button"
-              className="btn-primary btn-inline-save"
-              onClick={() => onSaveAppTimezone(zone)}
-              disabled={saving || zone === appTimezone}
-            >
-              Save
-            </button>
+            <SaveActions dirty={zone !== appTimezone} saving={saving} onSave={() => onSaveAppTimezone(zone)} onCancel={() => setZoneChoice(appTimezone)} />
           </div>
         </div>
       </div>
       <div className="server-section">
         <div className="server-section-header">
           <h3>Scheduled Tasks</h3>
-          <button className="btn-add-instance" onClick={onAddSchedule}>
+          <button className="btn-primary" onClick={onAddSchedule}>
             <Plus size={16} />
             Add Schedule
           </button>
@@ -137,7 +127,7 @@ function SettingsSchedulingSection({
                     </label>
                     <button
                       type="button"
-                      className="btn-edit-instance"
+                      className="btn-icon btn-icon-filled"
                       onClick={() => onEditSchedule(index)}
                       title="Edit schedule"
                     >
@@ -145,7 +135,7 @@ function SettingsSchedulingSection({
                     </button>
                     <button
                       type="button"
-                      className="btn-remove-instance"
+                      className="btn-icon btn-icon-filled btn-icon-danger"
                       onClick={() => handleDeleteClick(index)}
                       title="Remove schedule"
                     >

@@ -120,7 +120,7 @@ describe('Logs', () => {
     const user = userEvent.setup()
     render(<Logs />)
 
-    await user.click(screen.getByRole('button', { name: 'Job Logs' }))
+    await user.click(screen.getByRole('tab', { name: 'Job Logs' }))
 
     await screen.findByText('workflow.log')
     await user.click(screen.getByText('workflow.log'))
@@ -134,7 +134,7 @@ describe('Logs', () => {
   const openWorkflowLog = async (user: ReturnType<typeof userEvent.setup>, content: string) => {
     mockGetJobLogContent.mockResolvedValue({ content, filename: 'workflow.log' })
     render(<Logs />)
-    await user.click(screen.getByRole('button', { name: 'Job Logs' }))
+    await user.click(screen.getByRole('tab', { name: 'Job Logs' }))
     await screen.findByText('workflow.log')
     await user.click(screen.getByText('workflow.log'))
     await waitFor(() => expect(mockGetJobLogContent).toHaveBeenCalled())

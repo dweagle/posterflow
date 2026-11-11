@@ -79,7 +79,7 @@ export default function RemindersTab({ psdConfig }: Props) {
         </select>
       </div>
     ) : scopesLoaded ? (
-      <button type="button" className="btn-toolbar" style={{ marginLeft: 12 }} onClick={() => navigate('/IDarr')} title='Add an artwork scope — enable the "Assets Drive" toggle on an IDarr sync target'>
+      <button type="button" className="btn-toolbar ml-md" onClick={() => navigate('/IDarr')} title='Add an artwork scope — enable the "Assets Drive" toggle on an IDarr sync target'>
         <HardDrive size={15} /> Add artwork scope
       </button>
     ) : null

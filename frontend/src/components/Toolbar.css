@@ -1,0 +1,259 @@
+/* The page toolbar (components/Toolbar.tsx): the title with its info tip on the left, the page's
+   actions on the right. Buttons take their natural width at one shared height. The actions wrap
+   as one right-aligned block, never one button at a time, and on narrow screens they become a
+   two-column grid with the primary action on a row of its own. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-24);
+  padding: var(--sp-8) var(--sp-12);
+  background-color: var(--color-slate);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--card-gap);
+  min-height: 3.2rem; /* a bar with no buttons is as tall as one with */
+}
+
+.toolbar .toolbar-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.toolbar h2 {
+  color: var(--color-accent);
+  margin: 0;
+  font-size: var(--text-xl);
+  white-space: nowrap;
+}
+
+.toolbar-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  color: var(--color-text-faint);
+  transition: color 0.2s;
+}
+
+.toolbar-info:hover {
+  color: var(--color-accent);
+}
+
+.toolbar-info svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.toolbar-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--sp-8) var(--sp-12);
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+  width: 300px;
+  max-width: 90vw;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: var(--z-popover);
+  white-space: normal;
+}
+
+.toolbar-info:hover .toolbar-tooltip {
+  opacity: 1;
+}
+
+/* Tooltip that carries a picture: sized to the image, caption under it */
+.toolbar-tooltip.tooltip-image {
+  width: max-content;
+  padding: var(--sp-6);
+}
+
+.toolbar-tooltip.tooltip-image img {
+  display: block;
+  width: 482px;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+
+.toolbar-tooltip.tooltip-image small {
+  display: block;
+  margin-top: var(--sp-6);
+  color: var(--color-text-muted);
+}
+
+/* The actions keep the right edge whether they share the title's row or take the next one. */
+.toolbar .action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-left: auto;
+}
+
+/* Two link buttons that belong together (Scheduling + Discord). */
+.btn-pair {
+  display: flex;
+  gap: var(--sp-8);
+  flex: 0 0 auto;
+}
+
+/* cursor: pointer comes from the global button rule. */
+.btn-toolbar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  height: 2rem;
+  padding: 0 var(--sp-16);
+  flex: 0 0 auto;
+  background-color: var(--color-slate-raised);
+  color: var(--color-text-body);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+  font-size: var(--text-md);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.btn-toolbar svg {
+  flex-shrink: 0;
+}
+
+.btn-toolbar:hover:not(:disabled) {
+  background-color: var(--color-slate-hover);
+}
+
+.btn-toolbar:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-toolbar.btn-primary {
+  background-color: var(--color-button-primary);
+  color: var(--color-text);
+}
+
+.btn-toolbar.btn-primary:hover:not(:disabled) {
+  background-color: var(--color-button-primary-hover);
+}
+
+.btn-toolbar.btn-danger {
+  background: rgba(var(--rgb-danger), 0.18);
+  border-color: rgba(var(--rgb-danger), 0.45);
+  color: var(--color-danger-text);
+}
+
+.btn-toolbar.btn-danger:hover:not(:disabled) {
+  background: rgba(var(--rgb-danger), 0.28);
+  border-color: var(--color-danger);
+}
+
+/* Quiet links that sit beside the real actions (Scheduling, Discord, Cancel). */
+.btn-toolbar.btn-toolbar-link {
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+/* Their narrower padding weighs no more than one class, so a size (.btn-sm, .btn-xs) still applies. */
+.btn-toolbar:where(.btn-toolbar-link) {
+  padding: 0 var(--sp-12);
+}
+
+.btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
+  background: var(--color-line-soft);
+}
+
+/* Narrow screens: the bar stacks, and the actions fill the width two to a row. The primary
+   action (and an unsaved Save) gets a row of its own, so it is always the last, widest button. */
+@media (max-width: 550px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-8);
+  }
+
+  .toolbar .action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .toolbar .action-buttons > .btn-pair {
+    display: contents;
+  }
+
+  /* A long label wraps inside its cell instead of being cut off. */
+  .toolbar .action-buttons .btn-toolbar {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 2rem;
+    padding: var(--sp-6) var(--sp-8);
+    font-size: var(--text-md);
+    white-space: normal;
+    text-align: center;
+  }
+
+  /* Pairs share a row; a button on its own takes the whole row. */
+  .toolbar .action-buttons > .btn-toolbar,
+  .toolbar .action-buttons > .btn-primary,
+  .toolbar .action-buttons > .btn-unsaved {
+    grid-column: 1 / -1;
+  }
+
+  /* The hover tip cannot open on a touch screen, and it widened the page. */
+  .toolbar-tooltip {
+    display: none;
+  }
+}
+
+/* A button whose label changes with state (Save / Save Changes) keeps one width: every label
+   sits in the same grid cell and only the current one is visible. */
+.btn-label-stack {
+  display: inline-grid;
+}
+
+.btn-label-stack > span {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+
+.btn-label-stack > span[aria-hidden='true'] {
+  visibility: hidden;
+}
+
+/* The Save + Cancel pair (components/SaveActions.tsx) keeps its own gap wherever it is dropped;
+   in the phone toolbar grid the wrapper dissolves so Save can take a row of its own. */
+.save-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+}
+
+.modal-footer > .save-actions {
+  gap: var(--sp-12);
+}
+
+@media (max-width: 550px) {
+  .toolbar .action-buttons > .save-actions {
+    display: contents;
+  }
+}
