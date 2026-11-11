@@ -29,7 +29,7 @@ RUN apt-get update && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy rclone binary from official image (multi-arch aware)
-COPY --from=rclone/rclone:1.75.2 /usr/local/bin/rclone /usr/local/bin/rclone
+COPY --from=rclone/rclone:1.76.0 /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Set default timezone (can be overridden by docker-compose)
 ENV TZ=UTC
@@ -48,6 +48,8 @@ WORKDIR /app
 
 # Copy requirements and install as root
 COPY backend/requirements.txt backend/requirements-dev.txt ./
+# pip runs as root in the image on purpose (the entrypoint drops privileges); no venv warning needed
+ENV PIP_ROOT_USER_ACTION=ignore
 RUN python -m pip install --no-cache-dir "pip==26.2.1" && \
     pip install --no-cache-dir -r requirements.txt && \
     pip uninstall -y pip
