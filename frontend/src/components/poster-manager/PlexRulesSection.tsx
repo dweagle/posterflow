@@ -357,6 +357,7 @@ function PlexRulesSection({
                 refreshOverlays={refreshOverlays}
                 idPrefix="rule-form"
                 label="Rule Border Style"
+                mainWidth={borderWidth}
                 preview={<StyleValuePreview value={{ ...current.style, colors: current.colors }} borderWidth={borderWidth} />}
               />
             </div>
@@ -416,6 +417,9 @@ function PlexRulesSection({
                         <span className={`rule-badge rule-badge-mode mode-${rule.mode}`} title={MODE_LABELS[rule.mode]}>
                           {MODE_SHORT[rule.mode]}
                         </span>
+                        {rule.mode !== 'skip' && rule.style.bandWidth != null && (
+                          <span className="rule-badge rule-badge-value" title="This rule has its own border width">{rule.style.bandWidth} px</span>
+                        )}
                         {!renderable && <span className="rule-badge rule-badge-warn">incomplete</span>}
                       </div>
                     </div>

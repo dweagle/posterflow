@@ -20,6 +20,8 @@ export type BorderStyleValue = {
   innerWidth: number
   fadeWidth: number
   cornerRadius: number
+  // A holiday's or rule's own border width; null or absent = the main border width.
+  bandWidth?: number | null
 }
 
 // Corner fill needs a band to paint with; image frames carry their own inner edge.
@@ -76,7 +78,7 @@ export function StyleValuePreview({ value, borderWidth }: { value: BorderStyleVa
         fetchBorderPreview({
           style: value.style,
           color: value.colors[0] || '#000000',
-          border_width: borderWidth,
+          border_width: value.bandWidth ?? borderWidth,
           gradient_colors: value.gradientColors,
           gradient_direction: value.gradientDirection,
           overlay: value.style === 'image' ? value.overlayImage : '',
@@ -136,9 +138,12 @@ type Props = {
   verbose?: boolean
   // Offer a "Remove borders" style option (used by Plex rules).
   allowRemove?: boolean
+  // The main border width. When given, this style can be switched to a width of its own
+  // (holidays and rules).
+  mainWidth?: number
 }
 
-function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPrefix, label = 'Border Style', preview, verbose = false, allowRemove = false }: Props) {
+function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPrefix, label = 'Border Style', preview, verbose = false, allowRemove = false, mainWidth }: Props) {
   const [newColor, setNewColor] = useState('#ffffff')
   const [newGradientColor, setNewGradientColor] = useState('#ffffff')
   const [overlayError, setOverlayError] = useState('')
@@ -309,6 +314,32 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
           </div>
           {overlayError && <small className="block text-danger">{overlayError}</small>}
         </div>
+      )}
+
+      {mainWidth !== undefined && (
+      <div className="mt-md">
+        <div className="toggle-field">
+          <label className="toggle-switch">
+            <input type="checkbox" checked={value.bandWidth != null} onChange={(e) => onChange({ bandWidth: e.target.checked ? mainWidth : null })} />
+            <span className="toggle-slider"></span>
+          </label>
+          <span className="toggle-label">Own border width</span>
+        </div>
+        {value.bandWidth != null ? (
+          <div className="mt-sm">
+            <label htmlFor={`${idPrefix}-band-width`}>Border Width (pixels)</label>
+            <NumberField id={`${idPrefix}-band-width`} value={value.bandWidth} onChange={(n) => onChange({ bandWidth: n })} fallback={mainWidth} min={1} max={200} className="field-w-xs" />
+          </div>
+        ) : (
+          <small className="block">Uses the main Border Width ({mainWidth} px).</small>
+        )}
+        {value.style === 'image' && (
+          <small className="block mt-sm">
+            A frame image is not resized, so its border looks the same at any width. The width only places the
+            inner edge effect and the trim of Remove existing border first.
+          </small>
+        )}
+      </div>
       )}
 
       {value.style !== 'remove' && (

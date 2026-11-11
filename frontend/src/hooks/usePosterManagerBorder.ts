@@ -48,6 +48,8 @@ export interface SeasonStyle {
   fadeWidth: number
   // Client corner radius (px on a 1000×1500 poster); 0 = square corners.
   cornerRadius: number
+  // A holiday's or rule's own border width (px); null = the main border width.
+  bandWidth: number | null
 }
 
 // Default border-style options — the single source of truth for the main border,
@@ -65,6 +67,7 @@ const DEFAULT_BORDER_STYLE: SeasonStyle = {
   innerWidth: 8,
   fadeWidth: 8,
   cornerRadius: 0,
+  bandWidth: null,
 }
 
 // The season/holiday code refers to these same defaults by their SeasonStyle name.
@@ -115,7 +118,7 @@ interface UsePosterManagerBorderParams {
 }
 
 // SeasonStyle <-> the snake_case shape the backend reads (for season + holidays).
-const styleToSnake = (s: SeasonStyle) => ({
+export const styleToSnake = (s: SeasonStyle) => ({
   style: s.style,
   overlay_image: s.overlayImage,
   remove_existing: s.removeExisting,
@@ -127,9 +130,10 @@ const styleToSnake = (s: SeasonStyle) => ({
   inner_width: s.innerWidth,
   fade_width: s.fadeWidth,
   corner_radius: s.cornerRadius,
+  band_width: s.bandWidth,
 })
 
-const snakeToStyle = (raw: Record<string, unknown> | undefined, legacyBorderImage?: string): SeasonStyle => {
+export const snakeToStyle = (raw: Record<string, unknown> | undefined, legacyBorderImage?: string): SeasonStyle => {
   const r = raw || {}
   const num = (v: unknown, d: number) => parseIntOr(v, d)
   const styleVal = String(r.style || (legacyBorderImage ? 'image' : 'solid'))
@@ -147,6 +151,7 @@ const snakeToStyle = (raw: Record<string, unknown> | undefined, legacyBorderImag
     innerWidth: num(r.inner_width, 8),
     fadeWidth: num(r.fade_width, 8),
     cornerRadius: num(r.corner_radius, 0),
+    bandWidth: num(r.band_width, 0) > 0 ? num(r.band_width, 0) : null,
   }
 }
 

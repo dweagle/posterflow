@@ -589,6 +589,7 @@ def build_holiday_style_opts(raw_style: Optional[Dict[str, Any]], border_image: 
             return default
 
     overlay_path = resolve_overlay_path(raw.get("overlay_image") or border_image) if style == "image" else None
+    band_width = _as_int("band_width", 0)
 
     return {
         "style": style,
@@ -602,7 +603,18 @@ def build_holiday_style_opts(raw_style: Optional[Dict[str, Any]], border_image: 
         "inner_width": _as_int("inner_width", 8),
         "fade_width": _as_int("fade_width", 8),
         "corner_radius": _as_int("corner_radius", 0),
+        # A holiday's or rule's own border width; None = the main border width.
+        "band_width": min(band_width, 400) if band_width > 0 else None,
     }
+
+
+def style_band_width(style_opts: Optional[Dict[str, Any]], default: int) -> int:
+    """The border width a style brings with it (a holiday or a rule may), else `default`."""
+    try:
+        own = int((style_opts or {}).get("band_width") or 0)
+    except (TypeError, ValueError):
+        own = 0
+    return own if own > 0 else default
 
 
 def build_border_run_settings(db: Session, run_type: str = "manual") -> Dict[str, Any]:
@@ -720,6 +732,9 @@ class BorderReplacerService:
         # Only hashed when set, so upgrading doesn't change every existing hash.
         if corner_radius > 0:
             hashed["corner_radius"] = corner_radius
+        band_width = style_band_width(style, 0)
+        if band_width > 0:
+            hashed["band_width"] = band_width
         return hashed
 
     def _rule_signature_from_match(self, match: Optional[Any]) -> Optional[str]:
@@ -1309,9 +1324,10 @@ class BorderReplacerService:
             # image + inner effect). Its colors feed the solid band.
             if is_holiday_active and not remove_borders and holiday_style_opts:
                 run_style_opts = dict(holiday_style_opts)
+                own_width = style_band_width(run_style_opts, 0)
                 log_info(
                     LogTags.BORDER_REPLACER,
-                    f"Holiday style active: {run_style_opts.get('style', 'solid')}",
+                    f"Holiday style active: {run_style_opts.get('style', 'solid')}" + (f", its own border width {own_width}px" if own_width else ""),
                     holiday=active_holiday_name,
                 )
 
@@ -1863,7 +1879,7 @@ class BorderReplacerService:
                                 input_file,
                                 destination_dir,
                                 rule_color,
-                                border_width,
+                                style_band_width(plex_match.style_opts, border_width),
                                 folder,
                                 style_opts=plex_match.style_opts,
                             )
@@ -1907,7 +1923,7 @@ class BorderReplacerService:
                                 input_file,
                                 destination_dir,
                                 rgb_border_color,
-                                border_width,
+                                style_band_width(run_style_opts, border_width),
                                 folder,
                                 style_opts=run_style_opts,
                             )

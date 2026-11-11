@@ -957,6 +957,7 @@ function BorderTab({
                           overlays={overlays}
                           refreshOverlays={refreshOverlays}
                           idPrefix={`holiday-edit-${holiday.name}`}
+                          mainWidth={bandWidth}
                           preview={<StyleValuePreview value={{ ...editHolidayStyle, colors: editHolidayColors }} borderWidth={bandWidth} />}
                         />
                       </div>
@@ -970,6 +971,9 @@ function BorderTab({
                         <span className="holiday-frame-badge" title={`Style: ${holiday.style.style}`}>
                           {holiday.style.style === 'image' ? `🖼 ${holiday.style.overlayImage || 'frame'}` : '🎨 gradient'}
                         </span>
+                      )}
+                      {holiday.style.bandWidth != null && (
+                        <span className="holiday-frame-badge" title="This holiday has its own border width">{holiday.style.bandWidth} px</span>
                       )}
                     </div>
                   </div>
@@ -1059,6 +1063,7 @@ function BorderTab({
                 overlays={overlays}
                 refreshOverlays={refreshOverlays}
                 idPrefix="holiday-custom"
+                mainWidth={bandWidth}
                 preview={<StyleValuePreview value={{ ...customHolidayStyle, colors: customHolidayColors }} borderWidth={bandWidth} />}
               />
             </div>

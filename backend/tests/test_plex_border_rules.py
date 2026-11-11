@@ -453,6 +453,47 @@ def test_process_posters_applies_rule_to_matching_item(test_db, tmp_path):
     assert _corner(destination_dir / "Die Hard (1988)" / "poster.png") == (255, 255, 255)
 
 
+def test_a_rule_uses_its_own_border_width(test_db, tmp_path):
+    """A rule with a width of its own paints that width on its matches; a rule without one,
+    and every other poster, keeps the main width. The width is part of the rule's fingerprint."""
+    from services.border_replacer import build_holiday_style_opts
+
+    source_dir, destination_dir = tmp_path / "source", tmp_path / "destination"
+    for folder in ("Elf (2003)", "Scrooged (1988)", "Die Hard (1988)"):
+        _create_source_image(source_dir / folder / "poster.png", (255, 255, 255))
+    wide = PlexBorderRule(name="wide", match="label", value="Christmas", mode="include", colors=["#ff0000"],
+                          style_opts=build_holiday_style_opts({"style": "solid", "band_width": 60}, None), match_keys=folder_match_keys("Elf (2003)"))
+    plain = PlexBorderRule(name="plain", match="label", value="Classic", mode="include", colors=["#ff0000"],
+                           style_opts=build_holiday_style_opts({"style": "solid"}, None), match_keys=folder_match_keys("Scrooged (1988)"))
+    matcher = PlexRuleMatcher([wide, plain])
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir), destination_dir=str(destination_dir), border_colors=["#0000ff"], border_width=26,
+        dry_run=False, mode="full", plex_matcher=matcher,
+    )
+    assert result["success"] is True
+
+    def at(folder, x):
+        with Image.open(destination_dir / folder / "poster.png") as img:
+            return img.convert("RGB").getpixel((x, 750))
+
+    assert at("Elf (2003)", 10) == (255, 0, 0) and at("Elf (2003)", 40) == (255, 0, 0) and at("Elf (2003)", 80) != (255, 0, 0)
+    assert at("Scrooged (1988)", 10) == (255, 0, 0) and at("Scrooged (1988)", 40) != (255, 0, 0)
+    assert at("Die Hard (1988)", 10) == (0, 0, 255) and at("Die Hard (1988)", 40) != (0, 0, 255)
+    assert service._rule_signature(matcher, "Elf (2003)") != service._rule_signature(matcher, "Scrooged (1988)")
+
+
+def test_load_plex_rules_reads_a_rules_own_border_width(test_db):
+    test_db.add(Setting(key="border_replacer_plex_rules", value=json.dumps([
+        {"match": "label", "value": "Christmas", "mode": "include", "colors": ["#ff0000"], "style": {"style": "solid", "band_width": 60}},
+        {"match": "label", "value": "Classic", "mode": "include", "colors": ["#ff0000"], "style": {"style": "solid", "band_width": None}},
+        {"match": "label", "value": "Old", "mode": "include", "colors": ["#ff0000"]},
+    ])))
+    test_db.commit()
+    assert [r.style_opts["band_width"] for r in load_plex_rules(test_db)] == [60, None, None]
+
+
 def test_process_posters_skip_rule_leaves_untouched(test_db, tmp_path):
     source_dir = tmp_path / "source"
     destination_dir = tmp_path / "destination"

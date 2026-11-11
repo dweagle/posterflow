@@ -1288,6 +1288,64 @@ def test_holiday_style_opts_parse_corner_radius():
     assert build_holiday_style_opts({"style": "solid"}, None)["corner_radius"] == 0
 
 
+def test_holiday_style_opts_parse_an_own_border_width():
+    from services.border_replacer import build_holiday_style_opts, style_band_width
+
+    assert build_holiday_style_opts({"style": "solid", "band_width": 40}, None)["band_width"] == 40
+    assert build_holiday_style_opts({"style": "solid", "band_width": "40"}, None)["band_width"] == 40
+    assert build_holiday_style_opts({"style": "solid", "band_width": 9999}, None)["band_width"] == 400
+    for stored in (None, "", 0, -5, "wide"):
+        assert build_holiday_style_opts({"style": "solid", "band_width": stored}, None)["band_width"] is None
+    assert build_holiday_style_opts({"style": "solid"}, None)["band_width"] is None
+    assert build_holiday_style_opts(None, None)["band_width"] is None
+    # Without one of its own, a style takes the width it is given.
+    assert style_band_width({"band_width": 40}, 26) == 40
+    assert style_band_width({"band_width": None}, 26) == 26 and style_band_width({}, 26) == 26 and style_band_width(None, 26) == 26
+
+
+def _band_reaches(path: Path, x: int, color: tuple[int, int, int]) -> bool:
+    """Is the pixel `x` in from the left edge, half way down, the border color?"""
+    with Image.open(path) as img:
+        return img.convert("RGB").getpixel((x, 750)) == color
+
+
+@pytest.mark.parametrize("style, reaches_40", [({"style": "solid", "band_width": 60}, True), ({"style": "solid"}, False), (None, False)])
+def test_an_active_holiday_uses_its_own_border_width(test_db, tmp_path, style, reaches_40):
+    """A holiday with a width of its own paints that width; one without keeps the main width."""
+    holiday = {"name": "Always On", "schedule": "range(01/01-12/31)", "colors": ["#FF0000"]}
+    if style is not None:
+        holiday["style"] = style
+    test_db.add(Setting(key="border_replacer_holidays", value=json.dumps([holiday])))
+    test_db.commit()
+    source_dir, destination_dir = tmp_path / "source", tmp_path / "destination"
+    _create_source_image(source_dir / "Movie (2020)" / "poster.png", (255, 255, 255))
+    _create_source_image(source_dir / "Show (2020)" / "Season01.png", (255, 255, 255))
+
+    result = BorderReplacerService(test_db).process_posters(
+        source_dir=str(source_dir), destination_dir=str(destination_dir), border_colors=["#0000FF"], border_width=26,
+        exclusion_list=[], dry_run=False, mode="full",
+    )
+    assert result["success"] is True
+    for placed in (destination_dir / "Movie (2020)" / "poster.png", destination_dir / "Show (2020)" / "Season01.png"):  # seasons follow the main posters
+        assert _band_reaches(placed, 10, (255, 0, 0))
+        assert _band_reaches(placed, 40, (255, 0, 0)) is reaches_40
+        assert not _band_reaches(placed, 80, (255, 0, 0))
+
+
+def test_an_own_border_width_is_part_of_what_makes_a_poster_due_again(test_db):
+    """Setting or changing the width reprocesses; a style without one hashes as it always did."""
+    from services.border_replacer import build_holiday_style_opts
+
+    service = BorderReplacerService(test_db)
+    plain = build_holiday_style_opts({"style": "solid"}, None)
+    wide = build_holiday_style_opts({"style": "solid", "band_width": 60}, None)
+    wider = build_holiday_style_opts({"style": "solid", "band_width": 80}, None)
+    assert "band_width" not in service._style_opts_for_hash(plain)
+    assert service._style_opts_for_hash(wide)["band_width"] == 60
+    hashes = {service.calculate_settings_hash(["#FF0000"], 26, [], processing_profile="holiday:X", style_opts=opts) for opts in (plain, wide, wider)}
+    assert len(hashes) == 3
+
+
 def test_rounded_corner_continues_baked_glow_around_arc():
     """Rounded corners carry the template's baked-in inner glow around the arc even with no
     inner effect configured, and leave the straight edges (which already have it) untouched."""
