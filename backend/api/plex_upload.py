@@ -925,7 +925,9 @@ def handle_plex_upload_webhook(
         parsed = parse_arr_webhook_payload(payload)
 
         if parsed.get("skip"):
-            increment_webhook_stat(db, "received", "skipped_test")
+            increment_webhook_stat(db, "received", parsed.get("stat") or "skipped_test")
+            if parsed.get("stat") == "skipped_ignored":
+                log_info(LogTags.UPLOADER, parsed.get("reason", "Webhook ignored"), event_type=parsed.get("event_type"), source=parsed.get("source"))
             return {
                 "success": True,
                 "queued": False,

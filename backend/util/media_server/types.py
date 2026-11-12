@@ -53,6 +53,10 @@ class MediaServerItem:
     thumb_locked: Optional[bool] = None  # Plex: the poster field is locked (a chosen or uploaded poster); None = unknown
     original_title: Optional[str] = None  # the agent's original title (Plex 'Seven' vs original 'Se7en')
     virtual: bool = False  # Jellyfin placeholder for unaired/missing episodes; nothing on disk
+    ratings: Dict[str, float] = field(default_factory=dict)  # audience / critic / user, 0-10 (whatever the server holds)
+    guid: Optional[str] = None  # Plex guid as the server reports it (plex://… or a legacy agent string); bundle folders hash it
+    parent_guid: Optional[str] = None  # seasons: the show's guid
+    content_rating: Optional[str] = None  # the age rating as the server shows it (R, TV-14, gb/15); None = unrated
     native: Any = field(default=None, repr=False)
     client: Any = field(default=None, repr=False)  # owning MediaServerClient (multi-instance indexes)
 
@@ -66,3 +70,20 @@ def provider_ids_match(wanted: Dict[str, str], item_ids: Dict[str, str]) -> bool
         if item_value and str(item_value) == str(value):
             return True
     return False
+
+
+# Id-less items named per library warning at warning level; the rest go to debug.
+IDLESS_DETAIL_LIMIT = 15
+
+
+def idless_item_label(item: MediaServerItem) -> str:
+    """'Title (Year) — why', read from the guid the server reports, for an item with no provider id."""
+    name = f"{item.title} ({item.year})" if item.year else str(item.title)
+    guid = str(item.guid or "").strip()
+    if guid.startswith("local://"):
+        return f"{name} — not matched in Plex ({guid})"
+    if guid.startswith("plex://"):
+        return f"{name} — matched in Plex without a TMDB/TVDB/IMDb id ({guid})"
+    if guid:
+        return f"{name} — legacy agent guid {guid}"
+    return name

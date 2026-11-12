@@ -79,6 +79,8 @@ export const useSettingsSchedules = ({
         return 'Unmatched Assets'
       case 'border_replacer':
         return 'Border Replacer'
+      case 'overlays':
+        return 'Overlays'
       case 'backup':
         return 'Backup'
       default:

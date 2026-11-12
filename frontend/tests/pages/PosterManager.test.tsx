@@ -15,6 +15,10 @@ vi.mock('react-router-dom', () => ({
   useLocation: () => ({ state: null }),
 }))
 
+vi.mock('../../src/api/overlays', () => ({
+  getOverlaysConfig: () => Promise.resolve({ config: { enabled: false, types: {} } }),
+}))
+
 vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }))

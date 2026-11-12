@@ -455,6 +455,13 @@ def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None
         if new_routing != routing:
             upsert_setting(db, "plex_upload_instance_library_map", json.dumps(new_routing))
 
+    # plex_metadata_paths: {instance name: Metadata folder}; a removed server's path goes with it.
+    metadata_paths = _load_json_setting_value(db, "plex_metadata_paths")
+    if isinstance(metadata_paths, dict):
+        rekeyed_paths = {renames.get(name, name): path for name, path in metadata_paths.items()
+                         if renames.get(name, name) in valid_names and (name not in renames or renames[name] not in metadata_paths)}
+        if rekeyed_paths != metadata_paths:
+            upsert_setting(db, "plex_metadata_paths", json.dumps(rekeyed_paths))
     # "<name>:<library key>" selections: rename only — entries for removed servers are
     # inert and revive if the server is re-added, so they are deliberately not pruned.
     if renames:
@@ -474,6 +481,49 @@ def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None
                     rewritten.append(value)
             if rewritten != selection:
                 upsert_setting(db, key, json.dumps(rewritten))
+        overlays = _load_json_setting_value(db, "overlays_config")
+        if isinstance(overlays, dict):
+            rewritten_overlays = _rename_overlay_libraries(overlays, renames)
+            if rewritten_overlays != overlays:
+                upsert_setting(db, "overlays_config", json.dumps(rewritten_overlays))
+        for key in PLEX_PREFIXED_LIBRARY_SETTINGS:
+            selection = _load_json_setting_value(db, key)
+            if not isinstance(selection, list):
+                continue
+            rewritten: List[str] = []
+            seen: set[str] = set()
+            for item in selection:
+                value = str(item)
+                prefix, sep, rest = value.partition(":")
+                if sep and prefix in renames:
+                    value = f"{renames[prefix]}:{rest}"
+                if value not in seen:
+                    seen.add(value)
+                    rewritten.append(value)
+            if rewritten != selection:
+                upsert_setting(db, key, json.dumps(rewritten))
+
+
+def _rename_overlay_libraries(config: Dict[str, Any], renames: Dict[str, str]) -> Dict[str, Any]:
+    """The overlays config with its "<name>:<library key>" picks (the feature's own list and each
+    overlay's) following a renamed server."""
+    def rewrite(values: Any) -> List[str]:
+        out: List[str] = []
+        for item in values if isinstance(values, list) else []:
+            prefix, sep, rest = str(item).partition(":")
+            value = f"{renames[prefix]}:{rest}" if sep and prefix in renames else str(item)
+            if value not in out:
+                out.append(value)
+        return out
+
+    out = {**config, "libraries": rewrite(config.get("libraries"))}
+    types = config.get("types") if isinstance(config.get("types"), dict) else {}
+    out["types"] = {
+        key: {**tcfg, "overlays": [{**o, "libraries": rewrite(o.get("libraries"))} if isinstance(o, dict) else o for o in tcfg.get("overlays") or []]}
+        if isinstance(tcfg, dict) else tcfg
+        for key, tcfg in types.items()
+    }
+    return out
 
 
 def _sync_arr_name_keyed_settings(db: Session, setting_key: str, new_instances_json: str) -> None:

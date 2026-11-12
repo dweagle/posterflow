@@ -36,6 +36,7 @@ from api.poster_reminders import router as poster_reminders_router
 from api.stats import router as stats_router
 from api.scripts import router as scripts_router
 from api.community import router as community_router
+from api.overlays import router as overlays_router
 from services.drive_loader import load_drives_data
 from services.artwork_drive_loader import load_artwork_drives_data
 from pathlib import Path
@@ -492,7 +493,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-App-Version"],
+    expose_headers=["X-App-Version", "X-Overlay-Rect", "X-Overlay-Text", "X-Overlay-Layers"],
 )
 
 # App password authentication middleware (no-op when no password is set)
@@ -573,6 +574,7 @@ app.include_router(poster_reminders_router)
 app.include_router(stats_router)
 app.include_router(scripts_router)
 app.include_router(community_router)
+app.include_router(overlays_router)
 
 # API health check (must be before catch-all frontend route)
 @app.get("/api/health")

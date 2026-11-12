@@ -21,7 +21,6 @@ class LogIcons:
     WARNING = "⚠"    # Warning
     INFO = "•"       # Information
     PROGRESS = "→"   # Progress indicator
-    SKIP = "○"       # Skipped item
     DEBUG = "◆"      # Debug information
     USER = "◉"       # User action
 
@@ -58,6 +57,7 @@ class LogTags:
     ARTWORK_PULL = "ARTPULL"
     MONITOR = "MONITOR"
     CLEANUP = "CLEANUP"
+    OVERLAYS = "OVERLAYS"
 
 # ============================================================================
 # LOGGING HELPERS
@@ -213,6 +213,7 @@ def add_job_log_handler(job_type: str, job_id: int, job_name: Optional[str] = No
         "workflow": LogTags.WORKFLOW,
         "poster_renamer": LogTags.RENAMER,
         "border_replacer": LogTags.BORDER_REPLACER,
+        "overlays": LogTags.OVERLAYS,
         "unmatched_assets": LogTags.UNMATCHED,
         "backup": LogTags.BACKUP,
         "idarr": LogTags.IDARR,
@@ -277,11 +278,12 @@ def _should_log_to_job(record: dict, job_type: str) -> bool:
     job_specific_tags = {
         "sync_one": ["SYNC", "RCLONE"],
         "sync_all": ["SYNC-ALL", "SYNC", "RCLONE"],
-        "plex_upload": ["UPLOADER", "DATABASE", "API", "RENAMER", "BORDER", "SCANNER", "MERGE"],
+        "plex_upload": ["UPLOADER", "DATABASE", "API", "RENAMER", "BORDER", "OVERLAYS", "SCANNER", "MERGE"],
         "poster_renamer": ["RENAMER", "SCANNER", "MERGE", "ARR", "MATCH", "CLEANUP"],
         "border_replacer": ["BORDER"],
+        "overlays": ["OVERLAYS"],
         "unmatched_assets": ["UNMATCHED", "SCANNER", "MERGE", "ARR", "RENAMER"],
-        "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "RENAMER", "BORDER", "UNMATCHED", "RCLONE", "SCANNER", "MERGE", "ARR", "MATCH", "UPLOADER", "CLEANUP"],
+        "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "RENAMER", "BORDER", "OVERLAYS", "UNMATCHED", "RCLONE", "SCANNER", "MERGE", "ARR", "MATCH", "UPLOADER", "CLEANUP"],
         "backup": ["BACKUP"],
         "idarr": ["IDARR", "RCLONE"],
         "artwork_pull": ["ARTPULL"],
@@ -320,6 +322,7 @@ def remove_job_log_handler(handler_id: int, job_type: str = None, success: bool 
                 "workflow": LogTags.WORKFLOW,
                 "poster_renamer": LogTags.RENAMER,
                 "border_replacer": LogTags.BORDER_REPLACER,
+                "overlays": LogTags.OVERLAYS,
                 "unmatched_assets": LogTags.UNMATCHED,
                 "backup": LogTags.BACKUP,
                 "idarr": LogTags.IDARR,

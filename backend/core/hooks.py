@@ -9,7 +9,6 @@ import json
 import os
 import subprocess  # nosec B404
 import traceback
-from typing import Optional
 
 from core.config import settings
 from core.logging import LogTags, log_info, log_warning, log_error, log_debug
@@ -26,6 +25,7 @@ HOOK_KEY_SYNC_ALL = "sync_all"
 HOOK_KEY_WORKFLOW = "poster_workflow"
 HOOK_KEY_RENAMER = "poster_renamer"
 HOOK_KEY_BORDER = "border_replacer"
+HOOK_KEY_OVERLAYS = "overlays"
 HOOK_KEY_UNMATCHED = "unmatched"
 
 HOOK_KEYS: list[str] = [
@@ -34,6 +34,7 @@ HOOK_KEYS: list[str] = [
     HOOK_KEY_WORKFLOW,
     HOOK_KEY_RENAMER,
     HOOK_KEY_BORDER,
+    HOOK_KEY_OVERLAYS,
     HOOK_KEY_UNMATCHED,
 ]
 
@@ -43,6 +44,7 @@ HOOK_KEY_LABELS: dict[str, str] = {
     HOOK_KEY_WORKFLOW: "Poster Workflow",
     HOOK_KEY_RENAMER: "Poster Renamer",
     HOOK_KEY_BORDER: "Border Replacer",
+    HOOK_KEY_OVERLAYS: "Overlays",
     HOOK_KEY_UNMATCHED: "Unmatched Detection",
 }
 

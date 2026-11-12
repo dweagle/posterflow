@@ -39,6 +39,7 @@ import models.plex_upload  # noqa: F401
 import models.server_poster  # noqa: F401
 import models.manual_media  # noqa: F401
 import models.workflow  # noqa: F401
+import models.overlay  # noqa: F401
 
 # Use the same DB URL that app SessionLocal uses so startup/middleware queries
 # and dependency-overridden route sessions share one schema.

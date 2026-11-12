@@ -282,7 +282,8 @@ def test_upload_ready_downscales_over_byte_cap_under_dimension_cap(test_db, tmp_
     dense = tmp_path / "background.png"
     # Random RGB defeats PNG compression, so 2600x2600 lands well over 10MB while under 4000px.
     Image.frombytes("RGB", (2600, 2600), os.urandom(2600 * 2600 * 3)).save(dense)
-    assert os.path.getsize(dense) > 10_000_000 and max(Image.open(dense).size) < 4000
+    with Image.open(dense) as made:
+        assert os.path.getsize(dense) > 10_000_000 and max(made.size) < 4000
 
     svc = _svc(test_db)
     with svc._upload_ready(str(dense)) as up:

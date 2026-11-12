@@ -53,6 +53,10 @@ class _WrapServer:
         return root
 
     def fetchItems(self, key, cls=None, **kwargs):
+        if _UPLOAD_RE.match(key):
+            # Image lists are not modelled: a lookup gets no answer ("Plex can't say"); tests that
+            # need one stub selected_poster_key. An empty list would mean the item shows no image.
+            raise ConnectionError("image lists are not modelled by this fake server")
         m = _CHILDREN_RE.match(key)
         if not m:
             return []

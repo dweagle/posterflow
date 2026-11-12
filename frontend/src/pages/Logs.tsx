@@ -139,6 +139,7 @@ function Logs() {
     workflow: [],
     poster_renamer: [],
     border_replacer: [],
+    overlays: [],
     unmatched_assets: [],
     idarr: [],
     artwork_pull: [],
@@ -169,6 +170,7 @@ function Logs() {
     unmatched_assets: true,
     idarr: true,
     artwork_pull: true,
+    overlays: true,
   })
 
   // Live-tail state
@@ -222,6 +224,7 @@ function Logs() {
           unmatched_assets: true,
           idarr: true,
           artwork_pull: true,
+          overlays: true,
           [section]: false
         }
       } else {
@@ -1124,6 +1127,55 @@ function Logs() {
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('border_replacer', file.name)
+                              }}
+                              title="Download log"
+                            >
+                              <Download size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="log-section">
+                <h2 onClick={() => toggleSection('overlays')}>
+                  <span>Overlays</span>
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'overlays' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'overlays' ? stopLiveTail() : startLiveTail('overlays') }}
+                      title={liveJobType === 'overlays' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'overlays' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['overlays'] ? 'collapsed' : ''}`} />
+                  </div>
+                </h2>
+                {!collapsedSections['overlays'] && (
+                  <div className="log-section-content">
+                    {(jobLogs.overlays ?? []).length === 0 ? (
+                      <p className="no-logs">No overlays logs yet</p>
+                    ) : (
+                      <div className="log-list">
+                        {(jobLogs.overlays ?? []).map((file) => (
+                          <div
+                            key={file.name}
+                            className={`log-item ${selectedLog?.file.name === file.name ? 'active' : ''}`}
+                            onClick={() => viewLog('overlays', file)}
+                          >
+                            <div className="log-item-content">
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
+                              <span className="log-size">{formatFileSize(file.size)}</span>
+                            </div>
+                            <button
+                              className="btn-icon btn-icon-sm btn-download-mini"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDownload('overlays', file.name)
                               }}
                               title="Download log"
                             >

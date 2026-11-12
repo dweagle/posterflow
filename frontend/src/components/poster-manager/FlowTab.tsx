@@ -1,7 +1,8 @@
 import { AlertCircle, CheckCircle, Eye, Info, Plus, Trash2, Waves, X } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FlowConfig, FlowResult, IdarrFlowJobConfig, MakerIdarrSyncTarget, Workflow } from '../../api/client'
+import { getOverlaysConfig } from '../../api/overlays'
 import ConfirmDialog from '../ConfirmDialog'
 import Toolbar from '../Toolbar'
 import SaveActions from '../../components/SaveActions'
@@ -61,6 +62,17 @@ function FlowTab({
 
   const nameInputRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<{ type: 'switch'; id: number } | { type: 'create' } | null>(null)
+  // Overlays ride on the upload: say so in the step's title while they are switched on.
+  const [overlaysOn, setOverlaysOn] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    getOverlaysConfig()
+      .then((resp) => {
+        if (!cancelled) setOverlaysOn(Boolean(resp.config?.enabled) && Object.values(resp.config?.types ?? {}).some((t) => t.enabled))
+      })
+      .catch(() => { /* the title just stays plain */ })
+    return () => { cancelled = true }
+  }, [])
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const selectedName = workflows.find((w) => w.id === selectedWorkflowId)?.name ?? workflowName
@@ -333,7 +345,7 @@ function FlowTab({
           <div className="job-header">
             <div className="job-header-left">
               <span className="job-number">{stepOffset + 4}</span>
-              <span className="job-title">Asset Upload</span>
+              <span className="job-title">Asset Upload{overlaysOn ? ' + Overlays' : ''}</span>
             </div>
             <label className="toggle-switch">
               <input type="checkbox" checked={flowConfig.plex_upload.enabled} onChange={(e) => onChangeFlowConfig('plex_upload', 'enabled', e.target.checked)} />

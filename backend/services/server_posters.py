@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from util.media_server.plex import NO_IMAGE_SELECTED
+
+# stable_poster_key's answer when Plex shows no poster at all for the item
+PLEX_NO_POSTER = f"plex:{NO_IMAGE_SELECTED}"
+
 
 def poster_key(item: Any) -> str:
     """The cheap change hint from the library listing: 'jf:<tag>' on Jellyfin ('' = no image),
@@ -21,8 +26,8 @@ def poster_key(item: Any) -> str:
 
 def stable_poster_key(item: Any) -> str:
     """An identity that only changes when the poster image changes: Jellyfin's tag, or the key
-    of the poster Plex has selected ('plex:upload://posters/<sha1>' for one of ours). '' when
-    the server cannot say."""
+    of the poster Plex has selected ('plex:upload://posters/<sha1>' for one of ours,
+    PLEX_NO_POSTER when none is). '' when the server cannot say."""
     native = getattr(item, "native", None)
     if isinstance(native, dict):
         tag = (native.get("ImageTags") or {}).get("Primary")
@@ -39,7 +44,7 @@ def stable_poster_key(item: Any) -> str:
                 return f"plex:{getattr(poster, 'ratingKey', None) or getattr(poster, 'key', '') or ''}"
     except Exception:
         return ""
-    return ""
+    return PLEX_NO_POSTER
 
 
 def upload_sha(stable_key: str) -> str:

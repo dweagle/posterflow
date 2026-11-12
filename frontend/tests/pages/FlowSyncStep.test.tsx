@@ -1,9 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 import FlowTab from '../../src/components/poster-manager/FlowTab'
 import type { FlowConfig } from '../../src/api/client'
+
+const mockGetOverlaysConfig = vi.fn()
+
+vi.mock('../../src/api/overlays', () => ({
+  getOverlaysConfig: (...args: unknown[]) => mockGetOverlaysConfig(...args),
+}))
 
 /**
  * The Sync Drives step covers two separate drive types. Artwork lives in its own table
@@ -48,6 +54,10 @@ function renderTab(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Workflow Sync Drives step', () => {
+  beforeEach(() => {
+    mockGetOverlaysConfig.mockResolvedValue({ config: { enabled: false, types: {} } })
+  })
+
   afterEach(() => {
     cleanup()
   })
@@ -96,5 +106,25 @@ describe('Workflow Detect Unmatched step', () => {
     expect(screen.getByText('Detect Unmatched Assets')).toBeTruthy()
     expect(screen.queryByLabelText(/Detect unmatched posters/i)).toBeNull()
     expect(screen.queryByLabelText(/Detect unmatched artwork/i)).toBeNull()
+  })
+})
+
+describe('Workflow Asset Upload step', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('names overlays in its title while they are switched on', async () => {
+    mockGetOverlaysConfig.mockResolvedValue({ config: { enabled: true, types: { status: { enabled: true } } } })
+    renderTab()
+    await waitFor(() => expect(screen.getByText('Asset Upload + Overlays')).toBeTruthy())
+  })
+
+  it('stays plain while overlays are off or no type is enabled', async () => {
+    mockGetOverlaysConfig.mockResolvedValue({ config: { enabled: true, types: { status: { enabled: false } } } })
+    renderTab()
+    await waitFor(() => expect(mockGetOverlaysConfig).toHaveBeenCalled())
+    expect(screen.getByText('Asset Upload')).toBeTruthy()
+    expect(screen.queryByText('Asset Upload + Overlays')).toBeNull()
   })
 })

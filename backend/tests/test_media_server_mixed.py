@@ -143,7 +143,32 @@ def test_build_index_warns_about_a_library_whose_items_carry_no_ids(test_db, mon
     _, totals = service._build_plex_index([{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}], {})
 
     assert totals[0]["no_ids"] == 1
-    assert any("J / Movies: 1 of 1 movies carry no TMDB/TVDB/IMDb id" in m for m in captured)
+    header = next(i for i, m in enumerate(captured) if "J / Movies: 1 of 1 movies carry no TMDB/TVDB/IMDb id" in m)
+    assert captured[header + 1] == "    Heat (1995)"
+
+
+def test_idless_warning_caps_named_items_and_sends_the_rest_to_debug(monkeypatch):
+    import services.plex_upload as pu
+    from util.media_server.types import IDLESS_DETAIL_LIMIT
+
+    warned, debugged = [], []
+    monkeypatch.setattr(pu, "log_warning", lambda tag, msg, **kw: warned.append(msg))
+    monkeypatch.setattr(pu, "log_debug", lambda tag, msg, **kw: debugged.append(msg))
+    items = [
+        MediaServerItem(item_id=str(n), item_type="movie", title=f"Film {n}", year=2000, guid=f"local://{n}")
+        for n in range(IDLESS_DETAIL_LIMIT + 2)
+    ]
+
+    PlexUploadService._warn_idless_library("Plex", "Movies", "movie", 2460, items)
+
+    assert warned[0].startswith("Plex / Movies: 17 of 2,460 movies carry no TMDB/TVDB/IMDb id")
+    assert warned[1] == "    Film 0 (2000) — not matched in Plex (local://0)"
+    assert len(warned) == 1 + IDLESS_DETAIL_LIMIT + 1
+    assert warned[-1] == "    ... and 2 more (enable debug logging for the full list)"
+    assert debugged == [
+        "    Film 15 (2000) — not matched in Plex (local://15)",
+        "    Film 16 (2000) — not matched in Plex (local://16)",
+    ]
 
 
 def test_targeted_index_over_jellyfin_instance(test_db, monkeypatch):

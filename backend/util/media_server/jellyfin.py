@@ -1,9 +1,8 @@
 import base64
 import logging
 import time
-import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -48,7 +47,7 @@ MEDIA_TYPE_TO_ITEM_KINDS = {
 
 CONTENT_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
-ITEM_FIELDS = "ProviderIds,Path,Tags,DateCreated,OriginalTitle"
+ITEM_FIELDS = "ProviderIds,Path,Tags,DateCreated,OriginalTitle,OfficialRating"
 PAGE_SIZE = 500
 
 
@@ -68,6 +67,20 @@ def normalize_provider_ids(provider_ids: Optional[Dict[str, Any]]) -> Dict[str, 
         if value is None or str(value).strip() == "":
             continue
         out[str(key).strip().lower()] = str(value).strip()
+    return out
+
+
+def _ratings(data: Dict[str, Any]) -> Dict[str, float]:
+    """Ratings Jellyfin holds for an item, on a 0-10 scale: CommunityRating is 0-10 already,
+    CriticRating is a 0-100 percentage."""
+    out: Dict[str, float] = {}
+    try:
+        if data.get("CommunityRating") is not None:
+            out["audience"] = float(data["CommunityRating"])
+        if data.get("CriticRating") is not None:
+            out["critic"] = float(data["CriticRating"]) / 10.0
+    except (TypeError, ValueError):
+        pass
     return out
 
 
@@ -225,6 +238,8 @@ class JellyfinClient(MediaServerClient):
             thumb_path=thumb_path,
             original_title=str(data.get("OriginalTitle") or "").strip() or None,
             virtual=str(data.get("LocationType") or "") == "Virtual" or bool(data.get("IsVirtualItem")),
+            ratings=_ratings(data),
+            content_rating=str(data.get("OfficialRating") or "").strip() or None,
             native=data,
             client=self,
         )
@@ -504,6 +519,139 @@ class JellyfinClient(MediaServerClient):
             headers={"Content-Type": content_type},
         )
         return result is not None
+
+    def _delete_images(self, item: MediaServerItem, kind: str) -> bool:
+        """Delete the item's images of one kind (every backdrop, since Jellyfin keeps several)."""
+        image_type = IMAGE_TYPE_MAP.get(kind)
+        if not image_type:
+            return False
+        if image_type == "Backdrop":
+            fresh = self.get_item(item.item_id)
+            native = fresh.native if fresh is not None and isinstance(fresh.native, dict) else {}
+            for index in reversed(range(len(native.get("BackdropImageTags") or []))):
+                if self._request("DELETE", f"/Items/{item.item_id}/Images/Backdrop/{index}") is None:
+                    return False
+            return True
+        return self._request("DELETE", f"/Items/{item.item_id}/Images/{image_type}") is not None
+
+    def reset_images(self, item: MediaServerItem, kinds: List[str], *, unlocked: bool = False) -> Dict[str, bool]:
+        """Delete the item's images of each kind, then ask the server once to fetch fresh ones
+        from its metadata providers (an image refresh fills in whatever is missing). squareart
+        has no Jellyfin equivalent."""
+        deleted = {kind: self._delete_images(item, kind) for kind in kinds}
+        if not any(deleted.values()):
+            return deleted
+        refreshed = self._request(
+            "POST",
+            f"/Items/{item.item_id}/Refresh",
+            params={"metadataRefreshMode": "Default", "imageRefreshMode": "FullRefresh",
+                    "replaceAllImages": "false", "replaceAllMetadata": "false"},
+        ) is not None
+        return {kind: ok and refreshed for kind, ok in deleted.items()}
+
+    def reset_image(self, item: MediaServerItem, kind: str) -> bool:
+        return self.reset_images(item, [kind]).get(kind, False)
+
+    def reset_poster(self, item: MediaServerItem) -> bool:
+        return self.reset_image(item, IMAGE_KIND_POSTER)
+
+    # ── media details (resolution, HDR, audio) for the overlays ──
+    MEDIA_FIELDS = "MediaStreams,Path"
+
+    @staticmethod
+    def _media_file(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """One movie's or episode's file, from the item's streams. Jellyfin reports a frame size
+        rather than a resolution name, and a video range rather than HDR flags."""
+        from services.overlays.media import frame_resolution
+
+        streams = [st for st in (data.get("MediaStreams") or []) if isinstance(st, dict)]
+        video = next((st for st in streams if st.get("Type") == "Video"), None)
+        if video is None and not data.get("Path"):
+            return None
+        range_type = str((video or {}).get("VideoRangeType") or "")
+        dovi = range_type.upper().startswith("DOVI")
+        titles: List[str] = []
+        for st in streams:
+            if st.get("Type") != "Audio":
+                continue
+            # The display title, plus the codec and profile as the file-name patterns expect them ("EAC3", "DTS-HD MA").
+            titles += [str(t) for t in (st.get("DisplayTitle"), " ".join(str(v) for v in (str(st.get("Codec") or "").upper(), st.get("Profile")) if v)) if t]
+        return {
+            "resolution": frame_resolution((video or {}).get("Width"), (video or {}).get("Height")),
+            "hdr": dovi or str((video or {}).get("VideoRange") or "").upper() == "HDR" or range_type.upper() not in ("", "SDR", "UNKNOWN"),
+            "dovi": dovi,
+            "path": str(data.get("Path") or ""),
+            "audio_titles": titles,
+        }
+
+    def library_media(self, library_key: str) -> Dict[str, List[Dict[str, Any]]]:
+        """One listing with streams per library: its movies and its episodes (each episode
+        grouped under its show and its season)."""
+        local_id = self._local_library_id(library_key)
+        rows = self._items_page({"parentId": local_id, "recursive": "true", "includeItemTypes": "Movie,Episode", "fields": self.MEDIA_FIELDS,
+                                 "enableUserData": "false", "enableImages": "false"})
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            entry = self._media_file(row)
+            if entry is None or row.get("LocationType") == "Virtual":
+                continue
+            owners = [row.get("Id")] if row.get("Type") == "Movie" else [row.get("SeriesId"), row.get("SeasonId")]
+            for owner in owners:
+                if owner:
+                    out.setdefault(str(owner), []).append(entry)
+        return out
+
+    def item_media(self, item: MediaServerItem) -> List[Dict[str, Any]]:
+        if not item.item_id:
+            return []
+        if item.item_type == "movie":
+            params: Dict[str, Any] = {"ids": item.item_id}
+        elif item.item_type in ("show", "season"):
+            params = {"parentId": item.item_id, "recursive": "true", "includeItemTypes": "Episode"}
+        else:
+            return []
+        rows = self._items_page({**params, "fields": self.MEDIA_FIELDS, "enableUserData": "false", "enableImages": "false"})
+        return [entry for row in rows if row.get("LocationType") != "Virtual" for entry in [self._media_file(row)] if entry is not None]
+
+    def _download(self, url: str) -> Optional[bytes]:
+        try:
+            resp = requests.get(url, timeout=self.timeout)  # the provider's address, not the server: no API key sent
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as ex:
+            if self.logger:
+                self.logger.debug(f"Could not download a provider poster ({ex})")
+            return None
+        return resp.content or None
+
+    def server_poster(self, item: MediaServerItem, ref: str = "") -> Optional[Tuple[str, bytes]]:
+        """Jellyfin holds one poster per item, so an upload replaces it. Its clean source is the
+        provider poster it would download itself: the address `ref` names while that still
+        works, else the first one its providers list for the item."""
+        if ref:
+            raw = self._download(ref)
+            if raw:
+                return ref, raw
+        data = self._request("GET", f"/Items/{item.item_id}/RemoteImages", params={"type": "Primary"})
+        images = data.get("Images") if isinstance(data, dict) else None
+        for image in images or []:
+            url = str(image.get("Url") or "") if isinstance(image, dict) else ""
+            if url and url != ref:
+                raw = self._download(url)
+                if raw:
+                    return url, raw
+                break  # the provider is unreachable: one failed download is enough to know
+        return None
+
+    def run_scheduled_task(self, key: str) -> bool:
+        """Start a server scheduled task by its key (e.g. 'DeleteCacheFiles', the cache
+        cleaner). True when the server accepted the request."""
+        tasks = self._request("GET", "/ScheduledTasks")
+        if not isinstance(tasks, list):
+            return False
+        task_id = next((t.get("Id") for t in tasks if isinstance(t, dict) and t.get("Key") == key), None)
+        if not task_id:
+            return False
+        return self._request("POST", f"/ScheduledTasks/Running/{task_id}") is not None
 
     def image_url(self, item: MediaServerItem, max_width: Optional[int] = None) -> Optional[str]:
         if not item.thumb_path:

@@ -80,7 +80,6 @@ SETTING_PLEX_WEBHOOK_RETRY_DELAY_SECONDS = "plex_webhook_retry_delay_seconds"
 SETTING_PLEX_WEBHOOK_STATS = "plex_webhook_stats"
 SETTING_PLEX_LIBRARY_CONFIG = "plex_library_config"
 SETTING_PLEX_UPLOAD_LIBRARY_OVERRIDE = "plex_upload_library_override"
-SETTING_PLEX_UPLOAD_FILE_CACHE = "plex_upload_file_cache"
 SETTING_PLEX_UPLOAD_MANUAL_DRY_RUN = "plex_upload_manual_dry_run"
 SETTING_PLEX_UPLOAD_MANUAL_REAPPLY = "plex_upload_manual_reapply"
 SETTING_PLEX_UPLOAD_MANUAL_REMOVE_OVERLAY_LABEL = "plex_upload_manual_remove_overlay_label"
@@ -1287,8 +1286,17 @@ def _to_int(value: Any) -> Optional[int]:
         return None
 
 
+# Arr events that never mean new media landed: renames, grabs, health and deletes.
+# Anything else (Download, ImportComplete, adds, unknown custom payloads) still queues.
+_ARR_IGNORED_EVENTS = {
+    "grab", "rename", "health", "healthrestored", "applicationupdate", "manualinteractionrequired",
+    "seriesdelete", "moviedelete", "episodefiledelete", "moviefiledelete",
+}
+
+
 def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    event_type = str(payload.get("eventType") or payload.get("event") or "unknown").strip().lower()
+    raw_event = str(payload.get("eventType") or payload.get("event") or "unknown").strip()
+    event_type = raw_event.lower()
 
     # Instance nams and url fallback
     instance_name = str(payload.get("instanceName") or "").strip() or None
@@ -1299,6 +1307,18 @@ def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "skip": True,
             "reason": "ARR test webhook received",
             "event_type": event_type,
+        }
+
+    if event_type in _ARR_IGNORED_EVENTS:
+        app = "Radarr" if isinstance(payload.get("movie"), dict) else "Sonarr"
+        subject = payload.get("movie") if app == "Radarr" else payload.get("series")
+        title = str(subject.get("title") or "").strip() if isinstance(subject, dict) else ""
+        return {
+            "skip": True,
+            "stat": "skipped_ignored",
+            "reason": f"Ignored {app} event '{raw_event}'" + (f" for {title}" if title else ""),
+            "event_type": event_type,
+            "source": app.lower(),
         }
 
     if isinstance(payload.get("movie"), dict):
@@ -2039,6 +2059,22 @@ def _discord_outcome_fields(
 SETTING_PLEX_UPLOAD_STATS = "plex_upload_stats"
 
 
+def _instance_fields(by_instance: Any, *, dry_run: bool) -> list:
+    """One field per media server with what it got this run, so Plex and Jellyfin read apart."""
+    if not isinstance(by_instance, dict) or not by_instance:
+        return []
+    verb = "would upload" if dry_run else "uploaded"
+    fields = []
+    for name, row in sorted(by_instance.items()):
+        if not isinstance(row, dict):
+            continue
+        lines = [f"Posters: {int(row.get('posters_uploaded', 0)):,} {verb}, {int(row.get('posters_current', 0)):,} already current"]
+        if int(row.get("artwork_uploaded", 0)) or int(row.get("artwork_current", 0)):
+            lines.append(f"Artwork: {int(row.get('artwork_uploaded', 0)):,} {verb}, {int(row.get('artwork_current', 0)):,} already current")
+        fields.append({"name": media_server_label(str(row.get("type") or ""), str(name)), "value": "\n".join(lines), "inline": False})
+    return fields
+
+
 def build_plex_upload_embed(stats: Dict[str, Any], *, dry_run: bool) -> Dict[str, Any]:
     """description/fields/color for the Plex upload embed, shared by the standalone job
     and the workflow step so both report the same run the same way."""
@@ -2069,6 +2105,7 @@ def build_plex_upload_embed(stats: Dict[str, Any], *, dry_run: bool) -> Dict[str
                 ("Squareart", int(by_type.get("squareart", 0))),
             ],
         )
+    fields += _instance_fields(stats.get("by_instance"), dry_run=dry_run)
     fields.append({"name": "Mode", "value": mode_label, "inline": True})
 
     year_discrepancy_text = _format_year_discrepancy_text(stats.get("year_discrepancies", []) or [])
@@ -2381,6 +2418,10 @@ def run_plex_upload_background_job(
             failure_context="asset upload",
         )
     finally:
+        try:
+            service.finish_overlays()  # what the overlay engine learned (TMDB records, badge state) outlives the job
+        except Exception:  # nosec B110
+            pass
         try:
             service.invalidate_preflight_cache()
             service.invalidate_local_assets_cache()
@@ -2923,6 +2964,26 @@ def run_plex_webhook_background_job(
                 imdb_id=parsed_payload.get("imdb_id"),
                 include_artwork=webhook_include_artwork,
             )
+            if not cached and target_season_number is not None and getattr(service, "_single_target_reason", None) == "season_re_added":
+                # The server re-added this season under an unchanged show (Jellyfin keys items by
+                # folder path). Drop the season's record so the upload pass sends the poster again.
+                removed = service.clear_upload_cache_for_target(
+                    media_type=media_type,
+                    title=title,
+                    year=parsed_payload.get("year"),
+                    season_number=target_season_number,
+                    tmdb_id=parsed_payload.get("tmdb_id"),
+                    tvdb_id=parsed_payload.get("tvdb_id"),
+                    imdb_id=parsed_payload.get("imdb_id"),
+                )
+                log_info(
+                    LogTags.UPLOADER,
+                    f"{target.get('label') or 'Season'} of {title} was re-added on the server (new id) — cleared its upload record so the poster goes up again",
+                    media_type=media_type,
+                    title=title,
+                    season_number=target_season_number,
+                    removed_entries=removed,
+                )
             target_cache_checks.append(
                 {
                     "season_number": target_season_number,
@@ -3586,6 +3647,7 @@ def run_plex_webhook_background_job(
                         ("Squareart", int(wh_artwork_by_type.get("squareart", 0))),
                     ],
                 )
+            discord_fields += _instance_fields(stats.get("by_instance"), dry_run=False)
             if year_discrepancy_text:
                 discord_fields.append(
                     {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}
@@ -3637,6 +3699,10 @@ def run_plex_webhook_background_job(
             failure_context="webhook upload",
         )
     finally:
+        try:
+            service.finish_overlays()  # what the overlay engine learned (TMDB records, badge state) outlives the job
+        except Exception:  # nosec B110
+            pass
         try:
             service.invalidate_preflight_cache()
             service.invalidate_local_assets_cache()
@@ -3836,6 +3902,10 @@ def run_plex_single_manual_background_job(
             failure_context="single upload",
         )
     finally:
+        try:
+            service.finish_overlays()  # what the overlay engine learned (TMDB records, badge state) outlives the job
+        except Exception:  # nosec B110
+            pass
         try:
             service.invalidate_preflight_cache()
             service.invalidate_local_assets_cache()

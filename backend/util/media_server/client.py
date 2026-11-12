@@ -1,6 +1,6 @@
 import traceback
 from abc import ABC, abstractmethod
-from typing import Any, Dict, FrozenSet, List, Optional, Set
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from util.media_server.types import (
     MediaServerInfo,
@@ -144,6 +144,50 @@ class MediaServerClient(ABC):
     def remove_label(self, item: MediaServerItem, label: str) -> bool:
         """Remove a label/tag from an item; True only if it was present and removed. No-op by default."""
         return False
+
+    def selected_image_key(self, item: MediaServerItem, kind: str) -> str:
+        """The key of the image the server shows for `kind` ('' when it cannot say)."""
+        return ""
+
+    def reset_poster(self, item: MediaServerItem) -> bool:
+        """Put the server's own (metadata-provider) poster back on the item, discarding any
+        uploaded one. No-op by default."""
+        return False
+
+    def reset_image(self, item: MediaServerItem, kind: str) -> bool:
+        """Put one image kind (poster/background/logo/squareart) back to the server's own. No-op by default."""
+        return False
+
+    def reset_images(self, item: MediaServerItem, kinds: List[str], *, unlocked: bool = False) -> Dict[str, bool]:
+        """Put several image kinds of one item back to the server's own: {kind: done}. `unlocked`
+        says unlock_images already ran for the item."""
+        return {kind: self.reset_image(item, kind) for kind in kinds}
+
+    def unlock_images(self, items: List[MediaServerItem], kinds: List[str]) -> Set[str]:
+        """Unlock these image kinds on many items at once, where the server locks a chosen image.
+        Returns the ids of the items it could not unlock. Nothing to unlock by default."""
+        return set()
+
+    def library_media(self, library_key: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Item id → the media files behind it (resolution, HDR, Dolby Vision, path, audio track
+        titles: see services/overlays/media.py), for every movie, show and season of a library.
+        A show's and a season's files are their episodes'. Nothing by default."""
+        return {}
+
+    def item_media(self, item: MediaServerItem) -> List[Dict[str, Any]]:
+        """The media files behind one movie, show or season (as library_media gives them)."""
+        return []
+
+    def server_poster(self, item: MediaServerItem, ref: str = "") -> Optional[Tuple[str, bytes]]:
+        """The server's own clean poster for an item, as (reference, image bytes): the poster
+        `ref` names when the server still has it, else the server's current pick. None when
+        the server has none to give. Not supported by default."""
+        return None
+
+    def restore_server_poster(self, item: MediaServerItem, ref: str = "") -> bool:
+        """Show the server's own poster again (the one `ref` names, where the server keeps
+        several), discarding the uploaded one."""
+        return self.reset_poster(item)
 
 
 _app_version_cache: Optional[str] = None

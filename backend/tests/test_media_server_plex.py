@@ -1,8 +1,10 @@
 from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement
 
-from util.media_server.plex import PlexClient, extract_provider_ids
+from util.media_server.plex import NO_IMAGE_SELECTED, PlexClient, extract_provider_ids
 from util.media_server.types import (
+    IMAGE_KIND_BACKGROUND,
+    IMAGE_KIND_LOGO,
     IMAGE_KIND_POSTER,
     IMAGE_KIND_SQUAREART,
     MediaServerItem,
@@ -80,6 +82,9 @@ class FakeSession:
     def put(self, *args, **kwargs):
         return None
 
+    def delete(self, *args, **kwargs):
+        return None
+
 
 class FakeServer:
     def __init__(self, sections):
@@ -88,6 +93,7 @@ class FakeServer:
         self.version = "1.41.0"
         self.library = FakeLibrary(sections)
         self.calls = []  # (key, http method name, data)
+        self.fetches = []  # keys asked for as lists of items
         self._session = FakeSession()
 
     def _all_raw(self):
@@ -104,7 +110,7 @@ class FakeServer:
         self.calls.append((key, getattr(method, "__name__", None), data))
         root = Element("MediaContainer")
         if method is None and key.startswith("/library/metadata/") and "/" not in key[len("/library/metadata/"):]:
-            for rating_key in key[len("/library/metadata/"):].split(","):
+            for rating_key in key[len("/library/metadata/"):].split("?")[0].split(","):
                 raw = self._raw(rating_key)
                 if raw is None:
                     continue
@@ -112,9 +118,17 @@ class FakeServer:
                 # Full metadata carries Location; the fakes keep it apart from the listing row
                 for path in getattr(raw, "full_locations", None) or []:
                     SubElement(el, "Location", path=str(path))
+                for name in getattr(raw, "full_locked", None) or []:
+                    SubElement(el, "Field", name=name, locked="1")
+                for tag in getattr(raw, "full_labels", None) or []:
+                    SubElement(el, "Label", tag=tag)
         return root
 
     def fetchItems(self, key, cls=None, **kwargs):
+        self.fetches.append(key)
+        if key.startswith("/library/collections/"):
+            raw = self._raw(key.split("/")[3])
+            return list(getattr(raw, "members", []) or [])
         prefix = "/library/metadata/"
         if key.startswith(prefix) and "/children" in key:
             raw = self._raw(key[len(prefix):].split("/")[0])
@@ -257,6 +271,79 @@ def test_get_collections_smart_flag():
     assert collections[0].library_name == "Movies"
 
 
+def test_get_collections_asks_for_locks_and_labels_in_batches():
+    """A listing row carries neither the poster lock nor the labels: both come a batch at a
+    time, never one request per collection."""
+    rows = [FakeItem(ratingKey=300 + n, type="collection", title=f"Set {n}") for n in range(5)]
+    rows[1].full_locked, rows[1].full_labels = ["thumb"], ["Overlay", "Pinned"]
+    rows[4].full_locked = ["art"]
+    client = make_client([FakeSection(1, "Movies", "movie", collections=rows)])
+    client.METADATA_BATCH = 2
+    listed = client.get_collections("1")
+    assert [key.split("?")[0] for key, _method, _data in client.server.calls] == [
+        "/library/metadata/300,301", "/library/metadata/302,303", "/library/metadata/304"]
+    assert [c.thumb_locked for c in listed] == [False, True, False, False, False]
+    assert [c.tags for c in listed] == [[], ["Overlay", "Pinned"], [], [], []]
+    assert all(c.native is None for c in listed)
+
+
+def test_get_collections_keeps_the_listing_when_the_details_cannot_be_read():
+    client = make_client([FakeSection(1, "Movies", "movie", collections=[FakeItem(ratingKey=300, type="collection", title="Bond")])])
+
+    def down(*args, **kwargs):
+        raise ConnectionError("down")
+
+    client.server.query = down
+    listed = client.get_collections("1")
+    assert [(c.title, c.thumb_locked, c.tags) for c in listed] == [("Bond", None, [])]
+
+
+def test_get_collection_items_lists_the_members_in_one_request():
+    """Members come as listing rows from the collection's id: the collection itself is not
+    fetched and no member costs a request of its own."""
+    members = [make_movie(ratingKey=101, title="Dr. No"), make_movie(ratingKey=102, title="Goldfinger")]
+    bond = FakeItem(ratingKey=300, type="collection", title="Bond", members=members)
+    client = make_client([FakeSection(1, "Movies", "movie", collections=[bond])])
+    listed = client.get_collections("1")
+    client.server.calls.clear()
+    client.server.fetchItem = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("the collection is not fetched"))
+    found = client.get_collection_items(listed[0])
+    assert [(m.title, m.library_name, m.native) for m in found] == [("Dr. No", "Movies", None), ("Goldfinger", "Movies", None)]
+    assert found[0].provider_ids == client._parse_item(members[0]).provider_ids != {}
+    assert client.server.fetches == ["/library/collections/300/children?includeGuids=1"] and client.server.calls == []
+    assert all(m._autoReload is False for m in members)
+
+    # No answer is not an empty collection.
+    def down(*args, **kwargs):
+        raise ConnectionError("down")
+
+    client.server.fetchItems = down
+    try:
+        client.get_collection_items(listed[0])
+        raise AssertionError("a failed listing must raise")
+    except ConnectionError:
+        pass
+    assert client.get_collection_items(MediaServerItem(item_id="", item_type="collection", title="X")) == []
+
+
+def test_find_by_field_reads_listing_rows():
+    """A label or genre search takes the rows as listed, items first and then the collections
+    carrying it: a full parse would cost one request per match."""
+    elf = make_movie(ratingKey=101, title="Elf", labels=[FakeLabel("Christmas")])
+    heat = make_movie(ratingKey=102, title="Heat", labels=[])
+    xmas = FakeItem(ratingKey=300, type="collection", title="Christmas Movies", labels=[FakeLabel("Christmas")])
+    section = FakeSection(1, "Movies", "movie", items=[elf, heat], collections=[xmas])
+    client = make_client([section])
+    found = client.find_by_field("label", "Christmas", "1")
+    assert [(i.title, i.item_type, i.native) for i in found] == [("Elf", "movie", None), ("Christmas Movies", "collection", None)]
+    assert found[0].provider_ids == client._parse_item(elf).provider_ids != {}
+    assert elf._autoReload is False and xmas._autoReload is False
+    assert [(c["libtype"], c["label"], c["maxresults"]) for c in section.search_calls] == [(None, "Christmas", 500), ("collection", "Christmas", 500)]
+    assert client.server.calls == [] and client.server.fetches == []
+    assert [i.title for i in client.find_by_field("label", "Christmas", "1", include_collections=False)] == ["Elf"]
+    assert client.find_by_field("bogus", "x", "1") == [] and client.find_by_field("label", "Christmas", "nope") == []
+
+
 def test_upload_image_posts_to_the_rating_key(tmp_path):
     client = make_client([])
     poster = tmp_path / "p.png"
@@ -273,6 +360,165 @@ def test_upload_image_posts_to_the_rating_key(tmp_path):
     ]
     assert not client.upload_image(item, "bogus", str(poster))
     assert not client.upload_image(MediaServerItem(item_id="", item_type="movie", title="?"), IMAGE_KIND_POSTER, str(poster))
+
+
+def _listed(item_id, library, item_type="movie"):
+    return MediaServerItem(item_id=str(item_id), item_type=item_type, title=f"Item {item_id}", library_key=f"machine1:/library/sections/{library}")
+
+
+def test_unlock_images_takes_one_edit_per_library_and_item_type():
+    """Plex unlocks the image fields of many items in one library edit. The items are grouped
+    by library and item type, every wanted kind goes in the same request, and the ids of the
+    items that could not be unlocked come back."""
+    client = make_client([FakeSection(1, "Movies", "movie"), FakeSection(2, "TV", "show")])
+    items = [_listed(101, 1), _listed(102, 1), _listed(201, 2, "show"), _listed(211, 2, "season"), _listed(301, 9), _listed(401, 1, "episode"),
+             MediaServerItem(item_id="501", item_type="movie", title="No library")]
+    failed = client.unlock_images(items, [IMAGE_KIND_POSTER, IMAGE_KIND_LOGO])
+    assert failed == {"301", "401", "501"}  # an unknown library, an item type with no edit, no library at all
+    assert client.server.calls == [
+        ("/library/sections/1/all?type=1&id=101%2C102&thumb.locked=0&clearLogo.locked=0", "put", None),
+        ("/library/sections/2/all?type=2&id=201&thumb.locked=0&clearLogo.locked=0", "put", None),
+        ("/library/sections/2/all?type=3&id=211&thumb.locked=0&clearLogo.locked=0", "put", None),
+    ]
+
+    # A long list goes in several requests; one Plex refuses fails just its own ids.
+    client = make_client([FakeSection(1, "Movies", "movie")])
+    client.EDIT_BATCH = 2
+    answer = client.server.query
+
+    def refuse_second(key, method=None, **kwargs):
+        if "id=3%2C4" in key:
+            raise RuntimeError("bad request")
+        return answer(key, method=method, **kwargs)
+
+    client.server.query = refuse_second
+    assert client.unlock_images([_listed(n, 1) for n in range(1, 6)], [IMAGE_KIND_SQUAREART]) == {"3", "4"}
+    assert [key for key, _method, _data in client.server.calls] == [
+        "/library/sections/1/all?type=1&id=1%2C2&squareArt.locked=0", "/library/sections/1/all?type=1&id=5&squareArt.locked=0"]
+
+
+def test_reset_images_selects_plexs_own_image_without_fetching_the_item():
+    """Each kind costs a list of the item's images and one select of the first provider image.
+    A kind with uploads only has its selection deleted, and one refresh follows for all of
+    those. The item itself is never fetched, and one kind failing leaves the others alone."""
+    class Image:
+        def __init__(self, key, picked):
+            self.ratingKey, self._picked = key, picked
+
+        def select(self):
+            self._picked.append(self.ratingKey)
+
+    picked, listed = [], []
+    lists = {
+        "/library/metadata/101/posters": lambda: [Image("upload://posters/abc", picked), Image("metadata://posters/tmdb", picked), Image("metadata://posters/other", picked)],
+        "/library/metadata/101/arts": lambda: [Image("upload://art/def", picked)],
+        "/library/metadata/101/clearLogos": lambda: (_ for _ in ()).throw(RuntimeError("timeout")),
+        "/library/metadata/101/squareArts": lambda: [],
+    }
+
+    def fetch(key, cls=None, **kwargs):
+        listed.append(key)
+        return lists[key]()
+
+    client = make_client([FakeSection(1, "Movies", "movie")])
+    client.server.fetchItems = fetch
+    client.server.fetchItem = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("the item is not fetched"))
+    kinds = [IMAGE_KIND_POSTER, IMAGE_KIND_BACKGROUND, IMAGE_KIND_LOGO, IMAGE_KIND_SQUAREART]
+    done = client.reset_images(_listed(101, 1), kinds, unlocked=True)
+    assert done == {IMAGE_KIND_POSTER: True, IMAGE_KIND_BACKGROUND: True, IMAGE_KIND_LOGO: False, IMAGE_KIND_SQUAREART: True}
+    assert picked == ["metadata://posters/tmdb"] and listed == list(lists)
+    assert client.server.calls == [  # no unlock: the batch did that
+        ("/library/metadata/101/art", "delete", None), ("/library/metadata/101/squareArt", "delete", None), ("/library/metadata/101/refresh", "put", None)]
+
+    # On its own the reset unlocks first, and an item that stays locked is left as it is.
+    client = make_client([FakeSection(1, "Movies", "movie")])
+    client.server.fetchItems = lambda key, cls=None, **kw: [Image("metadata://posters/tmdb", picked)]
+    assert client.reset_image(_listed(102, 1), IMAGE_KIND_POSTER) is True
+    assert client.server.calls == [("/library/sections/1/all?type=1&id=102&thumb.locked=0", "put", None)] and picked[-1] == "metadata://posters/tmdb"
+    assert client.reset_image(_listed(103, 9), IMAGE_KIND_POSTER) is False and len(client.server.calls) == 1
+
+    # A collection refreshes through its own address, as Plex wants it.
+    client = make_client([FakeSection(1, "Movies", "movie")])
+    client.server.fetchItems = lambda key, cls=None, **kw: []
+    assert client.reset_images(_listed(900, 1, "collection"), [IMAGE_KIND_POSTER], unlocked=True) == {IMAGE_KIND_POSTER: True}
+    assert client.server.calls == [("/library/metadata/900/thumb", "delete", None), ("/library/collections/900/refresh", "put", None)]
+
+
+def test_selected_image_key_tells_a_blank_poster_from_no_answer():
+    """Plex listing the item's posters with none selected shows no poster at all: that is an
+    answer, unlike a lookup that fails."""
+    class Image:
+        def __init__(self, key, selected=False):
+            self.ratingKey, self.selected = key, selected
+
+    client = make_client([])
+    item = MediaServerItem(item_id="101", item_type="movie", title="Heat")
+    images = [Image("metadata://posters/agent"), Image("upload://posters/abc", selected=True)]
+    client.server.fetchItems = lambda key, cls=None, **kw: images
+    assert client.selected_image_key(item, IMAGE_KIND_POSTER) == "upload://posters/abc"
+    images[1].selected = False
+    assert client.selected_image_key(item, IMAGE_KIND_POSTER) == NO_IMAGE_SELECTED
+    client.server.fetchItems = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("down"))
+    assert client.selected_image_key(item, IMAGE_KIND_POSTER) == ""
+
+
+def test_shared_copies_asks_each_title_then_lists_every_library_once():
+    """A title in two libraries (Movies and 4K Movies) is two items with ONE bundle folder. A run
+    touching a few titles asks Plex about each, one request per title; past SHARED_LOOKUPS titles
+    every library is listed once instead. An edition has a bundle of its own, a season answers
+    for its show, and a collection is never asked about."""
+    from urllib.parse import unquote
+
+    def where(key, title):
+        return {"librarySectionID": key, "librarySectionKey": f"/library/sections/{key}", "librarySectionTitle": title}
+
+    hd = make_movie(ratingKey=101, guid="plex://movie/heat", editionTitle=None)
+    uhd = make_movie(ratingKey=201, guid="plex://movie/heat", editionTitle=None, **where(2, "4K Movies"))
+    cut = make_movie(ratingKey=202, guid="plex://movie/heat", **where(2, "4K Movies"))  # Director's Cut
+    solo = make_movie(ratingKey=102, title="Thief", guid="plex://movie/thief", editionTitle=None)
+    show = FakeItem(ratingKey=301, type="show", title="Done", guid="plex://show/done", guids=[], **where(3, "TV Shows"))
+    show_4k = FakeItem(ratingKey=401, type="show", title="Done", guid="plex://show/done", guids=[], **where(4, "4K TV"))
+    sections = [FakeSection(1, "Movies", "movie", [hd, solo]), FakeSection(2, "4K Movies", "movie", [uhd, cut]),
+                FakeSection(3, "TV Shows", "show", [show]), FakeSection(4, "4K TV", "show", [show_4k])]
+    client = make_client(sections)
+    asked = []
+
+    def by_guid(key, cls=None, **kwargs):
+        assert key.startswith("/library/all?guid=")
+        guid = unquote(key.split("=", 1)[1])
+        asked.append(guid)
+        return [i for s in sections for i in s.items if i.guid == guid]
+
+    client.server.fetchItems = by_guid
+    parsed = {raw.ratingKey: client._parse_item(raw, bulk=True) for raw in (hd, uhd, cut, solo, show, show_4k)}
+    copies = client.shared_copies(parsed[101])
+    assert sorted(c.item_id for c in copies) == ["101", "201"] and asked == ["plex://movie/heat"]
+    assert client.shared_copies(parsed[201]) == copies and len(asked) == 1  # one request per title
+    assert client.shared_copies(parsed[202]) == [] and client.shared_copies(parsed[102]) == []
+    season = MediaServerItem(item_id="311", item_type="season", title="Season 1", index=1)
+    assert sorted(c.item_id for c in client.shared_copies(season, parsed[301])) == ["301", "401"]
+    collection = MediaServerItem(item_id="9", item_type="collection", title="Heat Collection", guid="collection://heat")
+    assert client.shared_copies(collection) == []
+    assert asked == ["plex://movie/heat", "plex://movie/heat", "plex://movie/thief", "plex://show/done"]
+
+    # A big run: once enough titles were asked about, every library is listed once.
+    client.SHARED_LOOKUPS = 4
+    pages = sum(len(s.search_calls) for s in sections)
+    ronin = MediaServerItem(item_id="103", item_type="movie", title="Ronin", guid="plex://movie/ronin")
+    assert client.shared_copies(ronin) == [] and len(asked) == 4
+    assert sum(len(s.search_calls) for s in sections) == pages + 4  # one page per library
+    assert sorted(c.item_id for c in client.shared_copies(parsed[201])) == ["101", "201"]
+    assert sorted(c.item_id for c in client.shared_copies(season, parsed[401])) == ["301", "401"]
+    assert sum(len(s.search_calls) for s in sections) == pages + 4 and len(asked) == 4
+
+    # Plex not answering: None, so callers leave a bundle that may be shared alone.
+    down = make_client(sections)
+    down.server.fetchItems = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("down"))
+    assert down.shared_copies(parsed[101]) is None
+    down.SHARED_LOOKUPS = 1
+    for section in sections:
+        section.search = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("down"))
+    assert down.shared_copies(parsed[102]) is None and down.shared_copies(parsed[101]) is None
 
 
 def test_remove_label_only_when_present():
@@ -351,3 +597,130 @@ def test_get_library_items_fills_show_paths_in_one_batch():
     # Listings carry no Location for shows; one multi-key metadata request fills them
     assert [c[0] for c in client.server.calls] == ["/library/metadata/400,401,402,499"]
     assert [i.paths for i in items] == [["/tv/Show 0 (2000)"], ["/tv/Show 1 (2000)"], ["/tv/Show 2 (2000)"], []]
+
+
+class FakePoster:
+    def __init__(self, rating_key, thumb, selected=False):
+        self.ratingKey = rating_key
+        self.thumb = thumb
+        self.selected = selected
+        self.selects = 0
+
+    def select(self):
+        self.selects += 1
+
+
+def _poster_client(posters):
+    client = make_client([])
+    served = []
+
+    class Got:
+        def __init__(self, content):
+            self.content = content
+
+        def raise_for_status(self):
+            return None
+
+    client.server.fetchItems = lambda key, cls=None, **kw: list(posters) if key.endswith("/posters") else []
+    client.server.url = lambda path, includeToken=False: f"http://plex.local{path}{'&token' if includeToken else ''}"
+    client.server._session.get = lambda url, timeout=None: (served.append(url), Got(f"image at {url}".encode()))[1]
+    return client, served
+
+
+def test_server_poster_is_a_provider_poster_never_an_upload():
+    item = MediaServerItem(item_id="7", item_type="movie", title="Heat")
+    ours = FakePoster("upload://posters/abc", "/library/metadata/7/file?url=upload", selected=True)
+    first = FakePoster("metadata://posters/tmdb1", "/library/metadata/7/file?url=first")
+    picked = FakePoster("https://image.example/p2.jpg", "/library/metadata/7/file?url=second")
+    client, served = _poster_client([ours, first, picked])
+
+    # Our upload is selected (state lost, or a hand upload): the first provider poster is the source, never the upload.
+    ref, raw = client.server_poster(item)
+    assert ref == "metadata://posters/tmdb1" and raw == b"image at http://plex.local/library/metadata/7/file?url=first&token"
+    # A recorded reference wins while Plex still lists it; a vanished one falls back.
+    assert client.server_poster(item, "https://image.example/p2.jpg")[0] == "https://image.example/p2.jpg"
+    assert client.server_poster(item, "metadata://posters/gone")[0] == "metadata://posters/tmdb1"
+    # Before any upload, the provider poster Plex has selected is the one kept.
+    ours.selected, picked.selected = False, True
+    assert client.server_poster(item)[0] == "https://image.example/p2.jpg"
+    # Nothing but uploads: Plex has no poster of its own to give.
+    client, _ = _poster_client([ours])
+    assert client.server_poster(item) is None
+
+
+def test_restore_server_poster_selects_the_recorded_one_or_resets():
+    unlocked = []
+    native = FakeItem(unlockPoster=lambda: unlocked.append("unlock"))
+    item = MediaServerItem(item_id="7", item_type="movie", title="Heat", native=native)
+    ours = FakePoster("upload://posters/abc", "/x", selected=True)
+    first = FakePoster("metadata://posters/tmdb1", "/a")
+    picked = FakePoster("https://image.example/p2.jpg", "/b")
+    client, _ = _poster_client([ours, first, picked])
+    resets = []
+    client.reset_poster = lambda it: (resets.append(it.item_id), True)[1]
+
+    assert client.restore_server_poster(item, "https://image.example/p2.jpg") is True
+    assert picked.selects == 1 and first.selects == 0 and unlocked == ["unlock"] and resets == []
+    # The recorded poster is gone, or none was recorded: the ordinary reset picks Plex's first provider poster.
+    assert client.restore_server_poster(item, "metadata://posters/gone") is True and resets == ["7"]
+    assert client.restore_server_poster(item) is True and resets == ["7", "7"]
+    assert client.restore_server_poster(item, "upload://posters/abc") is True and ours.selects == 0  # an upload is never restored
+
+
+def _video(rating_key, resolution, file, *, dovi=False, transfer=None, audio=(), parent=None, grandparent=None):
+    row = Element("Video", ratingKey=str(rating_key))
+    if parent:
+        row.set("parentRatingKey", str(parent))
+    if grandparent:
+        row.set("grandparentRatingKey", str(grandparent))
+    part = SubElement(SubElement(row, "Media", videoResolution=resolution), "Part", file=file)
+    video = SubElement(part, "Stream", streamType="1")
+    if dovi:
+        video.set("DOVIPresent", "1")
+    if transfer:
+        video.set("colorTrc", transfer)
+    for title in audio:
+        SubElement(part, "Stream", streamType="2", extendedDisplayTitle=title)
+    return row
+
+
+def test_library_media_lists_every_file_with_its_streams_in_one_listing():
+    movies = FakeSection("1", "Movies", "movie")
+    shows = FakeSection("2", "TV", "show")
+    client = make_client([movies, shows])
+    asked = []
+    rows = {
+        "1": [_video(101, "4k", "/m/Film [DV HDR10].mkv", dovi=True, transfer="smpte2084", audio=["English (TrueHD 7.1)", "Commentary (AAC Stereo)"]),
+              _video(102, "1080", "/m/Other.mkv", transfer="arib-std-b67"), _video(103, "sd", "/m/Old.avi")],
+        "2": [_video(301, "720", "/tv/S01E01.mkv", parent=21, grandparent=20), _video(302, "720", "/tv/S01E02.mkv", parent=21, grandparent=20),
+              _video(303, "4k", "/tv/S02E01.mkv", parent=22, grandparent=20)],
+    }
+
+    def query(path, **kwargs):
+        asked.append(path)
+        section = path.split("/library/sections/")[1].split("/")[0]
+        root = Element("MediaContainer")
+        if "X-Plex-Container-Start=0&" in path:
+            root.extend(rows[section])
+        return root
+
+    client.server.query = query
+    media = client.library_media("machine1:/library/sections/1")
+    assert asked == ["/library/sections/1/all?type=1&includeElements=Stream&X-Plex-Container-Start=0&X-Plex-Container-Size=500"]  # one request, streams included
+    assert media["101"] == [{"resolution": "4k", "hdr": True, "dovi": True, "path": "/m/Film [DV HDR10].mkv", "audio_titles": ["English (TrueHD 7.1)", "Commentary (AAC Stereo)"]}]
+    assert (media["102"][0]["hdr"], media["102"][0]["dovi"]) == (True, False)   # HLG counts as HDR, as Plex's own HDR filter does
+    assert (media["103"][0]["resolution"], media["103"][0]["hdr"], media["103"][0]["audio_titles"]) == ("sd", False, [])
+    # Episodes are grouped under their show and under their season.
+    tv = client.library_media("2")
+    assert "type=4&includeElements=Stream" in asked[-1]
+    assert [f["path"] for f in tv["20"]] == ["/tv/S01E01.mkv", "/tv/S01E02.mkv", "/tv/S02E01.mkv"]
+    assert [f["path"] for f in tv["21"]] == ["/tv/S01E01.mkv", "/tv/S01E02.mkv"] and [f["resolution"] for f in tv["22"]] == ["4k"]
+    assert client.library_media("nope") == {}
+
+    # One item at a time (an upload): the movie itself, a show's leaves, a season's children.
+    asked.clear()
+    client.server.query = lambda path, **kwargs: (asked.append(path), Element("MediaContainer"))[1]
+    for item_type, expected in (("movie", "/library/metadata/7?X-Plex"), ("show", "/library/metadata/7/allLeaves?includeElements=Stream&X-Plex"), ("season", "/library/metadata/7/children?includeElements=Stream&X-Plex")):
+        assert client.item_media(MediaServerItem(item_id="7", item_type=item_type, title="X")) == [] and asked[-1].startswith(expected)
+    assert client.item_media(MediaServerItem(item_id="7", item_type="collection", title="X")) == []
+

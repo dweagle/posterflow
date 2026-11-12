@@ -30,7 +30,7 @@ from util.data.construct import (
 )
 from util.data.normalization import normalize_titles
 from util.media_server.instances import instance_label, instance_type, thumb_proxy_url
-from util.media_server.types import CAP_PER_LIBRARY_COLLECTIONS
+from util.media_server.types import CAP_PER_LIBRARY_COLLECTIONS, IDLESS_DETAIL_LIMIT, idless_item_label
 from util.poster_settings import media_server_media_source_enabled
 from util.posters.assets import get_assets_files, merge_assets
 from util.posters.index import build_search_index, create_new_empty_index
@@ -892,7 +892,8 @@ class PosterRenameService:
 
         library_roots = {norm_path(loc) for loc in (getattr(library, "locations", None) or []) if loc}
 
-        count = no_ids = 0
+        count = 0
+        idless: List[Any] = []
         for item in items:
             title = unidecode(html.unescape(item.title))
             if not title:
@@ -955,14 +956,23 @@ class PosterRenameService:
                 entry["has_episodes"] = bool(seasons)
             media_dict[media_type].append(entry)
             count += 1
-            no_ids += not any(entry.get(k) for k in ("tmdb_id", "tvdb_id", "imdb_id", "tmdb_id_ref"))
-        if no_ids:
+            if not any(entry.get(k) for k in ("tmdb_id", "tvdb_id", "imdb_id", "tmdb_id_ref")):
+                idless.append(item)
+        if idless:
             log_warning(
                 log_tag,
-                f"{no_ids} of {count} {media_type} in '{library.title}' ({instance_name}) carry no TMDB/TVDB/IMDb id "
-                "(legacy metadata agent?) — they can only merge with other sources and match posters by title and year",
-                instance=instance_name, library=str(library.title), no_ids=no_ids, items=count,
+                f"{len(idless)} of {count} {media_type} in '{library.title}' ({instance_name}) carry no TMDB/TVDB/IMDb id "
+                "— they can only merge with other sources and match posters by title and year",
+                instance=instance_name, library=str(library.title), no_ids=len(idless), items=count,
             )
+            for index, item in enumerate(idless):
+                log = log_warning if index < IDLESS_DETAIL_LIMIT else log_debug
+                log(log_tag, f"    {idless_item_label(item)}", media_title=item.title)
+            if len(idless) > IDLESS_DETAIL_LIMIT:
+                log_warning(
+                    log_tag,
+                    f"    ... and {len(idless) - IDLESS_DETAIL_LIMIT} more (enable debug logging for the full list)",
+                )
         return count
 
     @staticmethod

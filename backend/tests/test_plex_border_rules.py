@@ -1,5 +1,7 @@
+import itertools
 import json
 from pathlib import Path
+from xml.etree.ElementTree import Element
 
 from PIL import Image
 
@@ -178,11 +180,14 @@ class _FakeItem:
 
 
 class _FakeCollection:
+    _keys = itertools.count(900)
+
     def __init__(self, title, items):
         self.title = title
         self.type = "collection"
         self.year = None
         self.guids = []
+        self.ratingKey = next(self._keys)
         self._items = items
 
     def items(self):
@@ -200,6 +205,8 @@ class _FakeSection:
         self._collection_results = collection_results or {}
 
     def search(self, **kwargs):
+        # one page holds every row; the paging arguments of a listing are not modelled
+        kwargs = {k: v for k, v in kwargs.items() if k not in ("includeGuids", "container_start", "container_size", "maxresults")}
         if kwargs.get("libtype") == "collection":
             rest = {k: v for k, v in kwargs.items() if k != "libtype"}
             if not rest:
@@ -224,6 +231,14 @@ class _FakePlexServer:
 
     def __init__(self, url, token):
         self.library = _FakeLibrary(_FakePlexServer.instances[url])
+
+    def query(self, key, *args, **kwargs):
+        return Element("MediaContainer")
+
+    def fetchItems(self, key, cls=None, **kwargs):
+        # A listed collection keeps no object: its members are listed by its id.
+        wanted = int(key.split("/library/collections/")[1].split("/")[0])
+        return next(c for s in self.library.sections() for c in s._collections if c.ratingKey == wanted).items()
 
 
 def _patch_plex(monkeypatch, sections_by_url):
@@ -272,6 +287,26 @@ def test_build_plex_matcher_collection(test_db, monkeypatch):
 
     matcher = build_plex_matcher(test_db, "manual")
     assert matcher.resolve("Iron Man (2008)") is not None
+
+
+def test_a_collection_rule_fails_closed_when_the_members_cannot_be_listed(test_db, monkeypatch):
+    """No answer about a collection's members is not an empty collection: an 'except' rule
+    would otherwise border the whole library."""
+    section = _FakeSection("1", "movie", results={}, collections=[_FakeCollection("Marvel", [_FakeItem("Iron Man", year=2008)])])
+    _patch_plex(monkeypatch, {"http://plex": [section]})
+
+    def down(self, key, cls=None, **kwargs):
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(_FakePlexServer, "fetchItems", down)
+    test_db.add(Setting(key="plex_instances", value=json.dumps([{"name": "Main", "url": "http://plex", "api_key": "token"}])))
+    test_db.add(Setting(key="border_replacer_rule_run_types", value="manual"))
+    test_db.add(Setting(key="border_replacer_rule_libraries", value=json.dumps(["Main:1"])))
+    test_db.add(Setting(key="border_replacer_plex_rules", value=json.dumps([
+        {"match": "collection", "value": "Marvel", "mode": "except", "colors": ["#00ff00"]},
+    ])))
+    test_db.commit()
+    assert build_plex_matcher(test_db, "manual") is None
 
 
 def test_item_match_keys_collection_is_yearless_movie():

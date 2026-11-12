@@ -1332,6 +1332,18 @@ def test_an_active_holiday_uses_its_own_border_width(test_db, tmp_path, style, r
         assert not _band_reaches(placed, 80, (255, 0, 0))
 
 
+def test_the_overlay_preview_shows_an_active_holidays_own_border_width(test_db):
+    from api.overlays import _apply_saved_borders
+
+    test_db.add(Setting(key="border_replacer_colors", value=json.dumps(["#0000FF"])))
+    test_db.add(Setting(key="border_replacer_holidays", value=json.dumps([
+        {"name": "Always On", "schedule": "range(01/01-12/31)", "colors": ["#FF0000"], "style": {"style": "solid", "band_width": 60}},
+    ])))
+    test_db.commit()
+    out = _apply_saved_borders(test_db, Image.new("RGB", (1000, 1500), (255, 255, 255))).convert("RGB")
+    assert out.getpixel((40, 750)) == (255, 0, 0) and out.getpixel((80, 750)) != (255, 0, 0)
+
+
 def test_an_own_border_width_is_part_of_what_makes_a_poster_due_again(test_db):
     """Setting or changing the width reprocesses; a style without one hashes as it always did."""
     from services.border_replacer import build_holiday_style_opts

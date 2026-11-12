@@ -219,6 +219,7 @@ function ScheduleEditModal({
               <option value="poster_renamer">Asset Renamer</option>
               <option value="unmatched_assets">Unmatched Assets</option>
               <option value="border_replacer">Border Replacer</option>
+              <option value="overlays">Overlays</option>
               <option value="idarr">IDarr</option>
               <option value="maker_monitor">Maker Monitor</option>
               <option value="backup">Backup</option>

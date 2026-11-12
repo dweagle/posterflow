@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal, CircleStop, UploadCloud } from 'lucide-react'
+import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal, CircleStop, UploadCloud, Stamp } from 'lucide-react'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { formatJobType, getMakerIdarrConfig, cancelJob, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
@@ -43,6 +43,7 @@ const NAV_ITEM_DEFS: NavItemDef[] = [
   { id: 'drives', label: 'GDrives', to: '/drives', iconColor: '#4285F4', badge: 'drives' },
   { id: 'poster-search', label: 'Asset Search', to: '/asset-search', iconColor: '#64b5f6' },
   { id: 'plex-upload', label: 'Asset Upload', to: '/plex-upload', iconColor: '#e5a00d' },
+  { id: 'overlays', label: 'Overlays', to: '/overlays', iconColor: '#f06292' },
   { id: 'community-requests', label: 'Requests', to: '/community-requests', iconColor: '#64b5f6', badge: 'community' },
   { id: 'idarr', label: 'IDarr', to: '/IDarr', iconColor: '#66bb6a', badge: 'idarr', isIdarr: true },
   { id: 'maker-tools', label: 'Maker Tools', to: '/maker-tools', iconColor: '#64b5f6', badge: 'maker-monitor' },
@@ -102,6 +103,7 @@ function getNavIcon(id: string, color: string, size = 20) {
     case 'drives': return <HardDriveDownload size={size} color={color} />
     case 'poster-search': return <Search size={size} color={color} />
     case 'plex-upload': return <UploadCloud size={size} color={color} />
+    case 'overlays': return <Stamp size={size} color={color} />
     case 'community-requests': return <Globe size={size} color={color} />
     case 'idarr': return <Fingerprint size={size} color={color} />
     case 'maker-tools': return <Wrench size={size} color={color} />

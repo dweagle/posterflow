@@ -16,7 +16,7 @@ from datetime import datetime
 from database import get_db
 from core.config import settings as app_settings
 from core.logging import LogTags, log_info, log_success, log_error, log_warning, log_user_action
-from services.backup import (
+from services.backup import (CONFIG_FOLDERS, 
     UnsupportedDatabaseBackup,
     build_backup_zip,
     is_sqlite_database,
@@ -163,6 +163,19 @@ async def restore_backup(confirm: bool = False, file: UploadFile = File(...)) ->
                     shutil.copy(target, safety_path)
                 shutil.copy(extracted, target)
                 log_success(LogTags.BACKUP, f"{label} restored successfully")
+
+            # Config folders (the custom overlay badge images): the live folder is kept as a
+            # safety copy, then the backup's files are laid over it.
+            for name in CONFIG_FOLDERS:
+                extracted_dir = temp_path / name
+                restored_files[name] = extracted_dir.is_dir()
+                if not extracted_dir.is_dir():
+                    continue
+                target_dir = CONFIG_DIR / name
+                if target_dir.is_dir():
+                    shutil.copytree(target_dir, safety_backup_dir / f"{name}{backup_suffix}")
+                shutil.copytree(extracted_dir, target_dir, dirs_exist_ok=True)
+                log_success(LogTags.BACKUP, f"{name}/ restored successfully ({sum(1 for p in extracted_dir.rglob('*') if p.is_file())} file(s))")
 
             log_user_action(
                 "Backup restore completed",

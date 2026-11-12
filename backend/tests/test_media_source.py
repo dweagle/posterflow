@@ -221,11 +221,28 @@ def test_fetch_warns_once_per_library_about_idless_items(test_db, monkeypatch):
     captured = []
     monkeypatch.setattr(pr, "log_warning", lambda tag, msg, **kw: captured.append(msg))
     run_fetch(test_db, monkeypatch, default_sections())
-    # "No Guid Film" is the one Movies entry without any id.
-    assert [m for m in captured if "carry no TMDB/TVDB/IMDb id" in m] == [
-        "1 of 6 movies in 'Movies' (Plex) carry no TMDB/TVDB/IMDb id (legacy metadata agent?) — they can only "
+    # "No Guid Film" is the one Movies entry without any id; the header names it on the next line.
+    headers = [i for i, m in enumerate(captured) if "carry no TMDB/TVDB/IMDb id" in m]
+    assert [captured[i] for i in headers] == [
+        "1 of 6 movies in 'Movies' (Plex) carry no TMDB/TVDB/IMDb id — they can only "
         "merge with other sources and match posters by title and year"
     ]
+    assert captured[headers[0] + 1] == "    No Guid Film (2001)"
+
+
+def test_idless_item_label_says_why_from_the_guid():
+    from util.media_server.types import MediaServerItem, idless_item_label
+
+    def label(guid, year=2026):
+        return idless_item_label(MediaServerItem(item_id="1", item_type="movie", title="Film", year=year, guid=guid))
+
+    assert label("local://138879") == "Film (2026) — not matched in Plex (local://138879)"
+    assert label("plex://movie/6328b12f") == (
+        "Film (2026) — matched in Plex without a TMDB/TVDB/IMDb id (plex://movie/6328b12f)"
+    )
+    assert label("com.plexapp.agents.none://abc") == "Film (2026) — legacy agent guid com.plexapp.agents.none://abc"
+    assert label(None) == "Film (2026)"
+    assert label(None, year=None) == "Film"
 
 
 def test_dedupe_names_the_idless_twin_it_could_not_merge(test_db, monkeypatch):

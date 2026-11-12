@@ -18,6 +18,8 @@ DEFAULT_RETENTION = 7
 
 # Config files bundled alongside the database snapshot
 CONFIG_FILES = ("rclone.conf", "drives_cache.json", "artwork_drives_cache.json")
+# Config folders bundled whole: the custom overlay badge images (config/overlays/<type>/<set>/*.png)
+CONFIG_FOLDERS = ("overlays",)
 
 
 class UnsupportedDatabaseBackup(NotImplementedError):
@@ -114,6 +116,14 @@ def build_backup_zip(dest_dir: Path) -> Path:
                     if source.exists():
                         zipf.write(source, name)
                         log_info(LogTags.BACKUP, f"Added {name} to backup")
+
+                for name in CONFIG_FOLDERS:
+                    folder = app_settings.config_dir / name
+                    files = sorted(p for p in folder.rglob("*") if p.is_file()) if folder.is_dir() else []
+                    for path in files:
+                        zipf.write(path, f"{name}/{path.relative_to(folder).as_posix()}")
+                    if files:
+                        log_info(LogTags.BACKUP, f"Added {name}/ ({len(files)} file(s)) to backup")
 
                 zipf.writestr("metadata.json", json.dumps(metadata, indent=2))
         except Exception:

@@ -1245,6 +1245,10 @@ def test_any_upload_on_plex_stands_only_a_provider_image_is_a_loss(test_db, tmp_
     selected["key"] = ""
     item.thumb_path = ""
     assert service()._upload_asset(asset, index, dry_run=False)[0] == 0  # Plex could not say: left alone
+    from util.media_server.plex import NO_IMAGE_SELECTED
+
+    selected["key"] = NO_IMAGE_SELECTED
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1  # Plex shows no poster at all: up again
 
 
 def test_plex_locks_are_fetched_in_one_batch_per_library(test_db, tmp_path, monkeypatch):
@@ -1289,6 +1293,36 @@ class _JellyfinLikeClient:
 
     def supports(self, capability):
         return capability in self.capabilities
+
+
+def test_upload_asset_tallies_each_server_on_its_own(test_db, monkeypatch):
+    """One poster matched on Plex and on Jellyfin: the run's stats say what each server got."""
+    from plex_upload_fakes import _WRAP_CLIENT
+    from util.media_server.types import MediaServerItem
+
+    service = PlexUploadService(test_db)
+    monkeypatch.setattr(_WRAP_CLIENT, "instance_name", "Plex")
+    plex = _SimplePlex("movie", "Aliens", key="100")
+    jellyfin = MediaServerItem(
+        item_id="j1", item_type="movie", title="Aliens", year=1986,
+        library_key="jf1:lib1", library_name="Movies",
+        paths=["/movies/Aliens (1986)/Aliens.mkv"], client=_JellyfinLikeClient(),
+    )
+    movies_marker = object()
+    index = {"movies": movies_marker, "shows": {}, "collections": {}}
+    monkeypatch.setattr(service, "_resolve_target_media_type", lambda *a, **k: ("movie", "id-match"))
+    monkeypatch.setattr(service, "_asset_has_arr_availability", lambda *a, **k: (True, None))
+    monkeypatch.setattr(service, "_resolve_index_candidates", lambda sub, *a, **k: [plex, jellyfin] if sub is movies_marker else [])
+    asset = {"media_key": "aliens", "path": "/x/aliens.jpg", "asset_type": "main", "display_name": "Aliens", "folder_year": 1986}
+
+    stats = service._build_run_stats([asset], {})
+    uploaded, matched, *_ = service._upload_asset(asset, index, dry_run=True)
+    assert matched is True and uploaded == 2
+    assert stats["by_instance"] == {
+        "Plex": {"type": "plex", "posters_uploaded": 1, "posters_current": 0, "artwork_uploaded": 0, "artwork_current": 0},
+        "J": {"type": "jellyfin", "posters_uploaded": 1, "posters_current": 0, "artwork_uploaded": 0, "artwork_current": 0},
+    }
+    assert service._build_run_stats([asset], {})["by_instance"] == {}  # a new run starts its tally over
 
 
 def test_upload_asset_does_not_hold_a_jellyfin_item_for_an_edition(test_db, monkeypatch):
@@ -1367,3 +1401,160 @@ def test_clear_upload_cache_for_target_covers_artwork(test_db, tmp_path):
 
     assert removed == 2
     assert test_db.query(PlexUploadRecord).count() == 0
+
+
+def _season_index(show_key: str, season_key: str) -> dict:
+    """One show with one season on a single Plex-like server; ids are what the test says."""
+    show = _FakePlexItem("show", "Chicago Fire", 2012, "TV Shows", section_id=1, server_id="plex-a", rating_key=show_key)
+    season = _FakePlexItem("season", "Season 1", None, "TV Shows", section_id=1, server_id="plex-a", rating_key=season_key)
+    season.index = 1
+    season.parentRatingKey = show_key
+    season.parentTitle = "Chicago Fire"
+    show.seasons = lambda: [season]
+    return {"movies": {}, "shows": {"chicagofire": [show]}, "collections": {}}
+
+
+def _seed_season_record(test_db, file_path, *, rating_keys):
+    test_db.add(PlexUploadRecord(
+        file_path=str(file_path),
+        file_hash=None,
+        uploaded_to_libraries=json.dumps(["TV Shows"]),
+        uploaded_to_library_keys=json.dumps(["plex-a:1"]),
+        uploaded_to_rating_keys=json.dumps(rating_keys),
+        uploaded_editions=json.dumps([]),
+        uploaded_media_types=json.dumps(["seasons"]),
+    ))
+    test_db.commit()
+
+
+def _season_asset(file_path):
+    return {"media_key": "chicagofire", "path": str(file_path), "display_name": "Chicago Fire", "asset_type": "season", "season_number": 1, "folder_year": 2012}
+
+
+def test_readded_season_under_unchanged_show_is_reuploaded_once_its_id_is_known(test_db, tmp_path):
+    """Jellyfin keys items by folder path, so a renamed season folder is a new season under the
+    same show. Season ids are recorded beside the show's; the first sight is the baseline."""
+    file_path = tmp_path / "Chicago Fire (2012)" / "Season01.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"poster")
+    asset = _season_asset(file_path)
+    _seed_season_record(test_db, file_path, rating_keys=["rk-SHOW"])  # legacy record: show id only
+
+    record = lambda: json.loads(test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).one().uploaded_to_rating_keys)  # noqa: E731
+    uploaded, matched, *_rest = PlexUploadService(test_db)._upload_asset(asset, _season_index("rk-SHOW", "s-OLD"), dry_run=False, media_type_filter="series")
+    assert (uploaded, matched) == (0, True) and record() == ["rk-SHOW", "season:rk-SHOW:s-OLD"]  # baseline: backfilled, not re-sent
+
+    uploaded, matched, *_rest = PlexUploadService(test_db)._upload_asset(asset, _season_index("rk-SHOW", "s-NEW"), dry_run=False, media_type_filter="series")
+    assert (uploaded, matched) == (1, True) and "season:rk-SHOW:s-NEW" in record()  # same show, new season id: re-applied
+
+    assert PlexUploadService(test_db)._upload_asset(asset, _season_index("rk-SHOW", "s-NEW"), dry_run=False, media_type_filter="series")[0] == 0
+
+
+def test_webhook_cache_gate_sees_a_readded_season(test_db, tmp_path):
+    file_path = tmp_path / "Chicago Fire (2012)" / "Season01.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"poster")
+    asset = _season_asset(file_path)
+    _seed_season_record(test_db, file_path, rating_keys=["rk-SHOW", "season:rk-SHOW:s-OLD"])
+    availability = {"movies": {}, "shows": {}}
+
+    service = PlexUploadService(test_db)
+    assert service._is_asset_fully_cached_for_targets(asset, index=_season_index("rk-SHOW", "s-NEW"), media_type_filter="series", arr_availability=availability) is False
+    assert service._single_target_reason == "season_re_added"
+    # A fresh service (one per webhook job) with the known season id: cached.
+    assert PlexUploadService(test_db)._is_asset_fully_cached_for_targets(asset, index=_season_index("rk-SHOW", "s-OLD"), media_type_filter="series", arr_availability=availability) is True
+
+
+def test_webhook_cache_gate_needs_no_baseline_for_a_readded_season(test_db, tmp_path):
+    """Unlike a full run, a webhook event for a season is itself the evidence it was (re-)added:
+    a record that knows the show but not this season's id is not cached, so the job clears the
+    season's record and sends the poster again."""
+    file_path = tmp_path / "Chicago Fire (2012)" / "Season01.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"poster")
+    asset = _season_asset(file_path)
+    _seed_season_record(test_db, file_path, rating_keys=["rk-SHOW"])  # legacy record: show id only
+    availability = {"movies": {}, "shows": {}}
+
+    service = PlexUploadService(test_db)
+    assert service._is_asset_fully_cached_for_targets(asset, index=_season_index("rk-SHOW", "s-NEW"), media_type_filter="series", arr_availability=availability) is False
+    assert service._single_target_reason == "season_re_added"
+    # The job then clears that season's record and the upload pass re-sends it.
+    service._get_destination_dir = lambda: tmp_path
+    service._get_local_assets = lambda *a, **k: [asset]
+    assert service.clear_upload_cache_for_target(media_type="series", title="Chicago Fire", year=2012, season_number=1) == 1
+    assert PlexUploadService(test_db)._upload_asset(asset, _season_index("rk-SHOW", "s-NEW"), dry_run=False, media_type_filter="series")[0] == 1
+    keys = json.loads(test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).one().uploaded_to_rating_keys)
+    assert keys == ["rk-SHOW", "season:rk-SHOW:s-NEW"]
+
+
+def test_forget_uploads_drops_only_the_reset_libraries_and_kinds(test_db):
+    """A reset on some libraries forgets those libraries for the reset kinds only; a record with
+    nowhere left goes, and a legacy names-only record goes since it cannot say which server."""
+    def record(path, keys, names=("Movies",)):
+        test_db.add(PlexUploadRecord(file_path=path, uploaded_to_libraries=json.dumps(list(names)), uploaded_to_library_keys=json.dumps(keys),
+                                     uploaded_to_rating_keys="[]", uploaded_editions="[]", uploaded_media_types=json.dumps(["movies"])))
+    record("/a/Heat (1995)/poster.jpg", ["plex-a:1", "jf-1:9"])
+    record("/a/Heat (1995)/logo.png", ["plex-a:1"])
+    record("/a/Heat (1995)/background.jpg", ["plex-a:1", "jf-1:9"])
+    record("/a/Old (1990)/poster.jpg", [])  # legacy: names only
+    record("/a/Other (2000)/poster.jpg", ["plex-b:1"])
+    test_db.commit()
+    keys = lambda path: (lambda r: json.loads(r.uploaded_to_library_keys) if r else None)(test_db.query(PlexUploadRecord).filter_by(file_path=path).first())  # noqa: E731
+
+    assert PlexUploadService(test_db).forget_uploads({"plex-a:1"}, ["poster", "background"]) == 3
+    assert keys("/a/Heat (1995)/poster.jpg") == ["jf-1:9"] and keys("/a/Heat (1995)/background.jpg") == ["jf-1:9"]
+    assert keys("/a/Heat (1995)/logo.png") == ["plex-a:1"]  # logos were not reset
+    assert keys("/a/Old (1990)/poster.jpg") is None and keys("/a/Other (2000)/poster.jpg") == ["plex-b:1"]
+    assert PlexUploadService(test_db).forget_uploads({"plex-a:1"}, ["logo"]) == 1 and keys("/a/Heat (1995)/logo.png") is None
+    assert PlexUploadService(test_db).forget_uploads(set(), ["poster"]) == 0
+
+
+def test_cached_poster_is_reuploaded_when_its_overlay_badge_changes(test_db, tmp_path, monkeypatch):
+    """Badges ride on Asset Upload: a poster the cache would skip still goes up again when its
+    badge changed (overlays switched on, a badge that no longer applies), badged or plain."""
+    from PIL import Image
+
+    from models.overlay import OverlayItem
+    from models.setting import upsert_setting
+    from services.overlays.config import save_config
+    from plex_upload_fakes import _WRAP_CLIENT, uploads
+
+    poster = tmp_path / "The Matrix (1999)" / "poster.jpg"
+    poster.parent.mkdir()
+    Image.new("RGB", (1000, 1500), (90, 90, 90)).save(poster, format="JPEG", quality=95)
+    upsert_setting(test_db, "plex_instances", json.dumps([{"name": "Plex", "url": "http://fake-wrap", "api_key": "token", "type": "plex"}]))
+    upsert_setting(test_db, "plex_library_config", json.dumps([{"instance_name": "Plex", "libraries": [{"key": "1", "title": "Movies", "type": "movie", "enabled": True}]}]))
+    test_db.commit()
+    monkeypatch.setattr(_WRAP_CLIENT, "instance_name", "Plex")
+
+    item = _SimplePlex("movie", "The Matrix", key="100")
+    item.ratings = {"audience": 8.4}
+    movies_marker = object()
+    index = {"movies": movies_marker, "shows": {}, "collections": {}}
+
+    def service():
+        svc = PlexUploadService(test_db)  # a new run builds its own overlay engine
+        monkeypatch.setattr(svc, "_resolve_target_media_type", lambda *a, **k: ("movie", "id-match"))
+        monkeypatch.setattr(svc, "_asset_has_arr_availability", lambda *a, **k: (True, None))
+        monkeypatch.setattr(svc, "_resolve_index_candidates", lambda sub, *a, **k: [item] if sub is movies_marker else [])
+        return svc
+
+    asset = {"media_key": "matrix", "path": str(poster), "asset_type": "main", "display_name": "The Matrix", "folder_year": 1999}
+    before = len(uploads("100"))
+    # Overlays off: a plain upload, then a cached skip.
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0
+    assert len(uploads("100")) == before + 1 and uploads("100")[-1][2] == poster.read_bytes()
+    # Overlays on with a rating badge: the cached poster's badge is stale → up again, badged.
+    save_config(test_db, {"enabled": True, "types": {"rating": {"enabled": True}}})
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    assert uploads("100")[-1][2] != poster.read_bytes()
+    row = test_db.query(OverlayItem).filter_by(instance="Plex", item_id="100").one()
+    assert row.sig.startswith("rating:") and row.source_path == str(poster)
+    # Current now: skipped again.
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0
+    # Overlays off again: the badge must come off → the plain file goes up and the record is dropped.
+    save_config(test_db, {"enabled": False, "types": {"rating": {"enabled": True}}})
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    assert uploads("100")[-1][2] == poster.read_bytes() and test_db.query(OverlayItem).count() == 0

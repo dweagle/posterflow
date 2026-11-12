@@ -50,6 +50,7 @@ from modules.upload import run_plex_upload_background_job
 from modules.idarr import run_idarr_workflow_step
 from services.notifications import send_notification, send_workflow_summary, send_major_error_notification
 from core.hooks import run_post_job_hook, HOOK_KEY_WORKFLOW
+from services.overlays.config import load_config as load_overlays_config, overlays_active
 
 
 def _create_child_job(db: Any, job_type: str, message: str) -> Job:
@@ -732,9 +733,11 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
 
         # ── Plex Upload ───────────────────────────────────────────────────────
         if flow_config.get("plex_upload", {}).get("enabled", False):
+            badging = overlays_active(load_overlays_config(db))  # posters go up badged while overlays are on
+            upload_label = "Asset upload" + (" + overlays" if badging else "")
             step += 1
-            log_step(LogTags.WORKFLOW, step, total_steps, "Uploading posters to media servers")
-            update_job_state(db, job, progress=78, message=format_workflow_step(step, total_steps, "Uploading posters to media servers..."))
+            log_step(LogTags.WORKFLOW, step, total_steps, f"Uploading posters{' with overlays' if badging else ''} to media servers")
+            update_job_state(db, job, progress=78, message=format_workflow_step(step, total_steps, f"Uploading posters{' with overlays' if badging else ''} to media servers..."))
 
             plex_child = _create_child_job(db, JOB_TYPE_PLEX_UPLOAD, "Workflow requested asset upload")
             try:
@@ -751,7 +754,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     plex_child.id,
                     78,
                     90,
-                    format_workflow_step(step, total_steps, "Uploading posters to media servers..."),
+                    format_workflow_step(step, total_steps, f"Uploading posters{' with overlays' if badging else ''} to media servers..."),
                     run_plex_upload_background_job,
                     False,   # dry_run
                     False,   # reapply
@@ -783,14 +786,14 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     "child_job_id": plex_child.id,
                     "embed_spec": {
                         "event_type": "success",
-                        "title": "Asset Upload",
+                        "title": "Asset Upload" + (" + Overlays" if badging else ""),
                         **_pu_embed,
                     },
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: asset upload finished", child_job_id=plex_child.id)
-                    update_job_state(db, job, progress=90, message=format_workflow_step_complete(step, total_steps, "Asset upload finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: {upload_label.lower()} finished", child_job_id=plex_child.id)
+                    update_job_state(db, job, progress=90, message=format_workflow_step_complete(step, total_steps, f"{upload_label} finished"))
                 else:
                     raise Exception(child_message or "Asset upload step failed")
 

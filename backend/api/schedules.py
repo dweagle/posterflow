@@ -22,6 +22,7 @@ VALID_JOB_TYPES = {
     "poster_renamer",
     "unmatched_assets",
     "border_replacer",
+    "overlays",  # re-render posters whose overlay badge changed (air dates, status)
     "idarr",
     "maker_monitor",
     "backup",  # configuration backup zip to the configured backup location

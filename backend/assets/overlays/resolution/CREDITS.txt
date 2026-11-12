@@ -1,0 +1,9 @@
+color/: Kometa's default overlay images (github.com/Kometa-Team/Kometa, defaults/overlays/images),
+created by Yozora, Bullmoose20 and Sohjiro with base images by Magic815. Each is cropped to its art; the app's
+backdrop box (26 px of padding, 305 px minimum width) stands in for Kometa's 305 x 105 box.
+
+white/: the same images with every pixel made white (the transparency is kept).
+
+lettering/: from jmxd's Media Info overlay pack for Kometa (jmxd-overlays, https://buymeacoffee.com/jmxd): the pack's
+marks cropped to the lettering, joined with its own dot and spacing. Badges the pack has no mark for are set in the
+pack's font (Avenir Next LT Pro Bold) or cut from its marks.

@@ -3,9 +3,12 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from itertools import groupby
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
@@ -23,6 +26,7 @@ from util.constants import POSTER_ID_PATTERN
 from util.data.normalization import normalize_titles
 from util.media_server.client import MediaServerClient, create_media_server_client
 from util.media_server.instances import instance_type, server_label, server_type_label
+from util.media_server.plex import bundle_identity
 from util.media_server.types import (
     CAP_EDITIONS,
     CAP_PER_LIBRARY_COLLECTIONS,
@@ -31,7 +35,9 @@ from util.media_server.types import (
     IMAGE_KIND_LOGO,
     IMAGE_KIND_POSTER,
     IMAGE_KIND_SQUAREART,
+    IDLESS_DETAIL_LIMIT,
     MediaServerItem,
+    idless_item_label,
 )
 from util.posters.match import collection_title_variants
 from util.posters.scanner import artwork_type_of, artwork_flat_base
@@ -149,6 +155,9 @@ class AssetOutcome(NamedTuple):
     skip_reason: Optional[str] = None
 
 
+_UNSET = object()
+
+
 class PlexUploadService:
     """Upload organized poster assets to Plex libraries."""
 
@@ -170,11 +179,21 @@ class PlexUploadService:
     ERROR_INDEX_BUILD_FAILED = "Unable to build media server index from configured instances/libraries."
     MESSAGE_NO_POSTER_ASSETS = "No poster assets found to upload."
     REASON_COLLECTION_SHADOWED = "collection_shadowed"
+    # Assets of a full run handled at once. Their upload logic takes turns; what overlaps is
+    # the wait on the media server and the drawing of a badge.
+    UPLOAD_WORKERS = 4
 
     def __init__(self, db: Session, upload_delay_ms: int = 50) -> None:
         self.db = db
         self.upload_delay_ms = max(0, upload_delay_ms)
+        self._turn = threading.Condition(threading.Lock())  # held by the one worker running upload logic
+        self._has_turn = threading.local()
+        self._in_flight: Set[Tuple[str, Any, Any]] = set()  # titles with an upload under way
+        self._pace_lock = threading.Lock()
+        self._next_upload_at = 0.0
         self._record_cache: Dict[str, Optional[Dict[str, Any]]] = {}  # per-run in-memory cache of DB records
+        self._overlay_hook: Any = _UNSET  # the overlay engine for this run, built on first poster upload
+        self._by_instance: Dict[str, Dict[str, Any]] = {}  # per media server: posters/artwork uploaded or already current this run
         self._server_posters: Optional[Dict[str, Dict[str, Any]]] = None  # what we last put on each Jellyfin item, loaded on first use
         self._server_posters_pending = 0  # ledger rows flushed but not yet committed (committed in batches)
         self._season_libraries_loaded: Set[str] = set()  # libraries whose seasons were listed in one request
@@ -204,6 +223,7 @@ class PlexUploadService:
         # Server(s) still missing the expected edition this run; the webhook waits on them
         self._edition_pending_on: str = ""
         self._series_show_poster_status: Optional[str] = None
+        self._single_target_reason: Optional[str] = None  # why is_single_target_fully_cached said no ("season_re_added")
         self._logged_missing_show_keys: set[str] = set()
         self._logged_unverified_season_keys: set[str] = set()
         self._quiet_unmatched_logging: bool = False
@@ -343,8 +363,8 @@ class PlexUploadService:
             "collections": 0,
         }
 
-    @staticmethod
-    def _base_result_stats(scanned: int = 0) -> Dict[str, Any]:
+    def _base_result_stats(self, scanned: int = 0) -> Dict[str, Any]:
+        self._by_instance = {}  # a fresh per-server tally for this run; the stats carry the same dict
         return {
             "scanned": scanned,
             "matched": 0,
@@ -360,6 +380,7 @@ class PlexUploadService:
             "uploaded_files": 0,
             "already_current": 0,
             "awaiting_plex": 0,
+            "by_instance": self._by_instance,
         }
 
     def _no_assets_result(self, message: str) -> Dict[str, Any]:
@@ -427,9 +448,13 @@ class PlexUploadService:
         remove_overlay_label: bool,
         media_type_filter: Optional[str] = None,
         progress_callback: Optional[PlexUploadProgressCallback] = None,
+        at_once: bool = False,
     ) -> None:
         total_assets = len(local_assets)
-        for asset_index, asset in enumerate(local_assets, start=1):
+        done = 0
+
+        def handle(asset: Dict[str, Any]) -> None:
+            nonlocal done
             progress_message = ""
             try:
                 outcome = self._upload_asset(
@@ -465,11 +490,12 @@ class PlexUploadService:
                 if outcome.seasons_missing:
                     stats["plex_seasons_missing"] = int(stats.get("plex_seasons_missing", 0)) + outcome.seasons_missing
 
+                done += 1
                 file_name = Path(str(asset.get("path") or "")).name
                 upload_label = "would upload" if dry_run else "uploaded"
                 upload_value = int(stats.get("would_upload" if dry_run else "uploaded", 0))
                 progress_message = (
-                    f"Processed {asset_index}/{total_assets}: {file_name} | "
+                    f"Processed {done}/{total_assets}: {file_name} | "
                     f"matched={int(stats.get('matched', 0))}, {upload_label}={upload_value}, "
                     f"skipped={int(stats.get('skipped', 0))}, errors={int(stats.get('errors', 0))}"
                 )
@@ -478,10 +504,11 @@ class PlexUploadService:
                 if isinstance(e, SQLAlchemyError):
                     self.db.rollback()
                 stats["errors"] += 1
+                done += 1
                 log_error(LogTags.UPLOADER, f"Failed processing asset '{asset['path']}': {e}\n{traceback.format_exc()}")
                 file_name = Path(str(asset.get("path") or "")).name
                 progress_message = (
-                    f"Processed {asset_index}/{total_assets}: {file_name} | "
+                    f"Processed {done}/{total_assets}: {file_name} | "
                     f"matched={int(stats.get('matched', 0))}, "
                     f"uploaded={int(stats.get('uploaded', 0))}, "
                     f"skipped={int(stats.get('skipped', 0))}, errors={int(stats.get('errors', 0))}"
@@ -490,7 +517,7 @@ class PlexUploadService:
             if progress_callback:
                 try:
                     progress_callback(
-                        asset_index,
+                        done,
                         total_assets,
                         {
                             "matched": int(stats.get("matched", 0)),
@@ -503,6 +530,96 @@ class PlexUploadService:
                     )
                 except Exception as callback_error:
                     log_warning(LogTags.UPLOADER, f"Upload progress callback failed: {callback_error}")
+
+        self._each_asset(local_assets, handle, at_once=at_once and not dry_run)
+
+    def _each_asset(self, assets: List[Dict[str, Any]], handle: Callable[[Dict[str, Any]], None], *, at_once: bool,
+                    together: Optional[Callable[[Dict[str, Any]], Any]] = None) -> None:
+        """Run `handle` on every asset in order: one after another, or UPLOAD_WORKERS at a time.
+        Side by side, a worker holds the turn while its upload logic runs and gives it up while
+        it waits on the server, so records, counters and logs are only ever touched by one.
+        Neighbors that `together` gives one key (a title's artwork files) stay with one worker,
+        in order. A cancelled job starts no new asset; the ones under way finish and are recorded."""
+        if not at_once or self.UPLOAD_WORKERS < 2 or len(assets) < 2:
+            for asset in assets:
+                handle(asset)
+            return
+        queue = ([asset] for asset in assets) if together is None else (list(group) for _key, group in groupby(assets, key=together))
+        stopped: List[BaseException] = []
+
+        def work() -> None:
+            with self._turn:
+                self._has_turn.on = True
+                try:
+                    while not stopped:
+                        unit = next(queue, None)
+                        if unit is None:
+                            return
+                        for asset in unit:
+                            if stopped:
+                                break
+                            try:
+                                handle(asset)
+                            except BaseException as e:
+                                stopped.append(e)
+                finally:
+                    self._has_turn.on = False
+
+        with ThreadPoolExecutor(max_workers=self.UPLOAD_WORKERS, thread_name_prefix="upload") as pool:
+            for worker in [pool.submit(work) for _ in range(self.UPLOAD_WORKERS)]:
+                worker.result()
+        if stopped:
+            raise stopped[0]
+
+    @contextmanager
+    def _off_turn(self):
+        """Let the other uploads of a full run carry on while this one waits on the server.
+        Outside such a run nothing holds the turn and this does nothing."""
+        if not getattr(self._has_turn, "on", False):
+            yield
+            return
+        self._has_turn.on = False
+        self._turn.release()
+        try:
+            yield
+        finally:
+            self._turn.acquire()
+            self._has_turn.on = True
+
+    def _claim(self, item: MediaServerItem, parent: Optional[MediaServerItem] = None) -> Optional[Tuple[str, Any, Any]]:
+        """One upload at a time per title on the server, whatever the kind of image. Plex keeps
+        only one of the selections when two images reach a title at the same moment, and a title
+        in two libraries shares its bundle: tidying it must not meet the other copy's upload.
+        Seasons are items of their own, so a show's seasons still go side by side."""
+        if not getattr(self._has_turn, "on", False):
+            return None
+        client = item.client
+        where: Any = bundle_identity(item, parent) if getattr(client, "server_type", "") == "plex" else None
+        key = (str(getattr(client, "instance_name", "") or ""), where or str(item.item_id), item.index if item.item_type == "season" else None)
+        while key in self._in_flight:
+            self._turn.wait()
+        self._in_flight.add(key)
+        return key
+
+    def _release(self, key: Optional[Tuple[str, Any, Any]]) -> None:
+        if key is not None:
+            self._in_flight.discard(key)
+            self._turn.notify_all()
+
+    def _pause(self, seconds: float) -> None:
+        """The pause between uploads. Side by side they share it: this worker goes on only when
+        `seconds` have passed since the last one did, so the setting still caps the pace."""
+        if seconds <= 0:
+            return
+        if not getattr(self._has_turn, "on", False):
+            time.sleep(seconds)
+            return
+        with self._off_turn():
+            with self._pace_lock:
+                now = time.monotonic()
+                slot = max(now, self._next_upload_at)
+                self._next_upload_at = slot + seconds
+            time.sleep(max(0.0, slot + seconds - now))
 
     def _prepare_upload_context(
         self,
@@ -638,6 +755,7 @@ class PlexUploadService:
                 arr_availability=arr_availability,
                 remove_overlay_label=remove_overlay_label,
                 progress_callback=progress_callback,
+                at_once=True,
             )
         if artwork_assets:
             stats["artwork"]["scanned"] = len(artwork_assets)
@@ -648,6 +766,7 @@ class PlexUploadService:
                 dry_run=dry_run,
                 arr_availability=arr_availability,
                 progress_callback=progress_callback,
+                at_once=True,
             )
             # Full runs log artwork from the job layer; run_single_upload has no summary.
         if self._instance_scoped_paths:
@@ -801,6 +920,7 @@ class PlexUploadService:
         When include_artwork is set, the target's artwork (logo/background/squareart) must ALSO
         be cached — so a re-fired webhook whose poster is cached still runs to push new artwork.
         """
+        self._single_target_reason = None
         preflight_error, destination_dir, index, _library_totals = self._prepare_upload_context()
         if preflight_error:
             return False
@@ -989,6 +1109,13 @@ class PlexUploadService:
                     return False
                 # Show re-added since last upload (new ratingKey) — re-apply.
                 if self._rating_key_indicates_change(self._item_rating_key(show), uploaded_rating_keys):
+                    return False
+                # The season's own id unseen on a record that has ids: the server re-added this
+                # season (Jellyfin keys items by folder path). The event is the evidence, so no
+                # baseline here; the webhook job clears the season's record and re-sends.
+                season_tag = self._season_tag(self._item_rating_key(show), self._item_rating_key(season_obj))
+                if season_tag and uploaded_rating_keys and season_tag not in uploaded_rating_keys:
+                    self._single_target_reason = "season_re_added"
                     return False
                 # The server no longer shows the season poster we sent (an upgrade re-import cleared it).
                 if self._season_poster_needs_reupload(show, season_obj, file_path):
@@ -1778,8 +1905,8 @@ class PlexUploadService:
                     collection_count = 0
 
                 if library.type == "movie":
-                    movie_count, no_ids = self._index_movies(client, library, index["movies"])
-                    self._warn_idless_library(instance_name, str(library.title), "movie", movie_count, no_ids)
+                    movie_count, idless = self._index_movies(client, library, index["movies"])
+                    self._warn_idless_library(instance_name, str(library.title), "movie", movie_count, idless)
                     library_totals.append(
                         {
                             "instance": instance_name,
@@ -1787,12 +1914,12 @@ class PlexUploadService:
                             "section_type": "movie",
                             "items": movie_count,
                             "collections": collection_count,
-                            "no_ids": no_ids,
+                            "no_ids": len(idless),
                         }
                     )
                 else:
-                    show_count, no_ids = self._index_shows(client, library, index["shows"])
-                    self._warn_idless_library(instance_name, str(library.title), "show", show_count, no_ids)
+                    show_count, idless = self._index_shows(client, library, index["shows"])
+                    self._warn_idless_library(instance_name, str(library.title), "show", show_count, idless)
                     library_totals.append(
                         {
                             "instance": instance_name,
@@ -1800,7 +1927,7 @@ class PlexUploadService:
                             "section_type": "show",
                             "items": show_count,
                             "collections": collection_count,
-                            "no_ids": no_ids,
+                            "no_ids": len(idless),
                         }
                     )
 
@@ -2143,9 +2270,10 @@ class PlexUploadService:
         for item in items:
             self._lock_group_of[f"{server_id}:{item.item_id}"] = group
 
-    def _index_movies(self, client: MediaServerClient, library: Any, movie_index: Dict[str, List[Any]]) -> Tuple[int, int]:
+    def _index_movies(self, client: MediaServerClient, library: Any, movie_index: Dict[str, List[Any]]) -> Tuple[int, List[Any]]:
         """(items indexed, items carrying no provider id at all)."""
-        indexed = no_ids = 0
+        indexed = 0
+        idless: List[Any] = []
         try:
             movies = client.get_library_items(library.key)
             self._register_for_locks(client, library.key, "movie", movies)
@@ -2157,14 +2285,16 @@ class PlexUploadService:
                 for id_key in id_keys:
                     movie_index.setdefault(id_key, []).append(movie)
                 indexed += 1
-                no_ids += not id_keys
+                if not id_keys:
+                    idless.append(movie)
         except Exception as e:
             log_warning(LogTags.UPLOADER, f"Failed indexing movie section '{library.title}': {e}")
-        return indexed, no_ids
+        return indexed, idless
 
-    def _index_shows(self, client: MediaServerClient, library: Any, show_index: Dict[str, List[Any]]) -> Tuple[int, int]:
+    def _index_shows(self, client: MediaServerClient, library: Any, show_index: Dict[str, List[Any]]) -> Tuple[int, List[Any]]:
         """(items indexed, items carrying no provider id at all)."""
-        indexed = no_ids = 0
+        indexed = 0
+        idless: List[Any] = []
         try:
             shows = client.get_library_items(library.key)
             self._register_for_locks(client, library.key, "show", shows)
@@ -2176,20 +2306,29 @@ class PlexUploadService:
                 for id_key in id_keys:
                     show_index.setdefault(id_key, []).append(show)
                 indexed += 1
-                no_ids += not id_keys
+                if not id_keys:
+                    idless.append(show)
         except Exception as e:
             log_warning(LogTags.UPLOADER, f"Failed indexing show section '{library.title}': {e}")
-        return indexed, no_ids
+        return indexed, idless
 
     @staticmethod
-    def _warn_idless_library(instance_name: str, library_title: str, kind: str, indexed: int, no_ids: int) -> None:
-        if no_ids:
+    def _warn_idless_library(instance_name: str, library_title: str, kind: str, indexed: int, idless: List[Any]) -> None:
+        if not idless:
+            return
+        log_warning(
+            LogTags.UPLOADER,
+            f"{instance_name} / {library_title}: {len(idless):,} of {indexed:,} {kind}s carry no TMDB/TVDB/IMDb id "
+            "— posters reach them only by folder name or title, and season posters are withheld",
+            instance=instance_name, library=library_title, no_ids=len(idless), items=indexed,
+        )
+        for index, item in enumerate(idless):
+            log = log_warning if index < IDLESS_DETAIL_LIMIT else log_debug
+            log(LogTags.UPLOADER, f"    {idless_item_label(item)}", media_title=item.title)
+        if len(idless) > IDLESS_DETAIL_LIMIT:
             log_warning(
                 LogTags.UPLOADER,
-                f"{instance_name} / {library_title}: {no_ids:,} of {indexed:,} {kind}s carry no TMDB/TVDB/IMDb id "
-                "(legacy metadata agent?) — posters reach them only by folder name or title, and season "
-                "posters are withheld",
-                instance=instance_name, library=library_title, no_ids=no_ids, items=indexed,
+                f"    ... and {len(idless) - IDLESS_DETAIL_LIMIT} more (enable debug logging for the full list)",
             )
 
     def _index_collections(self, client: MediaServerClient, library: Any, collection_index: Dict[str, List[Any]]) -> int:
@@ -2376,22 +2515,27 @@ class PlexUploadService:
                 rating_key = self._item_rating_key(show)
                 rating_key_changed = self._rating_key_indicates_change(rating_key, uploaded_rating_keys)
                 season_obj = next((s for s in self._seasons_for_show(show) if s.index == season_number), None)
-                if not rating_key_changed and self._is_item_cached_for_library(
+                season_key = self._item_rating_key(season_obj) if season_obj else None
+                season_tag = self._season_tag(rating_key, season_key)
+                season_changed = self._season_key_indicates_change(rating_key, season_key, uploaded_rating_keys)
+                if not rating_key_changed and not season_changed and self._is_item_cached_for_library(
                     library_name=library_name,
                     library_key=library_key,
                     uploaded_to_libraries=uploaded_to_libraries,
                     uploaded_to_library_keys=uploaded_to_library_keys,
                 ) and not self._season_poster_needs_reupload(show, season_obj, file_path, persist=not dry_run):
-                    self._record_rating_key_if_new(
-                        file_path,
-                        rating_key,
-                        uploaded_rating_keys,
-                        dry_run=dry_run,
-                        library_name=library_name,
-                        library_key=library_key,
-                        media_type="seasons",
-                    )
+                    for key in (rating_key, season_tag):
+                        self._record_rating_key_if_new(
+                            file_path,
+                            key,
+                            uploaded_rating_keys,
+                            dry_run=dry_run,
+                            library_name=library_name,
+                            library_key=library_key,
+                            media_type="seasons",
+                        )
                     cached_skips += 1
+                    self._tally_target(show, "posters", "current")
                     log_debug(
                         LogTags.UPLOADER,
                         f"Skipping cached upload for {self._describe_show_with_season(show.title, season_number)} → {self._item_target_label(show)}",
@@ -2400,6 +2544,12 @@ class PlexUploadService:
                     continue
                 if not season_obj:
                     continue
+                if season_changed:
+                    log_info(
+                        LogTags.UPLOADER,
+                        f"{self._describe_show_with_season(show.title, season_number)} was re-added on {self._item_target_label(show)} (new id) — applying its poster again",
+                        file=file_path,
+                    )
                 if dry_run:
                     log_info(
                         LogTags.UPLOADER,
@@ -2407,15 +2557,17 @@ class PlexUploadService:
                         file=file_path,
                         asset=asset_label,
                     )
+                    self._tally_target(show, "posters", "uploaded")
                     uploaded += 1
                     media_counts["seasons"] += 1
                     continue
                 with self._upload_ready(file_path) as up_path:
-                    self._client_upload(season_obj, IMAGE_KIND_POSTER, up_path)
+                    self._client_upload(season_obj, IMAGE_KIND_POSTER, up_path, source=file_path, parent=show)
                 self._drop_file_cache(file_path)
-                time.sleep(self.upload_delay_ms / 2000.0)
+                self._pause(self.upload_delay_ms / 2000.0)
                 if remove_overlay_label:
                     self._remove_overlay_label_if_present(season_obj, file_path=file_path)
+                self._tally_target(show, "posters", "uploaded")
                 uploaded += 1
                 media_counts["seasons"] += 1
                 if library_name:
@@ -2424,12 +2576,15 @@ class PlexUploadService:
                     uploaded_to_library_keys.add(library_key)
                 if rating_key:
                     uploaded_rating_keys.add(rating_key)
+                if season_tag:
+                    uploaded_rating_keys.add(season_tag)
                 self._mark_uploaded(
                     file_path,
                     library_name=library_name,
                     library_key=library_key,
                     media_type="seasons",
                     rating_key=rating_key,
+                    season_key=season_key,
                 )
                 log_info(
                     LogTags.UPLOADER,
@@ -2581,6 +2736,7 @@ class PlexUploadService:
                         edition_title=edition_title,
                         media_type="movies",
                     )
+                    self._tally_target(item, "posters", "current")
                     log_debug(
                         LogTags.UPLOADER,
                         f"Skipping cached upload for {item_label}{'' if edition_title == self.DEFAULT_EDITION_MOVIE else f' [{edition_title}]'} → {self._item_target_label(item)}",
@@ -2605,6 +2761,7 @@ class PlexUploadService:
                         rating_key=rating_key,
                     )
                     uploaded_editions.add(edition_title)
+                    self._tally_target(item, "posters", "current")
                     log_debug(
                         LogTags.UPLOADER,
                         f"Skipping cached upload for {item_label} → {self._item_target_label(item)}",
@@ -2627,6 +2784,7 @@ class PlexUploadService:
                         f"Skipping cached upload for {item_label} → {self._item_target_label(item)}",
                         file=file_path,
                     )
+                    self._tally_target(item, "posters", "current")
                     continue
 
             if dry_run:
@@ -2636,15 +2794,17 @@ class PlexUploadService:
                     file=file_path,
                     asset=asset_label,
                 )
+                self._tally_target(item, "posters", "uploaded")
                 uploaded += 1
                 media_counts[item_media_type] += 1
                 continue
             with self._upload_ready(file_path) as up_path:
-                self._client_upload(item, IMAGE_KIND_POSTER, up_path)
+                self._client_upload(item, IMAGE_KIND_POSTER, up_path, source=file_path)
             self._drop_file_cache(file_path)
-            time.sleep(self.upload_delay_ms / 1000.0)
+            self._pause(self.upload_delay_ms / 1000.0)
             if remove_overlay_label:
                 self._remove_overlay_label_if_present(item, file_path=file_path)
+            self._tally_target(item, "posters", "uploaded")
             uploaded += 1
             media_counts[item_media_type] += 1
             if library_name:
@@ -2783,7 +2943,6 @@ class PlexUploadService:
                 return self._skip_shadowed_collection_asset(asset, {}, dry_run=dry_run, kind=artwork_type)
             if not resolution_reason:
                 return _no_match_outcome()
-            # Artwork used to return silently, leaving the bucket undiagnosable.
             self._log_unmatched(
                 f"Skipping ambiguous no-ID {artwork_type}: {asset_label} ({resolution_reason})",
                 file=file_path,
@@ -2835,15 +2994,18 @@ class PlexUploadService:
                     library_name=library_name, library_key=library_key, media_type=item_media_type,
                 )
                 log_debug(LogTags.UPLOADER, f"Skipping cached {artwork_type} for {item_label} → {self._item_target_label(item)}", file=file_path)
+                self._tally_target(item, "artwork", "current")
                 continue
             if dry_run:
                 log_info(LogTags.UPLOADER, f"Dry run: Uploaded {artwork_type} for {item_label} → {self._item_target_label(item)}", file=file_path, asset=asset_label)
+                self._tally_target(item, "artwork", "uploaded")
                 uploaded += 1
                 continue
             with self._upload_ready(file_path) as up_path:
                 self._client_upload(item, artwork_type, up_path)
             self._drop_file_cache(file_path)
-            time.sleep(self.upload_delay_ms / 1000.0)
+            self._pause(self.upload_delay_ms / 1000.0)
+            self._tally_target(item, "artwork", "uploaded")
             uploaded += 1
             if library_name:
                 uploaded_to_libraries.add(library_name)
@@ -2874,10 +3036,14 @@ class PlexUploadService:
         dry_run: bool,
         arr_availability: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[PlexUploadProgressCallback] = None,
+        at_once: bool = False,
     ) -> None:
         art = stats["artwork"]
         total = len(artwork_assets)
-        for i, asset in enumerate(artwork_assets, start=1):
+        done = 0
+
+        def handle(asset: Dict[str, Any]) -> None:
+            nonlocal done
             try:
                 outcome = self._upload_artwork_asset(asset, index, dry_run, arr_availability=arr_availability)
                 uploaded_count = outcome.uploaded
@@ -2901,19 +3067,23 @@ class PlexUploadService:
                     self.db.rollback()
                 art["errors"] += 1
                 log_error(LogTags.UPLOADER, f"Failed processing artwork '{asset.get('path')}': {e}\n{traceback.format_exc()}")
+            done += 1
             if progress_callback:
                 try:
                     file_name = Path(str(asset.get("path") or "")).name
                     label = "would upload" if dry_run else "uploaded"
                     value = art["would_upload"] if dry_run else art["uploaded"]
                     progress_callback(
-                        i, total,
+                        done, total,
                         {"matched": art["matched"], "uploaded": art["uploaded"], "would_upload": art["would_upload"], "skipped": art["skipped"], "errors": art["errors"]},
-                        f"Artwork {i}/{total}: {file_name} | {label}={value}, "
+                        f"Artwork {done}/{total}: {file_name} | {label}={value}, "
                         f"already current={art['already_current']}, errors={art['errors']}",
                     )
                 except Exception as callback_error:
                     log_warning(LogTags.UPLOADER, f"Artwork upload progress callback failed: {callback_error}")
+
+        # A title's artwork files stay with one worker: they reach the server one at a time.
+        self._each_asset(artwork_assets, handle, at_once=at_once and not dry_run, together=lambda asset: asset.get("media_key"))
 
     def _note_year_discrepancy(
         self,
@@ -2987,6 +3157,17 @@ class PlexUploadService:
         self._season_list_cache[key] = cached
         return cached
 
+    def _tally_target(self, item: MediaServerItem, kind: str, outcome: str) -> None:
+        """Count one server's share of the run: `kind` is posters or artwork, `outcome` uploaded
+        (a dry run's would-upload too) or current (already there)."""
+        client = getattr(item, "client", None)
+        name = str(getattr(client, "instance_name", "") or "") if client is not None else ""
+        if not name:
+            return
+        row = self._by_instance.setdefault(name, {"type": str(getattr(client, "server_type", "") or ""),
+                                                  "posters_uploaded": 0, "posters_current": 0, "artwork_uploaded": 0, "artwork_current": 0})
+        row[f"{kind}_{outcome}"] += 1
+
     def _item_server_label(self, item: MediaServerItem) -> str:
         """'Plex' / 'Jellyfin', with the instance name when it adds information."""
         client = item.client
@@ -3010,22 +3191,92 @@ class PlexUploadService:
         client = item.client
         return bool(client is None or client.supports(CAP_SQUAREART))
 
-    def _client_upload(self, item: MediaServerItem, kind: str, filepath: str) -> None:
-        """Push an image via the item's owning media server client; transport errors propagate."""
+    @property
+    def overlays(self) -> Any:
+        """The overlay engine for this run: posters get their badge composed before the upload,
+        so the server receives one file. None while overlays are off and nothing is badged."""
+        if self._overlay_hook is _UNSET:
+            try:
+                from services.overlays.server import build_server_engine
+
+                self._overlay_hook = build_server_engine(self.db)
+                if self._overlay_hook is not None:
+                    self._overlay_hook.off_turn = self._off_turn
+            except Exception as e:
+                log_warning(LogTags.UPLOADER, f"Overlays are unavailable for this run: {e}")
+                self._overlay_hook = None
+        return self._overlay_hook
+
+    def finish_overlays(self) -> None:
+        """At the end of a job: keep what the overlay engine learned (TMDB records, badge state)
+        and log its summary. Nothing to do when no poster went through it."""
+        hook = self._overlay_hook
+        if hook is _UNSET or hook is None:
+            return
+        try:
+            hook.flush()
+            hook.log_summary()
+        except Exception as e:
+            log_warning(LogTags.UPLOADER, f"Could not save what the overlay engine learned this run: {e}")
+
+    def _client_upload(self, item: MediaServerItem, kind: str, filepath: str, *, source: Optional[str] = None,
+                       parent: Optional[MediaServerItem] = None) -> None:
+        """Push an image via the item's owning media server client; transport errors propagate.
+        A poster goes through the overlay engine first, which may hand back a badged copy."""
         client = item.client
-        if client is None or not client.upload_image(item, kind, filepath):
+        if client is None:
             raise RuntimeError(f"{kind} upload not supported for this media server item")
-        if kind == IMAGE_KIND_POSTER:
-            self._record_server_poster_after_upload(item, self._sha1_of_file(filepath), filepath)
+        claim = self._claim(item, parent)
+        try:
+            hook = self.overlays if kind == IMAGE_KIND_POSTER else None
+            upload_path = filepath
+            if hook is not None:
+                composite = hook.compose_for_upload(client.instance_name, item, filepath, source_path=source or filepath, parent=parent)
+                if composite:
+                    upload_path = composite
+            sent_sha1 = None
+            ok = False
+            try:
+                with self._off_turn():
+                    sent_sha1 = self._sha1_of_file(upload_path) if kind == IMAGE_KIND_POSTER else None  # before the engine discards a composite
+                    ok = bool(client.upload_image(item, kind, upload_path))
+            finally:
+                if hook is not None:
+                    hook.record_upload(client.instance_name, item, ok, parent=parent)
+            if not ok:
+                raise RuntimeError(f"{kind} upload not supported for this media server item")
+            if kind == IMAGE_KIND_POSTER:
+                self._record_server_poster_after_upload(item, sent_sha1, source or filepath)
+        finally:
+            self._release(claim)
+
+    def _badge_stale(self, item: Optional[MediaServerItem], file_path: str, parent: Optional[MediaServerItem] = None) -> bool:
+        """A cached poster whose overlay badge changed since (status moved on, settings edited,
+        overlays switched off) goes up again, badged or plain as the engine decides."""
+        hook = self.overlays
+        if hook is None or item is None or item.client is None:
+            return False
+        try:
+            stale = bool(hook.badge_stale(item.client.instance_name, item, file_path, parent=parent))
+        except Exception as e:
+            log_debug(LogTags.UPLOADER, f"Overlay check failed: {e}", file=file_path)
+            return False
+        if stale:
+            log_debug(LogTags.UPLOADER, f"Overlay badge changed for {item.title}: re-uploading", file=file_path)
+        return stale
 
     # ── is our poster still the one on the server? ─────────────────────────
     def _poster_needs_reupload(self, item: MediaServerItem, file_path: str, parent: Optional[MediaServerItem] = None, *, persist: bool = True) -> bool:
-        """A cached poster still goes up again when the server no longer shows ours."""
-        return self._server_poster_changed(item, file_path, parent, persist=persist)
+        """A cached poster still goes up again when its badge changed or the server no longer
+        shows ours."""
+        return self._badge_stale(item, file_path, parent) or self._server_poster_changed(item, file_path, parent, persist=persist)
 
     def _season_poster_needs_reupload(self, show: MediaServerItem, season_obj: Optional[MediaServerItem], file_path: str, *, persist: bool = True) -> bool:
         if season_obj is None:
             return False
+        hook = self.overlays
+        if hook is not None and hook.badges_seasons() and self._badge_stale(season_obj, file_path, parent=show):
+            return True
         return self._server_poster_changed(season_obj, file_path, show, persist=persist)
 
     @staticmethod
@@ -3062,7 +3313,8 @@ class PlexUploadService:
         if getattr(client, "server_type", "") != "jellyfin":
             return
         try:
-            fresh = client.get_item(item.item_id)
+            with self._off_turn():
+                fresh = client.get_item(item.item_id)
             hint = poster_key(fresh) if fresh is not None else ""
         except Exception:
             hint = ""
@@ -3086,6 +3338,9 @@ class PlexUploadService:
         recorded. Nothing is assumed ours."""
         if item is None or item.client is None:
             return False
+        hook = self.overlays
+        if hook is not None and hook.tracks(getattr(item.client, "instance_name", None), item.item_id):
+            return False  # a badged poster is the overlay engine's to check
         label = f"{parent.title} {item.title}" if parent is not None else str(item.title)
         hint: Optional[str] = None
         sha1: Optional[str] = None
@@ -3959,6 +4214,24 @@ class PlexUploadService:
             return False
         return rating_key not in uploaded_rating_keys
 
+    @staticmethod
+    def _season_tag(show_key: Optional[str], season_key: Optional[str]) -> Optional[str]:
+        """Season ids ride in the record's key list as 'season:<show id>:<season id>', so a season
+        re-added under an unchanged show (Jellyfin keys items by folder path) is still noticed."""
+        return f"season:{show_key}:{season_key}" if show_key and season_key else None
+
+    @classmethod
+    def _season_key_indicates_change(cls, show_key: Optional[str], season_key: Optional[str], uploaded_rating_keys: set[str]) -> bool:
+        """True when this show already has season ids on record and this season's is not among them.
+        No season ids yet for the show is the baseline: record it, no re-upload."""
+        tag = cls._season_tag(show_key, season_key)
+        if not tag:
+            return False
+        prefix = f"season:{show_key}:"
+        if not any(k.startswith(prefix) for k in uploaded_rating_keys):
+            return False
+        return tag not in uploaded_rating_keys
+
     def _record_rating_key_if_new(
         self,
         file_path: str,
@@ -4025,6 +4298,7 @@ class PlexUploadService:
         edition_title: Optional[str] = None,
         media_type: Optional[str] = None,
         rating_key: Optional[str] = None,
+        season_key: Optional[str] = None,
     ) -> None:
         existing_record = self._get_uploaded_record(file_path)
         libraries = set(existing_record["uploaded_to_libraries"])
@@ -4039,6 +4313,8 @@ class PlexUploadService:
             library_keys.add(library_key)
         if rating_key:
             rating_keys.add(str(rating_key))
+        if rating_key and season_key:
+            rating_keys.add(self._season_tag(str(rating_key), str(season_key)))
         if edition_title:
             editions.add(edition_title)
         if media_type:
@@ -4136,3 +4412,34 @@ class PlexUploadService:
         self._record_cache = {}
         clear_server_posters(self.db)
         self._server_posters = None
+
+    def forget_uploads(self, library_keys: Set[str], kinds: List[str]) -> int:
+        """After a reset on some libraries: drop those libraries from the records of the files of
+        the reset kinds (posters, or an artwork kind), so the next run sends them there again and
+        nowhere else. A record left with no library goes; a legacy record with names only can't
+        say which server it covers, so it goes too. Returns the records touched."""
+        keys = {str(k) for k in library_keys if k}
+        wanted = set(kinds)
+        if not keys or not wanted:
+            return 0
+        touched = 0
+        for record in self.db.query(PlexUploadRecord).all():
+            kind = artwork_type_of(os.path.basename(record.file_path)) or IMAGE_KIND_POSTER
+            if kind not in wanted:
+                continue
+            try:
+                current = set(json.loads(record.uploaded_to_library_keys or "[]"))
+            except (json.JSONDecodeError, TypeError):
+                current = set()
+            remaining = current - keys
+            if current and remaining == current:
+                continue
+            touched += 1
+            if remaining:
+                record.uploaded_to_library_keys = json.dumps(sorted(remaining))
+            else:
+                self.db.delete(record)
+            self._record_cache.pop(record.file_path, None)
+        if touched:
+            self.db.commit()
+        return touched

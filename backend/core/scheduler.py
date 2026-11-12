@@ -12,6 +12,7 @@ from models.job import (
     JOB_TYPE_POSTER_RENAMER,
     JOB_TYPE_UNMATCHED_DETECTION,
     JOB_TYPE_BORDER_REPLACER,
+    JOB_TYPE_OVERLAYS,
     JOB_TYPE_GDRIVE_SYNC,
     JOB_TYPE_IDARR,
     JOB_STATUS_PENDING,
@@ -36,6 +37,7 @@ from modules.flow import run_flow_background_job
 from modules.renamer import run_rename_background_job
 from modules.unmatched import run_unmatched_detection_background_job
 from modules.border import run_border_replacer_background_job
+from modules.overlays import run_overlays_background_job
 from modules.idarr import run_idarr_background_job
 from api.maker_tools import run_maker_monitor_scan_for_schedule
 from services.backup import run_backup_to_location
@@ -232,6 +234,20 @@ def run_border_replacer_for_schedule() -> None:
         )
 
     _run_scheduled_operation("Scheduled border replacer failed", _submit)
+
+
+def run_overlays_for_schedule() -> None:
+    """Wrapper for scheduled overlay refresh runs."""
+    def _submit(db: Session) -> None:
+        _queue_pending_job(
+            db,
+            JOB_TYPE_OVERLAYS,
+            run_overlays_background_job,
+            args_builder=lambda job: (job.id, False, "incremental"),
+            runner_kwargs={"triggered_by": "scheduled"},
+        )
+
+    _run_scheduled_operation("Scheduled overlays run failed", _submit)
 
 
 def run_idarr_for_schedule(idarr_scope: Optional[str] = None, sync_after_run: bool = False, force_sync_after_run: bool = False) -> None:
@@ -452,6 +468,9 @@ def update_schedules() -> None:
                 job_args = []
             elif schedule.job_type == 'border_replacer':
                 job_func = run_border_replacer_for_schedule
+                job_args = []
+            elif schedule.job_type == 'overlays':
+                job_func = run_overlays_for_schedule
                 job_args = []
             elif schedule.job_type == 'idarr':
                 job_func = run_idarr_for_schedule

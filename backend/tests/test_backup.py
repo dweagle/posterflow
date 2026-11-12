@@ -155,8 +155,11 @@ def test_restore_returns_success_with_valid_backup(client, tmp_path, monkeypatch
     zip_bytes = _make_zip({
         "posterflow.db": _write_db(tmp_path / "from-backup.db", "restored").read_bytes(),
         "rclone.conf": b"[gdrive]\ntype=drive\n",
+        "overlays/streaming/color/netflix.png": b"png",
         "metadata.json": json.dumps({"version": "1.0", "created_at": "2026-01-01T00:00:00"}),
     })
+    (config_dir / "overlays" / "audio").mkdir(parents=True)
+    (config_dir / "overlays" / "audio" / "aac.png").write_bytes(b"mine")  # a live custom image the backup lacks
 
     resp = _post_restore(client, zip_bytes)
     assert resp.status_code == 200
@@ -164,9 +167,14 @@ def test_restore_returns_success_with_valid_backup(client, tmp_path, monkeypatch
     assert "restored" in data["message"].lower()
     assert data["restored_files"]["database"] is True
     assert data["restored_files"]["rclone_config"] is True
+    assert data["restored_files"]["overlays"] is True
 
     assert _markers(config_dir / "posterflow.db") == ["restored"]
     assert (config_dir / "rclone.conf").read_bytes() == b"[gdrive]\ntype=drive\n"
+    # The backup's images are laid over the live folder; what the backup lacks is kept, and a safety copy made.
+    assert (config_dir / "overlays" / "streaming" / "color" / "netflix.png").read_bytes() == b"png"
+    assert (config_dir / "overlays" / "audio" / "aac.png").read_bytes() == b"mine"
+    assert [p.name for p in (config_dir / "safety_backups").glob("overlays.backup_*")]
 
 
 def test_restore_creates_safety_backup_of_existing_db(client, tmp_path, monkeypatch):
@@ -215,6 +223,8 @@ def test_build_backup_zip_includes_db_snapshot_and_config_files(tmp_path, monkey
     (config_dir / "rclone.conf").write_text("[gdrive]\ntype=drive\n")
     (config_dir / "drives_cache.json").write_text("{}")
     (config_dir / "artwork_drives_cache.json").write_text("{}")
+    (config_dir / "overlays" / "streaming" / "color").mkdir(parents=True)
+    (config_dir / "overlays" / "streaming" / "color" / "netflix.png").write_bytes(b"png")
 
     dest_dir = tmp_path / "backups"
     backup_path = build_backup_zip(dest_dir)
@@ -227,6 +237,7 @@ def test_build_backup_zip_includes_db_snapshot_and_config_files(tmp_path, monkey
             "rclone.conf",
             "drives_cache.json",
             "artwork_drives_cache.json",
+            "overlays/streaming/color/netflix.png",  # custom badge images travel with the backup
             "metadata.json",
         }
         # DB member must be a valid sqlite snapshot with the original data

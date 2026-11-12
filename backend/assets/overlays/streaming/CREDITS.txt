@@ -1,0 +1,3 @@
+color/britbox, fubotv, fxnow, hoopla, mgm-plus, stan, starz, tbs, trutv, usa: the services' own logos, supplied by the project author, fitted onto the frame (fxnow made white: its lettering is black).
+color/tnt: the white TNT logo filled a soft red (#E25D5A); the brand has no fixed logo color.
+color/disney: the white Disney+ logo filled a light Disney+ blue (#4F8BF0); Kometa's color set draws it white.

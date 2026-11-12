@@ -554,6 +554,10 @@ def _upload_stats():
             "unmatched_reasons": {"not_downloaded": 164},
             "by_type": {"logo": 40, "background": 20, "squareart": 5},
         },
+        "by_instance": {
+            "Plex": {"type": "plex", "posters_uploaded": 4, "posters_current": 5648, "artwork_uploaded": 65, "artwork_current": 9020},
+            "jf": {"type": "jellyfin", "posters_uploaded": 3, "posters_current": 2100, "artwork_uploaded": 0, "artwork_current": 0},
+        },
     }
 
 
@@ -571,6 +575,25 @@ def test_plex_upload_embed_reports_both_halves_without_unmatched():
     assert "5,715" not in blob and "9,249" not in blob, "raw scan totals include unmatched"
     assert "unmatched" not in blob.lower()
     assert embed["description"] == "5 poster(s) and 65 artwork file(s) uploaded (live)"
+
+
+def test_plex_upload_embed_tells_the_servers_apart():
+    """A run over Plex and Jellyfin says what each got, after the totals and before the mode."""
+    from modules.upload import build_plex_upload_embed
+    from util.media_server.instances import server_label
+
+    fields = build_plex_upload_embed(_upload_stats(), dry_run=False)["fields"]
+    names = [f["name"] for f in fields]
+    plex, jf = names.index(server_label("plex", "Plex")), names.index(server_label("jellyfin", "jf"))
+    assert plex < jf < names.index("Mode")
+    assert fields[plex]["value"] == "Posters: 4 uploaded, 5,648 already current\nArtwork: 65 uploaded, 9,020 already current"
+    assert fields[jf]["value"] == "Posters: 3 uploaded, 2,100 already current" and fields[jf]["inline"] is False
+    dry = build_plex_upload_embed(_upload_stats(), dry_run=True)["fields"]
+    assert any(f["value"].startswith("Posters: 4 would upload") for f in dry)
+    # Older persisted stats carry no per-server counts: nothing extra is shown.
+    stats = _upload_stats()
+    stats.pop("by_instance")
+    assert not any(f["name"] == server_label("jellyfin", "jf") for f in build_plex_upload_embed(stats, dry_run=False)["fields"])
 
 
 def test_plex_upload_embed_survives_stats_without_artwork():

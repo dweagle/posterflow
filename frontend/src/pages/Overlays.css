@@ -1,0 +1,1476 @@
+/* Overlays page. Deliberately denser than the rest of the app: lots of small fields, and
+   the preview should stay in view while tweaking them. Sizes are scoped to .overlays-page. */
+.overlays-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  font-size: var(--text-sm);
+}
+
+/* The page's flex gap already spaces the header from the content. */
+.overlays-page .page-header {
+  margin-bottom: 0;
+}
+
+/* The page's flex gap already spaces the toolbar; its global margin would double it. */
+.overlays-page .toolbar {
+  margin-bottom: 0;
+}
+
+.overlays-error,
+.overlays-loading,
+.overlays-empty {
+  color: var(--color-text-muted);
+  padding: var(--sp-8) 0;
+}
+
+.overlays-error {
+  color: var(--color-danger-soft);
+}
+
+/* Compact settings bar under the toolbar: master switch | run types | metadata source */
+.overlays-global {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-6) 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.overlays-global-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-12);
+  padding: var(--sp-2) var(--sp-16);
+  border-left: 1px solid var(--color-border);
+}
+
+.overlays-global-item:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+
+/* The switches stack in two rows on the left (state + libraries, then the two options), so
+   the hint beside them has the room to stay short. */
+.overlays-global-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.overlays-global-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* A switch with its hint, kept on one line (server posters, Plex cleanup). */
+.overlays-server-posters {
+  flex-wrap: nowrap;
+  gap: var(--sp-6);
+  white-space: nowrap;
+}
+
+.overlays-global-hint {
+  flex: 1 1 260px;
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+/* Sits beside the Libraries dropdown (the hint class would wrap it onto its own line). */
+.overlays-badged-count {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.overlays-libraries-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  background: none;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-4) var(--sp-8);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.overlays-libraries-toggle:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.overlays-libraries {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.overlays-libraries-all {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.overlays-libraries-hint {
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+}
+
+.overlays-libraries-hint code {
+  color: var(--color-text-secondary);
+}
+
+.overlays-source {
+  grid-column: 2 / span 2;
+}
+
+.overlays-source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.overlays-source.ok {
+  color: var(--color-success-soft);
+}
+
+.overlays-source.warn {
+  color: var(--color-warning-soft);
+}
+
+/* Overlay-type tabs (one per installed type) + the editor card for the selected one */
+.overlays-types-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-12);
+  margin-bottom: var(--card-gap);
+}
+
+.overlays-types-head h2 {
+  margin: 0;
+  color: var(--color-title);
+  font-size: var(--text-base);
+}
+
+.overlays-types-hint {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+
+/* Equal pills that wrap as whole pills: every pill is at least as wide as the widest label
+   (150px fits "Content Rating" in the usual fonts), and a label never breaks onto a second
+   line, so a narrow screen gets a second row of pills instead of taller ones. */
+.overlays-page .overlays-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+}
+
+.overlays-page .overlays-tabs .overlays-tab {
+  min-width: 150px;
+}
+
+.overlays-page .overlays-tabs .overlays-tab button {
+  white-space: nowrap;
+}
+
+/* One pill per type: the name selects the tab, the switch turns the overlay on/off.
+   The pill (not the inner button) carries the subtab look so both halves share it. */
+.overlays-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-4) var(--sp-8) var(--sp-4) 0;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.overlays-tab:hover {
+  background: var(--color-border);
+  border-color: var(--color-line-soft);
+}
+
+.overlays-tab.active {
+  background: var(--color-button-primary);
+  border-color: var(--color-button-primary);
+}
+
+.overlays-tabs .overlays-tab button,
+.overlays-def-tablist .overlays-tab button {
+  flex: 1 1 auto;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--sp-4) var(--sp-12);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+/* The type pills sit tighter: less room around the name and before the switch. */
+.overlays-page .overlays-tabs .overlays-tab {
+  gap: var(--sp-4);
+  padding-right: var(--sp-6);
+}
+
+.overlays-page .overlays-tabs .overlays-tab button {
+  padding: var(--sp-4) var(--sp-8);
+}
+
+.overlays-tabs .overlays-tab:hover button,
+.overlays-def-tablist .overlays-tab:hover button {
+  background: none;
+  color: var(--color-text);
+}
+
+.overlays-tabs .overlays-tab.active button,
+.overlays-def-tablist .overlays-tab.active button {
+  background: none;
+  color: var(--color-text);
+}
+
+/* On the active blue pill the standard blue switch would vanish: darker off, lighter on. */
+.overlays-tab.active .toggle-slider {
+  background-color: var(--scrim-soft);
+}
+
+.overlays-tab.active .toggle-switch input:checked + .toggle-slider {
+  background-color: var(--hairline-strong);
+}
+
+.overlays-editor {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+}
+
+.overlays-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-12);
+  margin-bottom: var(--sp-12);
+}
+
+/* The title keeps a readable width; when the action row no longer fits beside it, the row
+   wraps under it instead of squeezing the title into a sliver. */
+.overlays-editor-title {
+  flex: 1 1 240px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-12);
+  min-width: 240px;
+}
+
+.overlays-editor-head h2 {
+  margin: 0;
+  color: var(--color-title);
+  font-size: var(--text-base);
+}
+
+.overlays-editor-desc {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  flex: 1 1 100%;
+  /* Always two lines tall (clamped to two), so the card keeps its height whatever the type says. */
+  min-height: 2.7em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Preview-state select, then the buttons as equal columns (sized by the widest label), one row. */
+.overlays-editor-actions {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: max-content;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-items: center;
+  gap: var(--sp-6) var(--sp-8);
+}
+
+.overlays-page .overlays-editor-actions .btn-toolbar {
+  flex: none;
+  min-width: 0;
+}
+/* Save + Cancel: two fixed-width buttons pinned to the right (the link style's flex: 1 must not win). */
+.overlays-editor-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-8);
+  margin-top: var(--sp-12);
+}
+.overlays-page .overlays-editor-foot .btn-toolbar {
+  flex: 0 0 140px;
+  width: 140px;
+  min-width: 0;
+}
+
+/* The overlays of the selected type: one tab each + Add Overlay, then the selected overlay's
+   name and libraries. */
+.overlays-defs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-12);
+}
+
+.overlays-def-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+/* Equal pills, like the type pills above: an inline grid of 1fr columns sizes every tab to the widest. */
+.overlays-page .overlays-def-tablist {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--sp-6);
+}
+
+.overlays-page .overlays-def-tabs .btn-toolbar.overlays-def-add,
+.overlays-page .overlays-def-panel .btn-toolbar.overlays-def-remove {
+  flex: 0 0 auto;
+  width: auto;
+  margin-left: auto;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .overlays-page .overlays-def-tablist {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
+
+/* The rows (name and hint, then the library boxes under their heading) fill the card;
+   Remove Overlay has its own column and sits in the bottom-right corner whatever the rows
+   do. Each row wraps on its own when narrow. */
+.overlays-def-panel {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-16);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-surface-raised);
+  border-radius: var(--radius-md);
+}
+
+.overlays-def-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.overlays-def-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-6) var(--sp-16);
+}
+
+/* A small heading over the library boxes. */
+.overlays-def-label {
+  margin-top: var(--sp-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.overlays-def-hint {
+  flex: 1 1 240px;
+  min-width: 0;
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+
+.overlays-def-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.overlays-def-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.overlays-def-name input {
+  width: 14rem;
+  max-width: 40vw;
+  padding: var(--sp-4) var(--sp-8);
+  font-size: var(--text-sm);
+}
+
+.overlays-def-pick small {
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+}
+
+.overlays-def-pick.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The small preview column is as tall as the two rows of cards beside it (286 + 0.6rem + 151):
+   273px wide puts the poster (2:3, with the base checkbox above and the caption below) at
+   exactly that height, so the two columns end on the same line. */
+.overlays-editor-body {
+  display: grid;
+  grid-template-columns: 273px minmax(0, 1fr);
+  gap: var(--sp-16);
+  align-items: start;
+}
+
+.overlays-editor-body.large {
+  grid-template-columns: 460px minmax(0, 1fr);
+}
+
+/* Narrow: let the card's action buttons wrap again. */
+/* The editor's action row must be allowed to shrink before it can wrap; a no-shrink flex item keeps its one-line width and runs out of the panel. */
+@media (max-width: 1200px) {
+  .overlays-editor-actions {
+    display: flex;
+    flex-wrap: wrap;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+/* Single column: keep the poster at its side-by-side size instead of filling the row. */
+@media (max-width: 1200px) {
+  .overlays-editor-body,
+  .overlays-editor-body.large {
+    grid-template-columns: 1fr;
+  }
+
+  .overlay-preview {
+    max-width: 273px;
+  }
+
+  .overlay-preview.large {
+    max-width: 460px;
+  }
+}
+
+/* Preview + drag handle */
+.overlay-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* The preview card (preview state picker + size toggle) and the Position card share one
+   grid cell, stacked; Position stretches to fill whatever height the row's other cards have. */
+.overlay-panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.overlay-panel-stack > .overlay-panel:last-child {
+  flex: 1 1 auto;
+}
+
+/* Same card on every type: the picker takes the row's width (never its longest option's),
+   and the size button keeps one width whichever label it shows. */
+.overlay-preview-panel-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.overlay-preview-panel-row .overlay-preview-state {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* ListPicker: a dropdown that draws its own list in the page (see ListPicker.tsx). The button
+   looks like the page's selects; the list is capped in height, scrolls inside, and opens
+   upward when there is more room above. */
+.list-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.list-picker-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0 var(--sp-6) 0 var(--sp-8);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+
+.list-picker-button:hover:not(:disabled),
+.list-picker.open .list-picker-button {
+  border-color: var(--color-accent);
+}
+
+
+.list-picker-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-picker-button svg {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+}
+
+.list-picker-list {
+  position: absolute;
+  z-index: var(--z-popover);
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-width: min(360px, 90vw);
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--sp-4) 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 22px var(--shadow-color);
+}
+
+.list-picker-list.above {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.list-picker-list li {
+  padding: var(--sp-4) var(--sp-8);
+  color: var(--color-text-body);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.list-picker-list li.selected {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.list-picker-list li.active {
+  background: var(--color-slate);
+  color: var(--color-text);
+}
+
+.overlays-page .overlay-preview-panel-row .btn-toolbar.overlays-preview-size {
+  flex: 0 0 auto;
+  width: 120px;  /* fits "Smaller Preview", so the button keeps one width when its label flips */
+  min-width: 0;
+  justify-content: center;
+}
+
+.overlay-preview-base {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.overlay-preview-base input[type='checkbox'] {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+
+.overlay-preview-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  background: var(--tint-faint);
+  user-select: none;
+}
+
+.overlay-preview-stage img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.overlay-preview-loading,
+.overlay-preview-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-faint);
+  background: var(--tint);
+}
+
+/* Invisible at rest (the badge itself is the handle); an outline appears only while
+   hovering, keyboard-focused, or dragging. */
+.overlay-drag-handle {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+
+.overlay-drag-handle:hover,
+.overlay-drag-handle:focus-visible {
+  border-color: rgba(var(--rgb-accent), 0.9);
+}
+
+.overlay-drag-handle.dragging {
+  cursor: grabbing;
+  border-color: var(--color-warning-strong);
+}
+
+/* Another overlay's badge: it can be dragged too, with a dashed outline so it reads as not the one being edited. */
+.overlay-drag-handle.other:hover,
+.overlay-drag-handle.other:focus-visible {
+  border-style: dashed;
+  border-color: var(--hairline-strong);
+}
+
+.overlay-drag-handle.other.dragging {
+  border-style: dashed;
+  border-color: var(--color-warning-strong);
+}
+
+.overlay-preview-caption {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+  min-height: 1.2em;
+}
+
+/* Same orange as the active snap guide, so the hint and the lines read as one thing. */
+.overlay-snap-hint {
+  color: var(--color-warning-strong);
+}
+
+/* Panels: uniform boxed groups (Position, Text, Backdrop, plus the type's own sections)
+   laid out in a grid beside the preview. Two rows: the first is 286px tall (Position, Text,
+   Backdrop), the second a fixed 151px (see .overlay-settings-panel), 0.6rem apart. */
+.overlay-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));  /* three cards per row at desktop widths; never narrower than 300px */
+  gap: var(--sp-8);
+  align-content: start;
+  min-width: 0;
+}
+
+.overlay-panel {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-surface-raised);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.overlay-panel h3,
+.overlay-states h3 {
+  margin: 0 0 var(--sp-8);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.overlay-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+}
+
+.overlay-panel-head h3 {
+  margin: 0;
+}
+
+.overlay-panel-fields {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.overlay-panel.off .overlay-panel-fields {
+  opacity: 0.45;
+}
+
+.overlay-color-field.disabled {
+  opacity: 0.6;
+}
+
+/* A cell, fieldset or color field dimmed as one does not dim what is inside it again: Form.css
+   dims each disabled control, and a disabled color field dims itself. */
+.overlay-state-cell.dimmed :disabled:not([type='checkbox'], [type='radio']),
+.overlay-color-field.disabled :disabled:not([type='checkbox'], [type='radio']),
+.overlay-state-cell.dimmed .overlay-color-field.disabled,
+.overlay-panel-fields:disabled .overlay-color-field.disabled {
+  opacity: 1;
+}
+
+.overlay-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-8) var(--sp-8);
+  align-items: start;
+}
+
+/* Every cell = one-line label + a control row of the same height, so labels and controls
+   line up across a row no matter what kind of field sits in each cell. */
+.overlay-panel-grid .field-group > label,
+.overlay-panel-grid .field-label-row {
+  display: block;
+  min-height: 1.15em;
+  line-height: 1.15em;
+  white-space: nowrap;
+}
+
+.overlay-panel-grid .field-group > label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The row itself must not clip: the info icon's tooltip hangs below it. Only the label text truncates. */
+.overlay-panel-grid .field-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.overlay-panel-grid .field-label-row label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overlay-panel-grid .field-group input[type='text'],
+.overlay-panel-grid .field-group input[type='number'],
+.overlay-panel-grid .field-group select,
+.overlay-panel-grid .overlay-toggle-row,
+.overlay-panel-grid .overlay-color-field > input {
+  height: 26px;
+  box-sizing: border-box;
+}
+
+.overlay-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.overlay-toggle-state {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* Two fields that belong together (a width and its color) share one double-width cell so
+   the grid can never wrap them onto different rows. */
+.overlay-field-pair {
+  grid-column: span 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: var(--sp-6) var(--sp-8);
+  min-width: 0;
+}
+
+/* Two small number fields in ONE cell (padding + radius, min + max, the band's offsets), so
+   two such pairs share a row and the Backdrop card stays as short as the Text card. */
+.overlay-field-pair.compact {
+  grid-column: span 1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-6) var(--sp-8);
+}
+
+.overlay-panel-hint {
+  display: block;
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  margin-top: var(--sp-8);
+}
+
+.overlays-page .field-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.overlays-page .field-group label {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.overlays-page .field-group input[type='text'],
+.overlays-page .field-group input[type='number'],
+.overlays-page .field-group select,
+.overlay-states-table input[type='text'],
+.overlay-states-table input[type='number'],
+.overlay-states-table select {
+  padding: var(--sp-4) var(--sp-8);
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.overlays-page .field-group input[type='number'] {
+  max-width: 110px;
+}
+
+.overlays-page .field-group.disabled label,
+.overlays-page .field-group.disabled small {
+  color: var(--color-text-disabled);
+}
+
+.overlays-page .field-group small {
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.3;
+}
+
+.overlays-page .field-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.overlays-page .field-label-row .toolbar-info svg,
+.overlays-page .overlay-th-label .toolbar-info svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Table headings carry the same "i" as field captions. */
+.overlay-th-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+/* Compact toggle (the shared one is 50x26) */
+.overlays-page .toggle-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.overlays-page .toggle-label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.overlays-page .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+/* Picker + hex on one line; the opacity slider wraps underneath so the hex never collapses. */
+.overlay-color-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.overlay-color-field input[type='color'] {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  cursor: pointer;
+}
+
+.overlay-color-field input[type='text'] {
+  flex: 1 1 96px;
+  min-width: 96px;
+  font-family: monospace;
+  font-size: var(--text-xs);
+}
+
+/* Opacity row: spans the color field's full width, the slider filling whatever the % label leaves. */
+.overlay-alpha {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  cursor: help;
+}
+
+.overlay-alpha span {
+  flex: 0 0 2.4em;
+}
+
+.overlay-alpha input[type='range'] {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Statuses table: full width under the preview + panels */
+.overlays-states-section {
+  container-type: inline-size;
+  margin-top: var(--sp-12);
+  padding: var(--sp-8) var(--sp-12) var(--sp-8);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-surface-raised);
+  border-radius: var(--radius-md);
+}
+
+.overlay-states-help {
+  display: block;
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  margin: -0.2rem 0 var(--sp-8);
+}
+
+/* Statuses as one table: a row per state */
+
+.overlay-states-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.overlay-states-table th,
+.overlay-states-table td {
+  padding: var(--sp-4) var(--sp-8);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-surface-raised);
+}
+
+.overlay-states-table thead th {
+  color: var(--color-text-dim);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  border-bottom-color: var(--color-border);
+}
+
+.overlay-states-table thead th.dimmed {
+  color: var(--color-line-soft);
+}
+
+.overlay-states-table tbody th {
+  color: var(--color-text-body);
+  font-weight: 500;
+  white-space: nowrap;
+  padding-top: var(--sp-8);
+}
+
+.overlay-states-table .overlay-states-on {
+  width: 40px;
+}
+
+/* The toggles sit a little lower to line up with the inputs beside them; the header does not. */
+.overlay-states-table tbody .overlay-states-on {
+  padding-top: var(--sp-8);
+}
+
+.overlay-states-table tr.disabled th,
+.overlay-state-cell.dimmed {
+  opacity: 0.45;
+}
+
+/* Per-status "back to default colors" button, last column. */
+.overlay-states-table .overlay-states-reset {
+  width: 28px;
+  padding-left: var(--sp-4);
+  padding-right: 0;
+  text-align: right;
+}
+
+/* A grayed-out reset button lets the pointer through to its tooltip host, so it still explains itself. */
+.overlay-tip-host .btn-icon:disabled {
+  pointer-events: none;
+}
+
+/* The per-row reset's hover text is the page's own tooltip, anchored to the button's right
+   edge so it opens leftwards: the button sits at the right end of its table, where the
+   browser's native tooltip could run off the screen. */
+.overlay-tip-host {
+  position: relative;
+  display: inline-flex;
+}
+
+.overlays-page .overlay-tip-host:hover .toolbar-tooltip,
+.overlays-page .overlay-tip-host:focus-within .toolbar-tooltip {
+  display: block;
+  opacity: 1;
+}
+
+.overlays-page .overlay-tip-host .toolbar-tooltip {
+  left: auto;
+  right: 0;
+  width: max-content;
+  max-width: min(240px, 80vw);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.overlay-states-table input[type='text'] {
+  min-width: 120px;
+}
+
+.overlay-states-table .overlay-color-field {
+  min-width: 150px;
+}
+
+.overlay-states-table .overlay-color-field input[type='text'] {
+  flex: 1 1 80px;
+  min-width: 80px;
+}
+
+/* A long list split into side-by-side tables (schema `split`); one column when the card is narrow. */
+
+.overlay-states-tables.split {
+  display: grid;
+  grid-template-columns: repeat(var(--split, 2), minmax(0, 1fr));
+  gap: 0 var(--sp-20);
+  align-items: start;
+}
+
+.overlay-states-tables.split > .overlay-states-table-wrap + .overlay-states-table-wrap {
+  border-left: 1px solid var(--color-border);
+  padding-left: var(--sp-20);
+}
+
+@container (max-width: 1000px) {
+  .overlay-states-tables.split:not(.bare) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overlay-states-tables.split:not(.bare) > .overlay-states-table-wrap + .overlay-states-table-wrap {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
+
+/* Rows of just a switch and a name (`bare`) need little room: they stay side by side longer. */
+@container (max-width: 520px) {
+  .overlay-states-tables.split.bare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overlay-states-tables.split.bare > .overlay-states-table-wrap + .overlay-states-table-wrap {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
+
+/* The statuses table sizes itself to the card (see container-type on .overlays-states-section):
+   wide enough → a real table; narrower → each status collapses into a block of labelled fields
+   instead of a sideways scroll box. */
+@container (max-width: 800px) {
+  .overlay-states-table,
+  .overlay-states-table tbody {
+    display: block;
+  }
+
+  .overlay-states-table thead {
+    display: none;
+  }
+
+  .overlay-states-table tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-6) var(--sp-8);
+    padding: var(--sp-8) 0;
+    border-bottom: 1px solid var(--color-surface-raised);
+  }
+
+  .overlay-states-table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .overlay-states-table tbody th,
+  .overlay-states-table tbody td {
+    display: block;
+    padding: 0;
+    border-bottom: none;
+  }
+
+  .overlay-states-table tbody .overlay-states-on,
+  .overlay-states-table tbody .overlay-states-reset {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  /* Toggle + name (+ reset) own the first line; the fields wrap two-up underneath. */
+  .overlay-states-table tbody th[scope='row'] {
+    flex: 1 0 calc(100% - 100px);
+  }
+
+  .overlay-states-table tbody .overlay-states-reset {
+    order: -1;
+    margin-left: auto;
+  }
+
+  .overlay-states-table tbody td.overlay-state-cell {
+    flex: 1 1 calc(50% - 0.6rem);
+    min-width: 150px;
+  }
+
+  .overlay-states-table tbody td.overlay-state-cell::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: var(--sp-2);
+    color: var(--color-text-dim);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+}
+
+.overlay-states-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-8);
+}
+
+.overlay-state-card {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-6) var(--sp-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.overlay-state-card.disabled {
+  opacity: 0.7;
+}
+
+.overlay-state-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+}
+
+.overlay-state-head strong {
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+}
+
+.overlay-state-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* Snap guides (shown while dragging) + anchor grid under the preview */
+.overlay-guide {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(var(--rgb-accent), 0.35);
+}
+
+.overlay-guide.vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.overlay-guide.horizontal {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+.overlay-guide.active {
+  background: var(--color-warning-strong);
+  box-shadow: 0 0 0 1px rgba(var(--rgb-warning), 0.35);
+}
+
+.overlay-drag-handle.snapped {
+  border-color: var(--color-warning-strong);
+  border-style: solid;
+}
+
+.overlay-position-footer {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  margin-top: var(--sp-8);
+}
+.overlay-position-footer .overlay-panel-hint {
+  margin-top: 0;
+}
+
+.overlay-position-tips {
+  margin: 0;
+  padding-left: var(--sp-16);
+  min-width: 0;
+  max-width: 340px;
+}
+
+.overlay-position-tips li {
+  margin: 0 0 var(--sp-2);
+}
+
+.overlay-anchors {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 12px);
+  grid-auto-rows: 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.overlay-anchors button {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-raised);
+  cursor: pointer;
+}
+
+.overlay-anchors button:hover {
+  border-color: var(--color-accent);
+  background: rgba(var(--rgb-accent), 0.25);
+}
+
+.overlay-anchors button.active {
+  border-color: var(--color-warning-strong);
+  background: var(--color-warning-strong);
+}
+
+/* Info tooltips (globals.css) are 300px wide and stay in layout at opacity 0, so an icon in
+   a right-hand column widens the page and shows a horizontal scroll bar. Keep them out of
+   layout until hovered/focused, center them under the icon, and let the page clip (not
+   scroll) one that still pokes past the edge. */
+.overlays-page {
+  overflow-x: clip;
+}
+
+.overlays-page .toolbar-tooltip {
+  display: none;
+  --tip-shift: 0px;  /* set by InfoIcon when the tooltip would run past the page edge */
+  transform: translateX(var(--tip-shift));
+}
+
+.overlays-page .toolbar-info:hover .toolbar-tooltip,
+.overlays-page .toolbar-info:focus-within .toolbar-tooltip {
+  display: block;
+  opacity: 1;
+}
+
+.overlays-page .field-label-row .toolbar-tooltip,
+.overlays-page .overlay-th-label .toolbar-tooltip,
+.overlays-page .overlay-toggle-chip .toolbar-tooltip {
+  left: 50%;
+  transform: translateX(calc(-50% + var(--tip-shift)));
+  width: 240px;
+  max-width: min(240px, 80vw);
+  font-size: var(--text-xs);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  white-space: normal;
+}
+
+/* Custom image badges (streaming logos, rating badges): one full-width cell in the panel.
+   Key picker with Upload / Use bundled beside it, and the file it draws now underneath. */
+
+.overlay-panel-grid .overlay-image-uploads-cell {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.overlay-image-uploads {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.overlay-image-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  max-width: 100%;
+}
+
+.overlay-image-uploads .list-picker {
+  flex: 0 0 auto;
+  width: 220px;
+}
+
+/* The badge box: a wide one (a line of lettering) shrinks to fit and keeps clear of the card's edge. */
+.overlay-image-thumb {
+  max-width: calc(100% - 0.5rem);
+  min-width: 48px;
+  height: 34px;
+  margin: 0 var(--sp-4);
+  padding: var(--sp-4) var(--sp-8);
+  box-sizing: border-box;
+  border-radius: var(--radius-sm);
+  background: var(--color-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlay-image-thumb img {
+  max-height: 26px;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  display: block;
+  object-fit: contain;
+}
+
+.overlays-page .overlay-image-uploads .btn-toolbar {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.overlay-image-status {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+
+.overlay-image-status.error {
+  color: var(--color-danger-soft);
+}
+
+/* The second row's cards (the sections that did not fit the first row) share one FIXED
+   height: the tallest second-row card of any type (Streaming's Availability: Region, On no
+   service, and the five Offers checkboxes), so every type's two rows add up to the same
+   height and the small preview beside them is sized to exactly that. A new section must fit
+   in this height; the cards never scroll, and hint tooltips hang out. */
+.overlay-panels .overlay-settings-panel {
+  height: 151px;
+  box-sizing: border-box;
+}
+
+/* Compact switches for several boolean options (the offer kinds): one full-width block under
+   the section's other fields, three switches to a row. */
+.overlay-panel-grid .overlay-toggles-cell {
+  grid-column: 1 / -1;
+}
+
+.overlay-toggle-chips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-8);
+}
+
+/* Checkbox + label + small hint icon, kept to one line each. */
+.overlay-toggle-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+  height: 20px;
+}
+
+.overlay-toggle-chip input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.overlay-toggle-chip label {
+  color: var(--color-text-body);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overlays-page .overlay-toggle-chip .toolbar-info svg {
+  width: 12px;
+  height: 12px;
+}

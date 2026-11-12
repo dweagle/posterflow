@@ -53,6 +53,7 @@ import './pages/maker-tools/unmatched.css'
 import './pages/maker-tools/artwork.css'
 import './pages/maker-tools/reminders.css'
 import './pages/PlexUpload.css'
+import './pages/Overlays.css'
 import './pages/CommunityRequests.css'
 import './components/LockScreen.css'
 import './styles/utilities.css'
@@ -67,6 +68,7 @@ const IDarr = lazy(() => import('./pages/IDarr'))
 const MakerTools = lazy(() => import('./pages/MakerTools'))
 const AssetSearch = lazy(() => import('./pages/AssetSearch'))
 const PlexUpload = lazy(() => import('./pages/PlexUpload'))
+const Overlays = lazy(() => import('./pages/Overlays'))
 const CommunityRequests = lazy(() => import('./pages/CommunityRequests'))
 import { CommunityClaimStatusProvider } from './hooks/useCommunityClaimStatus'
 import { checkSetupComplete } from './api/client'
@@ -195,6 +197,7 @@ function AppContent() {
                 <Route path="plex-upload" element={<PlexUpload />} />
                 <Route path="asset-search" element={<AssetSearch />} />
                 <Route path="poster-search" element={<Navigate to="/asset-search" replace />} />
+                <Route path="overlays" element={<Overlays />} />
                 <Route path="logs" element={<Logs />} />
                 <Route path="community-requests" element={<CommunityClaimStatusProvider><CommunityRequests /></CommunityClaimStatusProvider>} />
                 <Route path="settings" element={<Settings />} />

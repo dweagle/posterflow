@@ -419,6 +419,7 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   maker_monitor: 'Maker Monitor',
   unmatched_assets: 'Unmatched Assets',
   border_replacer: 'Border Replacer',
+  overlays: 'Overlays',
   artwork_pull: 'Artwork Pull',
 }
 
