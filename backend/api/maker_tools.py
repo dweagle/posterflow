@@ -2748,10 +2748,19 @@ def _place_logo(pil: Image.Image, canvas_w: int, canvas_h: int) -> tuple[Image.I
 
 
 def _downgrade_v8_linked_layers(psd) -> int:
-    """psd-tools reads liFD version-8 smart-object entries (Photoshop 2024+) but silently
-    drops their trailing contentID descriptor on save while still writing version=8;
-    Photoshop then refuses the file as "not compatible". Claim version 7 so the saved
-    entries are self-consistent. Returns the number of entries downgraded."""
+    """Downgrade self-inconsistent version-8 linked-layer entries to version 7.
+
+    Photoshop 2024+ writes liFD version-8 smart-object entries whose trailing
+    contentID descriptor older psd-tools releases silently discard on read while
+    the entry still claims version 8; saving then writes version=8 without the
+    descriptor and Photoshop refuses the file as "not compatible". Claim version 7
+    for those descriptor-less entries so the saved record is self-consistent.
+
+    psd-tools 1.26+ preserves that trailing descriptor in ``content_descriptor``.
+    Entries that still carry it are valid version-8 records and must keep both
+    their version and descriptor; do not touch them. The downgrade is therefore
+    keyed on the absence of the descriptor (data/capability), not on the
+    installed package version. Returns the number of entries downgraded."""
     from psd_tools.constants import Tag
 
     downgraded = 0
@@ -2760,7 +2769,7 @@ def _downgrade_v8_linked_layers(psd) -> int:
         return 0
     for tag in (Tag.LINKED_LAYER1, Tag.LINKED_LAYER2, Tag.LINKED_LAYER3, Tag.LINKED_LAYER_EXTERNAL):
         for entry in tagged.get_data(tag, None) or []:
-            if entry.version == 8:
+            if entry.version == 8 and getattr(entry, "content_descriptor", None) is None:
                 entry.version = 7
                 downgraded += 1
     return downgraded
