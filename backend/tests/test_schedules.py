@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -89,6 +90,48 @@ def test_create_schedule_accepts_idarr_job_type(client, monkeypatch):
     payload = response.json()
     assert payload["job_type"] == "idarr"
     assert payload["name"] == "Nightly IDarr"
+
+
+def test_create_schedule_accepts_a_tools_job_type_that_names_a_tool(client, test_db, monkeypatch):
+    """A Tools page tool can be scheduled; job_config names which one (and a dry run)."""
+    import api.schedules as schedules_module
+
+    monkeypatch.setattr(schedules_module, "update_schedules", lambda: None)
+    monkeypatch.setattr(schedules_module, "get_schedule_next_run", lambda _id: None)
+    base = {"job_type": "tools", "name": "Nightly rename", "enabled": True, "schedule_type": "daily", "schedule_value": "03:30"}
+    ok = client.post("/api/schedules/", json={**base, "job_config": '{"tool_id": "sonarr_rename", "dry_run": false}'})
+    assert ok.status_code == 200 and ok.json()["job_type"] == "tools" and '"sonarr_rename"' in ok.json()["job_config"]
+    for bad in (None, "not json", '{"tool_id": "nope"}', "{}"):
+        resp = client.post("/api/schedules/", json={**base, "job_config": bad})
+        assert resp.status_code == 400 and "tool_id" in resp.json()["detail"], bad
+    # Updating to a tools schedule needs the tool too; a known one goes through.
+    sid = ok.json()["id"]
+    assert client.put(f"/api/schedules/{sid}", json={"job_config": '{"tool_id": "gone"}'}).status_code == 400
+    assert client.put(f"/api/schedules/{sid}", json={"job_config": '{"tool_id": "radarr_rename", "dry_run": true}'}).status_code == 200
+    # A profile, when named, must be one of that tool's.
+    for bad in ('{"tool_id": "radarr_rename", "profile_id": 9999}', '{"tool_id": "radarr_rename", "profile_id": "7"}', '{"tool_id": "radarr_rename", "profile_id": true}'):
+        resp = client.put(f"/api/schedules/{sid}", json={"job_config": bad})
+        assert resp.status_code == 400 and "profile" in resp.json()["detail"], bad
+    from models.setting import upsert_setting
+    upsert_setting(test_db, "radarr_instances", json.dumps([{"name": "radarr-1", "url": "http://r1", "api_key": "k"}, {"name": "radarr-4k", "url": "http://r4", "api_key": "k"}]))
+    upsert_setting(test_db, "plex_instances", json.dumps([{"name": "plex", "url": "http://plex", "api_key": "k", "type": "plex"}]))
+    test_db.commit()
+    logos = client.post("/api/tools/plex_reset_posters/profiles", json={"name": "Logos", "settings": {"kinds": ["logo"]}}).json()
+    assert client.put(f"/api/schedules/{sid}", json={"job_config": json.dumps({"tool_id": "plex_reset_posters", "profile_id": logos["id"]})}).status_code == 200
+    assert client.put(f"/api/schedules/{sid}", json={"job_config": json.dumps({"tool_id": "plex_cleanup", "profile_id": logos["id"]})}).status_code == 400  # another tool's
+    # An arr instance has profiles of its own: one is scheduled with its instance, never with another or with all of them.
+    nightly = client.post("/api/tools/radarr_rename/profiles", json={"name": "Nightly", "instance": "radarr-4k"}).json()
+    assert client.put(f"/api/schedules/{sid}", json={"job_config": json.dumps({"tool_id": "radarr_rename", "instance": "radarr-4k", "profile_id": nightly["id"]})}).status_code == 200
+    for bad in ({"tool_id": "radarr_rename", "instance": "radarr-1", "profile_id": nightly["id"]}, {"tool_id": "radarr_rename", "profile_id": nightly["id"]}):
+        resp = client.put(f"/api/schedules/{sid}", json={"job_config": json.dumps(bad)})
+        assert resp.status_code == 400 and "own profiles" in resp.json()["detail"], bad
+    assert client.put(f"/api/schedules/{sid}", json={"job_config": json.dumps({"tool_id": "radarr_rename"})}).status_code == 200  # every instance, each its default
+    # An instance, when named, must be one of that tool's; tools without per-instance runs take none.
+    radarr = "radarr-4k"
+    assert client.put(f"/api/schedules/{sid}", json={"job_config": json.dumps({"tool_id": "radarr_rename", "instance": radarr})}).status_code == 200
+    for bad in ('{"tool_id": "radarr_rename", "instance": "nope"}', '{"tool_id": "radarr_rename", "instance": ""}', '{"tool_id": "radarr_rename", "instance": 7}', '{"tool_id": "plex_cleanup", "instance": "plex"}'):
+        resp = client.put(f"/api/schedules/{sid}", json={"job_config": bad})
+        assert resp.status_code == 400 and "instance" in resp.json()["detail"], bad
 
 
 def test_create_schedule_accepts_maker_monitor_job_type(client, monkeypatch):

@@ -1,0 +1,98 @@
+/* The arr tools' list dialogs (a tag's items, a filter's choices, the titles a filter matches):
+   a search over the arr's library, one row per item. The
+   dialog keeps one size whatever the list holds: the search stays put and the rows scroll in
+   their own box. */
+.rename-tag-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  height: min(440px, 60vh);
+  min-height: min(440px, 60vh);
+  max-height: min(440px, 60vh);
+  overflow: hidden;
+}
+
+.rename-tag-modal .field-hint {
+  margin: 0;
+}
+
+.rename-tag-where {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.rename-tag-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  color: var(--color-text-faint);
+}
+
+.rename-tag-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+.rename-tag-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.rename-tag-note {
+  margin: 0;
+  padding: var(--sp-8);
+  color: var(--color-text-muted);
+}
+
+.rename-tag-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The shared checkbox row (.checkbox-label), stretched to the box's width with a hover. */
+.rename-tag-row {
+  display: flex;
+  padding: var(--sp-6) var(--sp-8);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+}
+
+.rename-tag-row:hover {
+  background: var(--color-surface-raised);
+}
+
+/* A row that is clicked instead of ticked: a title to use as the title filter. */
+button.rename-tag-row {
+  width: 100%;
+  gap: var(--sp-8);
+  background: none;
+  text-align: left;
+}
+
+.rename-tag-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rename-tag-year {
+  flex-shrink: 0;
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
+
+.rename-tag-count {
+  margin-right: auto;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}

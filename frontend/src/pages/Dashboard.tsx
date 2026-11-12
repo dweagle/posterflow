@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
 import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
 import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, getRecentSyncedArtwork, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType, cancelJob, getArtworkUnmatchedStats, type ArtworkUnmatchedStats, type ArtworkType, type UnmatchedStats, type Job } from '../api/client'
+import { describeToolSchedule, getTools, type ToolInfo } from '../api/tools'
 import { useNavigate } from 'react-router-dom'
 import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X, CircleStop } from 'lucide-react'
 import { useToast } from '../components/Toast'
@@ -45,6 +46,7 @@ function Dashboard() {
   const { jobs, unmatchedStats } = useAppEvents()
   const [stats, setStats] = useState<Stats | null>(null)
   const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [tools, setTools] = useState<ToolInfo[]>([])  // for the Tool schedules' summaries
   const [recentItems, setRecentItems] = useState<Partial<Record<CoverageScope, RecentSyncedPoster[]>>>({})
   const [recentRefreshTick, setRecentRefreshTick] = useState(0)
   const [posterFilter, setPosterFilter] = useState<'all' | 'movie' | 'season' | 'collection'>('all')
@@ -81,6 +83,7 @@ function Dashboard() {
   useEffect(() => {
     fetchStats()
     fetchSchedules()
+    fetchToolLabels()
     fetchDrives()
     fetchIdarrTargets()
     fetchActivityStats()
@@ -152,6 +155,13 @@ function Dashboard() {
       const data = await getSchedules()
       setSchedules(data)
     }, 'Error fetching schedules:')
+  }
+
+  const fetchToolLabels = async () => {
+    await fetchWithLogging(async () => {
+      const { groups } = await getTools()
+      setTools(groups.flatMap((g) => g.tools))
+    }, 'Error fetching tools:')
   }
 
   const fetchDrives = async () => {
@@ -377,6 +387,9 @@ function Dashboard() {
     }
     if (isIdarrSchedule(schedule.job_type)) {
       return getIdarrScope(schedule.drive_group)
+    }
+    if (schedule.job_type === 'tools') {
+      return describeToolSchedule(schedule.job_config, tools)
     }
     return null
   }

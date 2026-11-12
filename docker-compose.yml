@@ -11,5 +11,6 @@ services:
       - PUID=1000
       - PGID=1000
       - UMASK=022
+      # - EXTRA_GROUPS=999  # Optional: extra group ids, comma-separated. The Plex user's group lets Clean up Plex uploads delete in Plex's Metadata folder.
       - TZ=UTC
     restart: unless-stopped

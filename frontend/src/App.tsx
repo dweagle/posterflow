@@ -54,6 +54,7 @@ import './pages/maker-tools/artwork.css'
 import './pages/maker-tools/reminders.css'
 import './pages/PlexUpload.css'
 import './pages/Overlays.css'
+import './pages/Tools.css'
 import './pages/CommunityRequests.css'
 import './components/LockScreen.css'
 import './styles/utilities.css'
@@ -69,6 +70,7 @@ const MakerTools = lazy(() => import('./pages/MakerTools'))
 const AssetSearch = lazy(() => import('./pages/AssetSearch'))
 const PlexUpload = lazy(() => import('./pages/PlexUpload'))
 const Overlays = lazy(() => import('./pages/Overlays'))
+const Tools = lazy(() => import('./pages/Tools'))
 const CommunityRequests = lazy(() => import('./pages/CommunityRequests'))
 import { CommunityClaimStatusProvider } from './hooks/useCommunityClaimStatus'
 import { checkSetupComplete } from './api/client'
@@ -198,6 +200,7 @@ function AppContent() {
                 <Route path="asset-search" element={<AssetSearch />} />
                 <Route path="poster-search" element={<Navigate to="/asset-search" replace />} />
                 <Route path="overlays" element={<Overlays />} />
+                <Route path="tools" element={<Tools />} />
                 <Route path="logs" element={<Logs />} />
                 <Route path="community-requests" element={<CommunityClaimStatusProvider><CommunityRequests /></CommunityClaimStatusProvider>} />
                 <Route path="settings" element={<Settings />} />

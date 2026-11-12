@@ -15,6 +15,8 @@ from core.logging import LogTags, log_user_action, log_error, log_info, log_warn
 from core.app_timezone import get_app_timezone, parse_timezone, set_app_timezone, timezone_names
 from core.scheduler import update_schedules
 from services.rclone import google_token_problem
+from services.arr_upgrader import STATE_KEYS as UPGRADE_STATE_KEYS
+from services.tool_profiles import rekey_arr_instances
 from services.apprise_notifications import (
     TAG_SPLIT_RE,
     invalid_apprise_url_lines,
@@ -192,6 +194,7 @@ INTERNAL_SETTING_KEYS: frozenset[str] = frozenset({
     "plex_webhook_stats",
     "poster_cleanup_stats",
     "unmatched_last_stats",
+    *UPGRADE_STATE_KEYS,
 })
 
 
@@ -466,22 +469,6 @@ def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None
     # "<name>:<library key>" selections: rename only — entries for removed servers are
     # inert and revive if the server is re-added, so they are deliberately not pruned.
     if renames:
-        for key in PLEX_PREFIXED_LIBRARY_SETTINGS:
-            selection = _load_json_setting_value(db, key)
-            if not isinstance(selection, list):
-                continue
-            rewritten: List[str] = []
-            seen: set[str] = set()
-            for item in selection:
-                value = str(item)
-                prefix, sep, rest = value.partition(":")
-                if sep and prefix in renames:
-                    value = f"{renames[prefix]}:{rest}"
-                if value not in seen:
-                    seen.add(value)
-                    rewritten.append(value)
-            if rewritten != selection:
-                upsert_setting(db, key, json.dumps(rewritten))
         overlays = _load_json_setting_value(db, "overlays_config")
         if isinstance(overlays, dict):
             rewritten_overlays = _rename_overlay_libraries(overlays, renames)
@@ -527,28 +514,61 @@ def _rename_overlay_libraries(config: Dict[str, Any], renames: Dict[str, str]) -
     return out
 
 
-def _sync_arr_name_keyed_settings(db: Session, setting_key: str, new_instances_json: str) -> None:
+def _rekey_tool_schedules(db: Session, tool_id: str, renames: Dict[str, str]) -> List[str]:
+    """Tools schedules limited to a renamed instance follow it. Returns the names of the
+    schedules changed; the caller commits and rebuilds the scheduler."""
+    from models.schedule import Schedule
+
+    changed: List[str] = []
+    for row in db.query(Schedule).filter(Schedule.job_type == "tools").all():
+        try:
+            cfg = json.loads(row.job_config) if row.job_config else {}
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(cfg, dict) or cfg.get("tool_id") != tool_id or cfg.get("instance") not in renames:
+            continue
+        cfg["instance"] = renames[cfg["instance"]]
+        row.job_config = json.dumps(cfg)
+        changed.append(str(row.name))
+    if changed:
+        db.flush()
+        log_info(LogTags.API, f"Arr instance renamed; schedule(s) {', '.join(changed)} follow the new name")
+    return changed
+
+
+def _sync_arr_name_keyed_settings(db: Session, setting_key: str, new_instances_json: str) -> bool:
     """Called when radarr_instances/sonarr_instances is being saved (before the upsert).
-    The Plex Upload routing map is keyed by arr instance NAME, so a renamed instance
-    gets its routing row re-keyed. Rows for removed instances are left alone — they're
-    not shown in the UI, inert at runtime, and revive if the instance is re-added."""
+    The Plex Upload routing map, the arr tools' profiles and the schedules limited to one
+    instance are keyed by arr instance NAME, so a renamed instance gets them re-keyed. Rows for
+    removed instances are left alone — they're not shown in the UI, inert at runtime, and revive
+    if the instance is re-added. Returns True when a schedule changed (the scheduler needs a rebuild)."""
     try:
         new_instances = json.loads(new_instances_json)
     except (json.JSONDecodeError, TypeError):
-        return
+        return False
     if not isinstance(new_instances, list):
-        return
+        return False
     old_instances = _load_json_setting_value(db, setting_key)
     if not isinstance(old_instances, list):
-        return
+        return False
 
     renames = _detect_instance_renames(old_instances, new_instances)
     if not renames:
-        return
+        return False
+
+    # The arr tools' profiles hold settings per instance name; settings already saved under
+    # the new name win, as with the routing map below.
+    schedules_changed = False
+    for tool in ("rename", "upgrade"):
+        tool_id = f"{setting_key.removesuffix('_instances')}_{tool}"
+        moved = rekey_arr_instances(db, tool_id, renames)
+        if moved:
+            log_info(LogTags.API, f"Arr instance renamed; migrating the {tool} tool settings of {', '.join(moved)}")
+        schedules_changed = bool(_rekey_tool_schedules(db, tool_id, renames)) or schedules_changed
 
     routing = _load_json_setting_value(db, "plex_upload_instance_library_map")
     if not isinstance(routing, dict):
-        return
+        return schedules_changed
     new_routing: Dict[str, Any] = {}
     for arr_name, entries in routing.items():
         target = renames.get(arr_name)
@@ -565,6 +585,7 @@ def _sync_arr_name_keyed_settings(db: Session, setting_key: str, new_instances_j
             new_routing[target] = entries
     if new_routing != routing:
         upsert_setting(db, "plex_upload_instance_library_map", json.dumps(new_routing))
+    return schedules_changed
 
 
 def cleanup_stale_plex_name_keys(db: Session) -> None:
@@ -1168,13 +1189,14 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
 
     log_user_action(f"Saving settings: {', '.join(sorted(allowed.keys()))}")
 
+    schedules_changed = False
     for key, value in allowed.items():
         resolved = _unmask_setting_value(key, value, db)
         if key == "plex_instances":
             # Must run before the upsert below so the old names are still readable.
             _sync_plex_name_keyed_settings(db, resolved)
         elif key in ("radarr_instances", "sonarr_instances"):
-            _sync_arr_name_keyed_settings(db, key, resolved)
+            schedules_changed = _sync_arr_name_keyed_settings(db, key, resolved) or schedules_changed
         upsert_setting(db, key, resolved)
 
     try:
@@ -1188,11 +1210,12 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
     if "timezone" in allowed:
         set_app_timezone(allowed["timezone"])
         log_info(LogTags.SCHEDULER, f"Schedule times are now in {get_app_timezone()}")
+    if "timezone" in allowed or schedules_changed:
         try:
             update_schedules()
         except Exception:
-            # the zone is saved and in force, so a failed rebuild is not a failed save
-            log_warning(LogTags.SCHEDULER, "Timezone saved, but schedules were not rebuilt. They pick it up on the next schedule change or restart.")
+            # the settings are saved and in force, so a failed rebuild is not a failed save
+            log_warning(LogTags.SCHEDULER, "Settings saved, but schedules were not rebuilt. They pick the change up on the next schedule change or restart.")
 
     return {"message": "Settings saved", "count": len(allowed)}
 

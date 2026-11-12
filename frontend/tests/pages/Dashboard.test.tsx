@@ -39,6 +39,11 @@ vi.mock('../../src/contexts/AppEventsContext', () => ({
   }),
 }))
 
+vi.mock('../../src/api/tools', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/api/tools')>()),
+  getTools: vi.fn().mockResolvedValue({ groups: [{ id: 'sonarr', label: 'Sonarr', instances: ['s'], tools: [{ id: 'sonarr_rename', label: 'Rename Sonarr files' }] }] }),
+}))
+
 vi.mock('../../src/api/client', () => ({
   getStats: (...args: unknown[]) => mockGetStats(...args),
   getSchedules: (...args: unknown[]) => mockGetSchedules(...args),

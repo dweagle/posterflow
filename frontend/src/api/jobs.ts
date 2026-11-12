@@ -77,6 +77,7 @@ export interface JobLogs {
   poster_renamer: JobLogFile[]
   border_replacer: JobLogFile[]
   overlays: JobLogFile[]
+  tools: JobLogFile[]
   unmatched_assets: JobLogFile[]
   idarr: JobLogFile[]
   artwork_pull: JobLogFile[]

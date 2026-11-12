@@ -115,6 +115,7 @@ docker run -d \
 |----------|---------|-------------|
 | `PUID` | `1000` | User ID for file ownership |
 | `PGID` | `1000` | Group ID for file ownership |
+| `EXTRA_GROUPS` | *(none)* | Extra group ids, comma-separated. Give the Plex user's group so Clean up Plex uploads can delete superseded uploads in Plex's Metadata folder |
 | `UMASK` | `022` | Permission mask for files and folders the container creates (posters, PSD exports, synced drive files). `022` gives `644`/`755`. Set `002` when other users in the `PGID` group need to save into those files over SMB, e.g. Photoshop on macOS writing in place. Applies to new files only; existing files keep their mode. |
 | `TZ` | `UTC` | Timezone for log timestamps and schedule times. Settings → Scheduling can set a different timezone for schedules. |
 | `DEBUG` | `false` | Enable debug logging on startup (can be toggled in-app) |

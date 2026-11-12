@@ -21,6 +21,7 @@ from models.schedule import Schedule  # noqa: F401
 from models.idarr import IdarrRun, IdarrPendingMatch, IdarrAssetCache  # noqa: F401
 from models.manual_media import ManualMediaEntry  # noqa: F401
 from models.workflow import Workflow  # noqa: F401
+from models.tool_profile import ToolProfile  # noqa: F401
 from models.poster_override import PosterOverride  # noqa: F401
 from models.poster_reminder import PosterReminder  # noqa: F401
 from models.plex_upload import PlexUploadRecord  # noqa: F401

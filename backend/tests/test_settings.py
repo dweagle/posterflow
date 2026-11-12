@@ -2,6 +2,8 @@ import json
 
 from core.config import settings as app_settings
 from models.setting import Setting
+from models.schedule import Schedule
+from models.tool_profile import ToolProfile
 from api.settings import MASKED_VALUE
 
 def test_save_bulk_settings(client, test_db):
@@ -371,6 +373,11 @@ def test_plex_rename_migrates_name_keyed_settings(client, test_db):
         })),
         Setting(key="poster_renamer_libraries", value=json.dumps(["Old Plex:1", "Old Plex:2"])),
         Setting(key="border_replacer_rule_libraries", value=json.dumps(["Old Plex:1"])),
+        Setting(key="plex_metadata_paths", value=json.dumps({"Old Plex": "/plex/Metadata", "Gone Plex": "/old/Metadata"})),
+        Setting(key="overlays_config", value=json.dumps({
+            "enabled": True, "all_libraries": False, "libraries": ["Old Plex:1", "Other:1"],
+            "types": {"status": {"enabled": True, "overlays": [{"name": "TV", "all_libraries": False, "libraries": ["Old Plex:2"]}]}},
+        })),
     ])
     test_db.commit()
 
@@ -380,6 +387,13 @@ def test_plex_rename_migrates_name_keyed_settings(client, test_db):
         ]),
     })
     assert response.status_code == 200
+
+    # The Tools page's Metadata folder follows the rename; a removed server's path goes.
+    assert _get_setting_json(test_db, "plex_metadata_paths") == {"New Plex": "/plex/Metadata"}
+    # The overlay library picks follow it too, the feature's own and each overlay's.
+    overlays = _get_setting_json(test_db, "overlays_config")
+    assert overlays["libraries"] == ["New Plex:1", "Other:1"]
+    assert overlays["types"]["status"]["overlays"][0]["libraries"] == ["New Plex:2"] and overlays["enabled"] is True
 
     instances = _get_setting_json(test_db, "plex_instances")
     assert instances[0]["name"] == "New Plex"
@@ -462,7 +476,7 @@ def test_plex_instances_save_prunes_orphaned_library_configs(client, test_db):
     assert _get_setting_json(test_db, "poster_renamer_libraries") == ["Ghost:9", "Plex:1"]
 
 
-def test_arr_rename_migrates_routing_map_key(client, test_db):
+def test_arr_rename_migrates_routing_map_key(client, test_db, monkeypatch):
     """Renaming a Radarr/Sonarr instance re-keys its Plex Upload routing row; rows for
     other instances (including the other arr type) are untouched."""
     test_db.add_all([
@@ -476,8 +490,22 @@ def test_arr_rename_migrates_routing_map_key(client, test_db):
             "Radarr HD": [{"plex_instance": "Plex", "library_key": "1"}],
             "Sonarr": [{"plex_instance": "Plex", "library_key": "2"}],
         })),
+        ToolProfile(tool_id="radarr_rename", instance="Radarr HD", name="Default", is_default=True, settings=json.dumps({"count": 7, "ignore_tag": "keep"})),
+        ToolProfile(tool_id="radarr_rename", instance="Radarr HD", name="Nightly", is_default=False, settings=json.dumps({"count": 1})),
+        ToolProfile(tool_id="radarr_rename", instance="Radarr 4K", name="Default", is_default=True, settings=json.dumps({"count": 3})),
+        ToolProfile(tool_id="sonarr_rename", instance="Sonarr", name="Default", is_default=True, settings=json.dumps({"count": 9})),
+        ToolProfile(tool_id="sonarr_rename", instance="Radarr HD", name="Default", is_default=True, settings=json.dumps({"count": 4})),
+        ToolProfile(tool_id="radarr_upgrade", instance="Radarr HD", name="Default", is_default=True, settings=json.dumps({"count": 2, "mode": "cutoff"})),
+        Schedule(job_type="tools", name="HD upgrades", schedule_type="daily", schedule_value="02:00", job_config=json.dumps({"tool_id": "radarr_upgrade", "dry_run": False, "instance": "Radarr HD"})),
+        Schedule(job_type="tools", name="HD nightly", schedule_type="daily", schedule_value="03:00", job_config=json.dumps({"tool_id": "radarr_rename", "dry_run": False, "instance": "Radarr HD"})),
+        Schedule(job_type="tools", name="4K nightly", schedule_type="daily", schedule_value="04:00", job_config=json.dumps({"tool_id": "radarr_rename", "dry_run": False, "instance": "Radarr 4K"})),
+        Schedule(job_type="tools", name="Every Radarr", schedule_type="daily", schedule_value="05:00", job_config=json.dumps({"tool_id": "radarr_rename", "dry_run": True})),
+        Schedule(job_type="tools", name="Sonarr oddity", schedule_type="daily", schedule_value="06:00", job_config=json.dumps({"tool_id": "sonarr_rename", "dry_run": False, "instance": "Radarr HD"})),
     ])
     test_db.commit()
+    import api.settings as settings_module
+    rebuilt = []
+    monkeypatch.setattr(settings_module, "update_schedules", lambda: rebuilt.append(True))
 
     response = client.post("/api/settings/bulk", json={
         "radarr_instances": json.dumps([
@@ -485,6 +513,28 @@ def test_arr_rename_migrates_routing_map_key(client, test_db):
         ]),
     })
     assert response.status_code == 200
+
+    # Schedules limited to the renamed instance follow it; the others (and another tool's) stay, and the scheduler is rebuilt once.
+    test_db.expire_all()
+    by_schedule = {s.name: json.loads(s.job_config) for s in test_db.query(Schedule).all()}
+    assert by_schedule["HD nightly"] == {"tool_id": "radarr_rename", "dry_run": False, "instance": "Radarr 1080p"}
+    assert by_schedule["HD upgrades"] == {"tool_id": "radarr_upgrade", "dry_run": False, "instance": "Radarr 1080p"}
+    assert by_schedule["4K nightly"]["instance"] == "Radarr 4K" and "instance" not in by_schedule["Every Radarr"]
+    assert by_schedule["Sonarr oddity"]["instance"] == "Radarr HD"
+    assert rebuilt == [True]
+
+    # Every profile of the renamed instance follows it (the custom ignore tag included); the other
+    # instance's, and another tool's under the old name, stay where they are.
+    test_db.expire_all()
+    by_owner = {(p.tool_id, p.instance, p.name): json.loads(p.settings) for p in test_db.query(ToolProfile).all()}
+    assert by_owner == {
+        ("radarr_rename", "Radarr 1080p", "Default"): {"count": 7, "ignore_tag": "keep"},
+        ("radarr_rename", "Radarr 1080p", "Nightly"): {"count": 1},
+        ("radarr_rename", "Radarr 4K", "Default"): {"count": 3},
+        ("sonarr_rename", "Sonarr", "Default"): {"count": 9},
+        ("sonarr_rename", "Radarr HD", "Default"): {"count": 4},
+        ("radarr_upgrade", "Radarr 1080p", "Default"): {"count": 2, "mode": "cutoff"},
+    }
 
     # Masked key preserved across the rename via the URL fallback
     instances = _get_setting_json(test_db, "radarr_instances")

@@ -8,6 +8,7 @@ import {
   updateSchedule,
   Workflow,
 } from '../api/client'
+import { describeToolSchedule, getTools, type ToolInfo } from '../api/tools'
 
 interface UseSettingsSchedulesParams {
   schedules: Schedule[]
@@ -83,6 +84,8 @@ export const useSettingsSchedules = ({
         return 'Overlays'
       case 'backup':
         return 'Backup'
+      case 'tools':
+        return 'Tool'
       default:
         return 'Unknown Task'
     }
@@ -92,16 +95,23 @@ export const useSettingsSchedules = ({
   const [scheduleValueCache, setScheduleValueCache] = useState<Record<string, string>>({})
   const [scheduleSaving, setScheduleSaving] = useState(false)
   const [workflows, setWorkflows] = useState<Workflow[]>([])
+  const [tools, setTools] = useState<ToolInfo[]>([])
 
   useEffect(() => {
     let mounted = true
     listWorkflows()
       .then((list) => { if (mounted) setWorkflows(list) })
       .catch(() => { if (mounted) setWorkflows([]) })
+    getTools()
+      .then((resp) => { if (mounted) setTools(resp.groups.flatMap((g) => g.tools)) })
+      .catch(() => { if (mounted) setTools([]) })
     return () => {
       mounted = false
     }
   }, [])
+
+  // The tool a tools schedule runs, by the label the Tools page shows.
+  const getToolName = (schedule: Schedule): string | null => describeToolSchedule(schedule.job_config, tools)
 
   // Mirrors the scheduler: a missing or deleted workflow_id runs the default workflow.
   const getWorkflowName = (schedule: Schedule): string | null => {
@@ -477,9 +487,10 @@ export const useSettingsSchedules = ({
     }
 
     const workflowName = schedule.job_type === 'poster_workflow' ? getWorkflowName(schedule) : null
+    const toolName = schedule.job_type === 'tools' ? getToolName(schedule) : null
     const summaryScope = isSyncSchedule
       ? `${taskLabel} · ${driveInfo}`
-      : workflowName ? `${taskLabel} · ${workflowName}` : taskLabel
+      : workflowName ? `${taskLabel} · ${workflowName}` : toolName ? `${taskLabel} · ${toolName}` : taskLabel
 
     switch (schedule.schedule_type) {
       case 'hourly': {

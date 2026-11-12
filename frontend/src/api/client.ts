@@ -420,6 +420,7 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   unmatched_assets: 'Unmatched Assets',
   border_replacer: 'Border Replacer',
   overlays: 'Overlays',
+  tools: 'Tools',
   artwork_pull: 'Artwork Pull',
 }
 

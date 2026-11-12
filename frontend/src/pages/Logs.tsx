@@ -140,6 +140,7 @@ function Logs() {
     poster_renamer: [],
     border_replacer: [],
     overlays: [],
+    tools: [],
     unmatched_assets: [],
     idarr: [],
     artwork_pull: [],
@@ -171,6 +172,7 @@ function Logs() {
     idarr: true,
     artwork_pull: true,
     overlays: true,
+    tools: true,
   })
 
   // Live-tail state
@@ -225,6 +227,7 @@ function Logs() {
           idarr: true,
           artwork_pull: true,
           overlays: true,
+          tools: true,
           [section]: false
         }
       } else {
@@ -1176,6 +1179,55 @@ function Logs() {
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownload('overlays', file.name)
+                              }}
+                              title="Download log"
+                            >
+                              <Download size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="log-section">
+                <h2 onClick={() => toggleSection('tools')}>
+                  <span>Tools</span>
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'tools' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'tools' ? stopLiveTail() : startLiveTail('tools') }}
+                      title={liveJobType === 'tools' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'tools' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['tools'] ? 'collapsed' : ''}`} />
+                  </div>
+                </h2>
+                {!collapsedSections['tools'] && (
+                  <div className="log-section-content">
+                    {(jobLogs.tools ?? []).length === 0 ? (
+                      <p className="no-logs">No tools logs yet</p>
+                    ) : (
+                      <div className="log-list">
+                        {(jobLogs.tools ?? []).map((file) => (
+                          <div
+                            key={file.name}
+                            className={`log-item ${selectedLog?.file.name === file.name ? 'active' : ''}`}
+                            onClick={() => viewLog('tools', file)}
+                          >
+                            <div className="log-item-content">
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
+                              <span className="log-size">{formatFileSize(file.size)}</span>
+                            </div>
+                            <button
+                              className="btn-icon btn-icon-sm btn-download-mini"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDownload('tools', file.name)
                               }}
                               title="Download log"
                             >

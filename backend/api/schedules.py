@@ -5,6 +5,7 @@ from models.schedule import Schedule
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
+import json
 import re
 import traceback
 from core.scheduler import update_schedules, get_schedule_next_run, scheduler
@@ -26,7 +27,42 @@ VALID_JOB_TYPES = {
     "idarr",
     "maker_monitor",
     "backup",  # configuration backup zip to the configured backup location
+    "tools",  # a Tools page tool (the Sonarr/Radarr renamer cycles through a library over scheduled runs)
 }
+
+
+def _check_tools_config(db: Session, job_config: Optional[str]) -> None:
+    """A tools schedule names the tool it runs: job_config {"tool_id": ..., "dry_run": bool} plus
+    "profile_id" when the tool has profiles and the schedule runs one of them, and "instance" when
+    it runs one instance of a per-instance tool. Such a tool keeps its profiles per instance, so a
+    profile there goes with the instance it belongs to."""
+    from models.tool_profile import get_tool_profile
+    from modules.tools import TOOLS, group_instance_names
+    from services.tool_profiles import per_instance
+
+    try:
+        parsed = json.loads(job_config) if job_config else {}
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    tool_id = str(parsed.get("tool_id") or "") if isinstance(parsed, dict) else ""
+    if tool_id not in TOOLS:
+        log_error(LogTags.SCHEDULER, f"Cannot save schedule: unknown tool '{tool_id}'", job_type="tools")
+        raise HTTPException(status_code=400, detail=f"A tools schedule needs a tool_id in job_config. Known tools: {', '.join(sorted(TOOLS))}")
+    instance = parsed.get("instance")
+    if instance is not None and (not isinstance(instance, str) or not instance.strip() or not TOOLS[tool_id].per_instance
+                                 or instance not in group_instance_names(db, TOOLS[tool_id].group)):
+        log_error(LogTags.SCHEDULER, f"Cannot save schedule: unknown instance {instance!r} for '{tool_id}'", job_type="tools")
+        raise HTTPException(status_code=400, detail=f"{TOOLS[tool_id].label} has no instance {instance!r}. Pick one of its instances, or all of them.")
+    profile_id = parsed.get("profile_id")
+    if profile_id is None:
+        return
+    row = None if isinstance(profile_id, bool) or not isinstance(profile_id, int) else get_tool_profile(db, tool_id, profile_id)
+    if row is None:
+        log_error(LogTags.SCHEDULER, f"Cannot save schedule: unknown profile {profile_id!r} for '{tool_id}'", job_type="tools")
+        raise HTTPException(status_code=400, detail=f"{TOOLS[tool_id].label} has no profile {profile_id}. Pick one of its profiles.")
+    if per_instance(TOOLS[tool_id]) and row.instance != instance:
+        log_error(LogTags.SCHEDULER, f"Cannot save schedule: profile {profile_id} of '{tool_id}' does not belong to instance {instance!r}", job_type="tools")
+        raise HTTPException(status_code=400, detail=f"Each {TOOLS[tool_id].group.capitalize()} instance has its own profiles. Pick an instance, then one of its profiles.")
 
 
 class ScheduleResponse(BaseModel):
@@ -130,6 +166,9 @@ def create_schedule(schedule_data: ScheduleCreate, db: Session = Depends(get_db)
     if schedule_data.schedule_type not in valid_types:
         log_error(LogTags.SCHEDULER, f"Cannot create schedule: Invalid schedule_type '{schedule_data.schedule_type}'", schedule_type=schedule_data.schedule_type)
         raise HTTPException(status_code=400, detail=f"Invalid schedule_type. Must be one of: {', '.join(valid_types)}")
+
+    if schedule_job_type == "tools":
+        _check_tools_config(db, schedule_data.job_config)
 
     schedule = Schedule(
         job_type=schedule_job_type,
@@ -271,6 +310,8 @@ def update_schedule(
         schedule.schedule_type = schedule_update.schedule_type
     if "schedule_value" in fields_set:
         schedule.schedule_value = schedule_update.schedule_value
+    if effective_job_type == "tools" and ("job_config" in fields_set or "job_type" in fields_set):
+        _check_tools_config(db, schedule_update.job_config if "job_config" in fields_set else schedule.job_config)
     if "job_config" in fields_set:
         schedule.job_config = schedule_update.job_config
 

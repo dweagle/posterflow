@@ -39,6 +39,9 @@ from modules.unmatched import run_unmatched_detection_background_job
 from modules.border import run_border_replacer_background_job
 from modules.overlays import run_overlays_background_job
 from modules.idarr import run_idarr_background_job
+from modules.tools import group_instance_names, remember_tool_job, TOOLS, run_tool_background_job
+from services.tool_profiles import run_settings
+from models.job import JOB_TYPE_TOOLS
 from api.maker_tools import run_maker_monitor_scan_for_schedule
 from services.backup import run_backup_to_location
 from core.app_timezone import get_app_timezone
@@ -248,6 +251,39 @@ def run_overlays_for_schedule() -> None:
         )
 
     _run_scheduled_operation("Scheduled overlays run failed", _submit)
+
+
+def run_tool_for_schedule(tool_id: str, dry_run: bool = False, profile_id: Optional[int] = None, instance: Optional[str] = None) -> None:
+    """Wrapper for scheduled Tools runs (the Sonarr/Radarr renamer, Plex cleanup …). The run gets
+    the named profile's settings as saved now; a profile that is gone falls back to the default one.
+    `instance` limits a per-instance tool to one configured instance, whose profile `profile_id`
+    then is; one that is gone skips the run. Without it every instance runs its own default profile."""
+    def _submit(db: Session) -> None:
+        tool = TOOLS.get(tool_id)
+        if tool is None:
+            log_warning(LogTags.SCHEDULER, f"Scheduled tool run skipped: unknown tool '{tool_id}'")
+            return
+        available, reason = tool.ready(db)
+        if not available:
+            log_warning(LogTags.SCHEDULER, f"Scheduled {tool.label} skipped: {reason}")
+            return
+        if instance and instance not in group_instance_names(db, tool.group):
+            log_warning(LogTags.SCHEDULER, f"Scheduled {tool.label} skipped: {tool.group.capitalize()} instance '{instance}' is no longer configured")
+            return
+        profile_name, settings, gone = run_settings(db, tool, instance=instance, profile_id=profile_id)
+        if gone:
+            log_warning(LogTags.SCHEDULER, f"Scheduled {tool.label}: profile {', '.join(gone)} no longer exists"
+                        + (f"; running '{profile_name}'" if profile_name else ""))
+        job = _queue_pending_job(
+            db,
+            JOB_TYPE_TOOLS,
+            run_tool_background_job,
+            args_builder=lambda job: (job.id, tool_id, bool(dry_run and tool.dry_run), settings, profile_name, instance),
+        )
+        if job is not None:
+            remember_tool_job(job.id, tool_id)  # busy on the Tools page while it waits in the queue
+
+    _run_scheduled_operation("Scheduled tool run failed", _submit)
 
 
 def run_idarr_for_schedule(idarr_scope: Optional[str] = None, sync_after_run: bool = False, force_sync_after_run: bool = False) -> None:
@@ -490,6 +526,21 @@ def update_schedules() -> None:
             elif schedule.job_type == 'backup':
                 job_func = run_backup_for_schedule
                 job_args = []
+            elif schedule.job_type == 'tools':
+                job_func = run_tool_for_schedule
+                tool_id, tool_dry_run, tool_profile, tool_instance = "", False, None, None
+                try:
+                    jc = json.loads(schedule.job_config) if schedule.job_config else {}
+                    tool_id = str(jc.get("tool_id") or "")
+                    tool_dry_run = bool(jc.get("dry_run", False))
+                    tool_profile = jc.get("profile_id") if isinstance(jc.get("profile_id"), int) else None
+                    tool_instance = str(jc.get("instance")).strip() if isinstance(jc.get("instance"), str) and str(jc.get("instance")).strip() else None
+                except Exception as e:
+                    log_warning(LogTags.SCHEDULER, f"Failed to parse tools job_config: {e}", schedule_id=schedule.id)
+                if not tool_id:
+                    log_warning(LogTags.SCHEDULER, "Skipping tools schedule with no tool_id", schedule_id=schedule.id)
+                    continue
+                job_args = [tool_id, tool_dry_run, tool_profile, tool_instance]
             else:
                 log_warning(
                     LogTags.SCHEDULER,

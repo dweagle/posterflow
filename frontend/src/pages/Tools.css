@@ -1,0 +1,649 @@
+.tools-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+}
+
+/* The page's flex gap already spaces the header from the content. */
+.tools-page .page-header {
+  margin-bottom: 0;
+}
+
+/* The page's flex gap already spaces the toolbar; its global margin would double it. */
+.tools-page .toolbar {
+  margin-bottom: 0;
+}
+
+/* Pill subtabs (shared .pf-subtabs look); the page gap spaces them from the toolbar and the cards. */
+.tools-tabs {
+  gap: var(--sp-6);
+}
+
+.tools-error,
+.tools-loading {
+  color: var(--color-text-dim);
+  padding: var(--sp-8) var(--sp-12);
+}
+
+.tools-error {
+  color: var(--color-danger-text);
+}
+
+/* One compact card per media server type, two per row when there is room. */
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* a lone card keeps half the width */
+  gap: var(--card-gap);
+  align-items: stretch; /* cards in a row share the tallest one's height */
+}
+
+@media (max-width: 1200px) {
+  .tools-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tools-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  container-type: inline-size; /* the columns inside stack on the card's own width, not the window's */
+}
+
+.tools-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.tools-card-head h3 {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--color-title);
+}
+
+.tools-card-icon {
+  display: inline-flex;
+  color: var(--color-warning);
+}
+
+.tools-card-servers {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+
+/* Settings sections sit flat in the card like the tool rows do, no box within the box. */
+.tools-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-2);
+  border-top: 1px solid var(--color-surface-raised);
+}
+
+.tools-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-8); /* air between the Save pair and the row of controls under it */
+}
+
+.tools-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-left: auto;
+}
+
+.tools-section h4,
+.tools-row h4 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-body);
+}
+
+.tools-note {
+  color: var(--color-warning);
+  font-size: var(--text-xs);
+}
+
+.tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+  flex-shrink: 0;
+}
+
+.tools-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-6) var(--sp-12);
+  padding: var(--sp-4) var(--sp-2);
+  border-top: 1px solid var(--color-surface-raised);
+}
+
+/* Image tools stack (two on Plex: clean and reset), each a block of one line per kind with the
+   kind on the left, indented under the title, and its switch on the right; a rule parts them. */
+.tools-image-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-4) var(--sp-2);
+  border-top: 1px solid var(--color-surface-raised);
+}
+
+.tools-image-tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.tools-image-tools > .tools-image-tool + .tools-image-tool {
+  border-top: 1px solid var(--color-surface-raised);
+  padding-top: var(--sp-8);
+}
+
+/* The title line anchors its info tip, like a tool row does, so the tip opens under the title. */
+.tools-image-tool .tools-row-text {
+  flex-wrap: nowrap;
+  position: relative;
+}
+
+.tools-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding-left: var(--sp-24);
+}
+
+.tools-kind-actions {
+  display: inline-flex;
+  gap: var(--sp-6);
+  flex-shrink: 0;
+}
+
+.tools-kind-row-all {
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--color-surface-raised);
+}
+
+.tools-kind-row-all .tools-kind-label {
+  color: var(--color-text-body);
+  font-weight: 600;
+}
+
+.tools-kind-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-12);
+}
+
+/* The kind switches sit two to a line (three kinds leave one alone), each switch right after
+   its label and the pairs hugging the left; one pair to a line in a narrow card. */
+.tools-kind-grid {
+  display: grid;
+  grid-template-columns: repeat(4, max-content);
+  gap: var(--sp-8) var(--sp-12);
+  align-items: center;
+}
+
+.tools-kind-grid .tools-kind-row {
+  display: contents;
+}
+
+.tools-kind-grid .tools-kind-row .toggle-switch {
+  margin-right: var(--sp-16); /* air before the next pair */
+}
+
+@container (max-width: 400px) {
+  .tools-kind-grid {
+    grid-template-columns: repeat(2, max-content);
+  }
+}
+
+.tools-kind-label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.tools-row-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.tools-row-icon {
+  display: inline-flex;
+  color: var(--color-accent);
+}
+
+.tools-plex-path {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-8);
+}
+
+.tools-plex-path label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tools-plex-path input[type='text'] {
+  padding: var(--sp-4) var(--sp-8);
+  font-size: var(--text-xs);
+  font-family: monospace;
+  min-width: 0;
+}
+
+/* Sonarr/Radarr rename settings: the typed fields in one column, the checkboxes in the other. */
+.tools-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: var(--sp-4) var(--sp-20);
+}
+
+.tools-fields-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+/* The inputs get the same air between them as the checkboxes beside them. */
+.tools-fields-inputs {
+  gap: var(--sp-12);
+}
+
+.tools-fields-inputs .tools-field {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+}
+
+.tools-fields-checks {
+  gap: var(--sp-12);
+  justify-content: center;
+  border-left: 1px solid var(--color-surface-raised);
+  padding-left: var(--sp-20);
+}
+
+@container (max-width: 520px) {
+  .tools-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .tools-fields-checks {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--color-surface-raised);
+    padding-top: var(--sp-8);
+  }
+}
+
+/* The upgrader's fields come in three groups: the search settings, the tags with the title
+   filter, and the switches. A wide card puts the tags above the switches in the second column.
+   A field with a button needs more room than a switch, so a narrower card keeps the tags under
+   the search settings, and a narrow one stacks all three. */
+.tools-fields-even {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: 'main tags' 'main checks';
+  row-gap: 0;
+}
+
+.tools-fields-main {
+  grid-area: main;
+}
+
+.tools-fields-tags {
+  grid-area: tags;
+  padding: 0 0 var(--sp-12) var(--sp-20);
+  border-left: 1px solid var(--color-surface-raised);
+}
+
+.tools-fields-even .tools-fields-checks {
+  grid-area: checks;
+  justify-content: flex-start;
+}
+
+@container (max-width: 640px) {
+  .tools-fields-even {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    grid-template-areas: 'main checks' 'tags checks';
+    row-gap: var(--sp-12);
+  }
+
+  .tools-fields-tags {
+    padding: 0;
+    border-left: 0;
+  }
+
+  .tools-fields-even .tools-fields-checks {
+    justify-content: center;
+  }
+}
+
+@container (max-width: 520px) {
+  .tools-fields-even {
+    grid-template-columns: 1fr;
+    grid-template-areas: 'main' 'tags' 'checks';
+  }
+}
+
+.tools-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.tools-field > span {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+/* Each setting anchors its own info tip, which opens under the field and stays inside the card. */
+.tools-field {
+  position: relative;
+}
+
+.tools-field .toolbar-info svg {
+  width: 13px;
+  height: 13px;
+}
+
+.tools-field .toolbar-tooltip {
+  min-width: 220px;
+}
+
+/* Compact fields, one height: 1.5rem, the height of the .btn-xs button beside a tag field. */
+.tools-field input[type='text'],
+.tools-field input[type='number'] {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 1.5rem;
+  padding: var(--sp-4) var(--sp-6);
+  font-size: var(--text-xs);
+}
+
+.tools-field input[type='number'] {
+  max-width: 5.5rem;
+}
+
+/* A setting that does not apply right now dims with its title, as a disabled checkbox does
+   with its caption (Form.css). The title's text only: the info tip in it stays readable. */
+.tools-field:has(> :where(input, select):disabled) > span:first-child {
+  color: var(--color-text-disabled);
+}
+
+/* An input with a button beside it: the ignore tag and its Manage button. */
+.tools-field-pair {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.tools-field-pair .btn-xs {
+  flex-shrink: 0;
+}
+
+.tools-field select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: 11rem;
+  height: 1.5rem;
+  padding: 0 var(--sp-6);
+  font-size: var(--text-xs);
+}
+
+.tools-check {
+  cursor: pointer;
+}
+
+/* A checkbox keeps its info tip outside the label, so a click on the tip never toggles the box. */
+.tools-check-row .tools-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.tools-check input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+/* A row that only takes up room: the Radarr card has one setting fewer than the Sonarr card
+   beside it, and its blocks and buttons should sit level with that one's. */
+.tools-check-spacer {
+  visibility: hidden;
+}
+
+.tools-path-check {
+  grid-column: 2 / span 2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.tools-path-check.ok { color: var(--color-success-soft); }
+.tools-path-check.warn { color: var(--color-warning); }
+
+@media (max-width: 550px) {
+  .tools-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* The hover tips hang off their row instead of the "i", so they never leave the card or the page. */
+.tools-card-head,
+.tools-section-head,
+.tools-row {
+  position: relative;
+}
+
+.tools-card .toolbar-info {
+  position: static;
+}
+
+.tools-card .toolbar-tooltip {
+  left: 0;
+  right: auto;
+  top: calc(100% + 4px);
+  width: auto;
+  max-width: 100%;
+}
+
+/* Rename settings, one block per instance (the name shows only when there are several). */
+.tools-instance-settings + .tools-instance-settings {
+  margin-top: var(--sp-8);
+  padding-top: var(--sp-8);
+  border-top: 1px solid var(--color-surface-raised);
+}
+
+/* An instance's name, then its buttons in one row: reset, the Save pair, then Run and Dry run. In
+   a narrow card the buttons drop under the name, and the run pair under those, all to the right. */
+.tools-instance-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-8);
+  margin-bottom: var(--sp-8);
+}
+
+.tools-instance-head .tools-section-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tools-instance-name {
+  margin: 0;
+  color: var(--color-title);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+/* Profiles: one saved settings set per name. The bar picks the one shown, and makes, renames
+   or deletes one; its info tip hangs off the bar like the other tips in the card. */
+.tools-profile-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-8);
+}
+
+/* In the rename settings the bar is a row of its own, ruled off from the Save row above it and
+   the fields below it: under the section head, or in each instance's block when there are several. */
+.tools-section > .tools-profile-bar,
+.tools-instance-settings > .tools-profile-bar {
+  padding: var(--sp-8) 0;
+  border-top: 1px solid var(--color-surface-raised);
+  border-bottom: 1px solid var(--color-surface-raised);
+}
+
+.tools-instance-settings > .tools-profile-bar {
+  margin-bottom: var(--sp-8);
+}
+
+.tools-profile-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex: 1 1 160px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.tools-profile-field > span {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.tools-profile-field select {
+  flex: 1;
+  min-width: 0;
+  max-width: 16rem;
+  padding: var(--sp-4) var(--sp-6);
+  font-size: var(--text-xs);
+}
+
+.tools-profile-actions {
+  display: inline-flex;
+  gap: var(--sp-4);
+  flex-shrink: 0;
+}
+
+/* The Save pair closes a block of image kinds. */
+.tools-kind-row-save {
+  justify-content: flex-end;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--color-surface-raised);
+}
+
+/* Setup tips for the Plex cleanup: a boxed disclosure under the Metadata folders head. */
+.tools-setup {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  margin-bottom: var(--sp-8);
+}
+
+.tools-setup-summary {
+  padding: var(--sp-6) var(--sp-12);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.tools-setup-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tools-setup-summary::before {
+  content: '▶';
+  font-size: var(--text-3xs);
+  transition: transform 0.15s;
+  display: inline-block;
+}
+
+.tools-setup[open] .tools-setup-summary::before {
+  transform: rotate(90deg);
+}
+
+.tools-setup-body {
+  padding: var(--sp-8) var(--sp-12) var(--sp-12);
+  border-top: 1px solid var(--color-surface-raised);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.tools-setup-body p {
+  margin: 0 0 var(--sp-8);
+}
+
+.tools-setup-body ul {
+  margin: 0;
+  padding-left: var(--sp-20);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.tools-setup-body strong {
+  color: var(--color-text-body);
+}
+
+.tools-setup-body code {
+  font-size: var(--text-2xs);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--sp-4);
+  overflow-wrap: anywhere;
+}
