@@ -18,6 +18,7 @@ DISCORD_NOTIFICATION_FEATURES = [
     "plex_upload",
     "idarr",
     "maker_monitor",
+    "tools",
     "system_errors",
 ]
 
@@ -153,6 +154,28 @@ def _truncate(value: str, max_length: int) -> str:
     return f"{value[: max_length - 3]}..."
 
 
+EMBED_LIMIT = 6000  # Discord: title, description, every field name and value, and the footer together
+
+
+def _embed_size(embed: Dict[str, Any]) -> int:
+    size = len(str(embed.get("title") or "")) + len(str(embed.get("description") or "")) + len(str((embed.get("footer") or {}).get("text") or ""))
+    return size + sum(len(str(f.get("name") or "")) + len(str(f.get("value") or "")) for f in embed.get("fields") or [])
+
+
+def _fit_embed(embed: Dict[str, Any], limit: int = EMBED_LIMIT - 100) -> None:
+    """Shrink an embed to Discord's size limit in place: the longest field values are cut first,
+    the description after them, so a long run report still goes out instead of being rejected."""
+    fields = embed.get("fields") or []
+    while _embed_size(embed) > limit and fields:
+        longest = max(fields, key=lambda f: len(str(f.get("value") or "")))
+        value = str(longest.get("value") or "")
+        if len(value) <= 64:
+            break
+        longest["value"] = _truncate(value, max(64, len(value) - (_embed_size(embed) - limit)))
+    if _embed_size(embed) > limit and embed.get("description"):
+        embed["description"] = _truncate(str(embed["description"]), max(64, len(str(embed["description"])) - (_embed_size(embed) - limit)))
+
+
 def _format_title(event_type: str, title: str) -> str:
     normalized = str(title or "").strip()
     lowered_title = normalized.lower()
@@ -183,8 +206,10 @@ def send_discord_notification(
     footer_text: str = "PosterFlow Notification",
     username: str = "PosterFlow",
     include_spacer_image: bool = True,
+    mention: bool = True,
 ) -> bool:
-    """Send a Discord notification if global and feature toggles allow it."""
+    """Send a Discord notification if global and feature toggles allow it. `mention=False`
+    leaves the ping out whatever the mention settings say."""
     try:
         config = _read_discord_config(db)
         if not config.get("enabled"):
@@ -235,6 +260,7 @@ def send_discord_notification(
             embed["description"] = _truncate(str(description), 3500)
         if embed_fields:
             embed["fields"] = embed_fields
+        _fit_embed(embed)
 
         payload = {
             "username": _truncate(str(username or "PosterFlow"), 80),
@@ -251,7 +277,7 @@ def send_discord_notification(
             mention_on_err = bool(config.get("mention_on_error", True))
             mention_on_ok = bool(config.get("mention_on_success", False))
             mention_on_info = bool(config.get("mention_on_info", False))
-        if mention_str:
+        if mention_str and mention:
             should_mention = (
                 (event_type == "error" and mention_on_err)
                 or (event_type == "success" and mention_on_ok)

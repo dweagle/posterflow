@@ -58,6 +58,7 @@ class LogTags:
     MONITOR = "MONITOR"
     CLEANUP = "CLEANUP"
     OVERLAYS = "OVERLAYS"
+    TOOLS = "TOOLS"
 
 # ============================================================================
 # LOGGING HELPERS
@@ -214,6 +215,7 @@ def add_job_log_handler(job_type: str, job_id: int, job_name: Optional[str] = No
         "poster_renamer": LogTags.RENAMER,
         "border_replacer": LogTags.BORDER_REPLACER,
         "overlays": LogTags.OVERLAYS,
+        "tools": LogTags.TOOLS,
         "unmatched_assets": LogTags.UNMATCHED,
         "backup": LogTags.BACKUP,
         "idarr": LogTags.IDARR,
@@ -282,6 +284,7 @@ def _should_log_to_job(record: dict, job_type: str) -> bool:
         "poster_renamer": ["RENAMER", "SCANNER", "MERGE", "ARR", "MATCH", "CLEANUP"],
         "border_replacer": ["BORDER"],
         "overlays": ["OVERLAYS"],
+        "tools": ["TOOLS", "OVERLAYS", "ARR"],
         "unmatched_assets": ["UNMATCHED", "SCANNER", "MERGE", "ARR", "RENAMER"],
         "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "RENAMER", "BORDER", "OVERLAYS", "UNMATCHED", "RCLONE", "SCANNER", "MERGE", "ARR", "MATCH", "UPLOADER", "CLEANUP"],
         "backup": ["BACKUP"],
@@ -323,6 +326,7 @@ def remove_job_log_handler(handler_id: int, job_type: str = None, success: bool 
                 "poster_renamer": LogTags.RENAMER,
                 "border_replacer": LogTags.BORDER_REPLACER,
                 "overlays": LogTags.OVERLAYS,
+                "tools": LogTags.TOOLS,
                 "unmatched_assets": LogTags.UNMATCHED,
                 "backup": LogTags.BACKUP,
                 "idarr": LogTags.IDARR,

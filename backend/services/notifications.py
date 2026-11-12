@@ -18,8 +18,10 @@ def send_notification(
     footer_text: str = "PosterFlow Notification",
     username: str = "PosterFlow",
     include_spacer_image: bool = True,
+    mention: bool = True,
 ) -> bool:
-    """Fan out to every channel; each one applies its own enable, feature and event gating."""
+    """Fan out to every channel; each one applies its own enable, feature and event gating.
+    `mention=False` sends without a ping, for a message that precedes the one that pings."""
     discord_sent = send_discord_notification(
         db,
         feature_key=feature_key,
@@ -31,6 +33,7 @@ def send_notification(
         footer_text=footer_text,
         username=username,
         include_spacer_image=include_spacer_image,
+        mention=mention,
     )
     apprise_sent = send_apprise_notification(
         db,

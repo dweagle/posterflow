@@ -22,6 +22,7 @@ from services.apprise_notifications import (
     parse_apprise_urls,
     send_apprise_test_notification,
 )
+from services.discord_notifications import DISCORD_NOTIFICATION_FEATURES
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -590,18 +591,6 @@ class RevealSensitiveSettingRequest(BaseModel):
     field: str | None = None
     instance_name: str | None = None
     index: int | None = None
-
-
-DISCORD_NOTIFICATION_FEATURES = [
-    "workflow",
-    "sync",
-    "poster_renamer",
-    "unmatched_assets",
-    "plex_upload",
-    "idarr",
-    "maker_monitor",
-    "system_errors",
-]
 
 
 class DiscordNotificationFeatureConfig(BaseModel):

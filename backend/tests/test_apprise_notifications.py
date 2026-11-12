@@ -376,6 +376,26 @@ def test_save_apprise_config_persists_and_keeps_comments(client, test_db):
     assert client.get("/api/settings/notifications/apprise").json()["features"]["sync"]["tags"] == "urgent"
 
 
+def test_every_feature_toggle_survives_a_save_on_both_channels(client):
+    """The settings API must keep every feature the senders know (Tools was once dropped on save)."""
+    on = {key: {"enabled": True} for key in DISCORD_NOTIFICATION_FEATURES}
+    response = client.post(
+        "/api/settings/notifications/apprise",
+        json={"enabled": True, "urls": "json://a/x", "features": _features_payload(**on)},
+    )
+    assert response.status_code == 200, response.text
+    apprise_features = client.get("/api/settings/notifications/apprise").json()["features"]
+    assert {key for key, f in apprise_features.items() if f["enabled"]} == set(DISCORD_NOTIFICATION_FEATURES)
+
+    response = client.post(
+        "/api/settings/notifications/discord",
+        json={"enabled": True, "webhook_url": "https://discord.com/api/webhooks/1/abc", "features": on},
+    )
+    assert response.status_code == 200, response.text
+    discord_features = client.get("/api/settings/notifications/discord").json()["features"]
+    assert {key for key, f in discord_features.items() if f["enabled"]} == set(DISCORD_NOTIFICATION_FEATURES)
+
+
 def test_save_apprise_config_rejects_bad_url_with_line_number(client):
     payload = {"enabled": True, "urls": "json://a/x\nnope", "features": _features_payload()}
     response = client.post("/api/settings/notifications/apprise", json=payload)

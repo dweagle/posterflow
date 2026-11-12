@@ -82,6 +82,14 @@ class ARRClient:
         """
         return self._request_with_retries("GET", endpoint, headers=headers)
 
+    def make_post_request(self, endpoint: str, json: Any = None) -> Optional[Any]:
+        """POST json to endpoint; the decoded response, or None after the retries fail."""
+        return self._request_with_retries("POST", endpoint, json=json)
+
+    def make_put_request(self, endpoint: str, json: Any = None) -> Optional[Any]:
+        """PUT json to endpoint; the decoded response, or None after the retries fail."""
+        return self._request_with_retries("PUT", endpoint, json=json)
+
     def _request_with_retries(
         self,
         method: str,

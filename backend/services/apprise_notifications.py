@@ -154,7 +154,8 @@ def _build_body(
         if lines:
             parts.append("\n".join(lines))
 
-    return "\n\n".join(parts)
+    # Code fences are Discord's; plain-text services get the lines inside them.
+    return "\n".join(line for line in "\n\n".join(parts).split("\n") if line.strip() not in ("```diff", "```"))
 
 
 def _notify(

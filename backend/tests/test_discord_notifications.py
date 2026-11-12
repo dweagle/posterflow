@@ -203,6 +203,20 @@ def test_send_discord_notification_returns_false_for_invalid_webhook():
     assert result is False
 
 
+def test_fit_embed_trims_the_longest_fields_to_discords_limit():
+    from services.discord_notifications import EMBED_LIMIT, _embed_size, _fit_embed
+
+    embed = {"title": "Radarr rename", "description": "Needs a look", "footer": {"text": "PosterFlow"},
+             "fields": [{"name": f"field {n}", "value": "x" * 1000, "inline": False} for n in range(10)]}
+    assert _embed_size(embed) > EMBED_LIMIT
+    _fit_embed(embed)
+    assert _embed_size(embed) <= EMBED_LIMIT - 100 and len(embed["fields"]) == 10 and embed["description"] == "Needs a look"
+    assert all(f["value"].endswith("...") or len(f["value"]) == 1000 for f in embed["fields"]) and min(len(f["value"]) for f in embed["fields"]) >= 64
+    small = {"title": "t", "description": "d", "footer": {"text": "f"}, "fields": [{"name": "n", "value": "v"}]}
+    _fit_embed(small)
+    assert small["fields"][0]["value"] == "v"  # nothing to trim
+
+
 def test_send_discord_notification_posts_to_webhook_and_returns_true():
     import json
 
