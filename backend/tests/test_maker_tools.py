@@ -1787,6 +1787,14 @@ def test_downgrade_v8_linked_layers_preserves_descriptor_bearing_entries():
     from psd_tools.psd.tagged_blocks import TaggedBlocks
     from api.maker_tools import _downgrade_v8_linked_layers
 
+    legacy_entry = LinkedLayer(
+        kind=LinkedLayerType.DATA, version=7, uuid="fedcba9876543210fedcba9876543210",
+        filename="Legacy.png\x00", filetype=b"png ", data=b"legacy-bytes",
+        child_id="\x00", mod_time=0.0, lock_state=0,
+    )
+    if not hasattr(legacy_entry, "content_descriptor"):
+        pytest.skip("psd-tools lacks linked-layer content_descriptor support")
+
     content_id = "content-id-123"
     descriptor = DescriptorBlock()
     descriptor["contentID"] = String(content_id)
@@ -1796,11 +1804,6 @@ def test_downgrade_v8_linked_layers_preserves_descriptor_bearing_entries():
         filename="Logo.png\x00", filetype=b"png ", data=b"fake-embedded-bytes",
         child_id="\x00", mod_time=0.0, lock_state=0,
         content_descriptor=descriptor,
-    )
-    legacy_entry = LinkedLayer(
-        kind=LinkedLayerType.DATA, version=7, uuid="fedcba9876543210fedcba9876543210",
-        filename="Legacy.png\x00", filetype=b"png ", data=b"legacy-bytes",
-        child_id="\x00", mod_time=0.0, lock_state=0,
     )
 
     psd = PSDImage.new("RGB", (4, 4))
@@ -1826,8 +1829,11 @@ def test_downgrade_v8_linked_layers_preserves_descriptor_bearing_entries():
     assert _downgrade_v8_linked_layers(reread) == 0
 
     # Stable repeated round-trip.
+    first_save = buf.getvalue()
     buf2 = BytesIO()
     reread.save(buf2)
+    second_save = buf2.getvalue()
+    assert first_save == second_save
     buf2.seek(0)
     reread2 = PSDImage.open(buf2)
     entries2 = reread2._record.layer_and_mask_information.tagged_blocks.get_data(Tag.LINKED_LAYER2)
