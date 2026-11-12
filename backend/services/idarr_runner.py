@@ -1656,7 +1656,7 @@ class IdarrRunner:
                 cls._tmdb_note_success()
                 return payload if isinstance(payload, dict) else {}
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
-                # Transport-level outage (previously NOT retried). Retry, then count it as a hard failure.
+                # Transport-level outage: retry, then count it as a hard failure.
                 if attempt < cls.TMDB_MAX_RETRIES - 1:
                     time.sleep(0.5 * (2 ** attempt))
                     continue
@@ -3229,77 +3229,6 @@ class IdarrRunner:
             log_warning(LogTags.IDARR, f"Failed reading IDarr cache rows for {context}: {exc}")
             return []
 
-    def _delete_cache_by_key(self, asset_key: str) -> bool:
-        key = str(asset_key or "").strip()
-        if not key:
-            return False
-
-        row = self._cache_query().filter(IdarrAssetCache.asset_key == key).first()
-        if not row:
-            return False
-
-        self.db.delete(row)
-        self._pending_query().filter(IdarrPendingMatch.asset_key == key).delete(synchronize_session=False)
-        self.db.commit()
-        return True
-
-    def _delete_cache_entries(self, query: str) -> int:
-        raw = str(query or "").strip()
-        if not raw:
-            return 0
-
-        deleted = 0
-        direct_key_deleted = self._delete_cache_by_key(raw)
-        if direct_key_deleted:
-            return 1
-
-        if raw.isdigit():
-            tmdb_value = int(raw)
-            rows = self._cache_query().filter(IdarrAssetCache.tmdb_id == tmdb_value).all()
-            for row in rows:
-                if isinstance(row.asset_key, str):
-                    self._pending_query().filter(IdarrPendingMatch.asset_key == row.asset_key).delete(synchronize_session=False)
-                self.db.delete(row)
-                deleted += 1
-            if deleted:
-                self.db.commit()
-            return deleted
-
-        title = raw
-        year: int | None = None
-        year_match = re.match(r"^(.*?)\s*\((\d{4})\)\s*$", raw)
-        if year_match:
-            title = str(year_match.group(1) or "").strip()
-            year = int(year_match.group(2))
-
-        if not title:
-            return 0
-
-        normalized_title = normalize_cache_key(title)
-        rows = self._load_all_cache_rows("delete by title")
-        target_rows: list[IdarrAssetCache] = []
-        for row in rows:
-            row_title = str(row.title or "").strip()
-            if not row_title:
-                continue
-            if normalize_cache_key(row_title) != normalized_title:
-                continue
-            if isinstance(year, int):
-                row_year = row.year if isinstance(row.year, int) else None
-                if row_year != year:
-                    continue
-            target_rows.append(row)
-
-        for row in target_rows:
-            if isinstance(row.asset_key, str):
-                self._pending_query().filter(IdarrPendingMatch.asset_key == row.asset_key).delete(synchronize_session=False)
-            self.db.delete(row)
-            deleted += 1
-
-        if deleted:
-            self.db.commit()
-        return deleted
-
     def _load_ignored_asset_keys(self) -> set[str]:
         setting = get_setting(self.db, SETTING_MAKER_IDARR_IGNORED_TITLES)
         if not setting or not setting.value:
@@ -3787,7 +3716,7 @@ class IdarrRunner:
         is normal (movie 4599 "Raising Helen" vs tv 4599 "Yes, Dear") — but the same *title* across
         those two types only happens when one row inherited the other's title. We can't tell which
         without TMDB, so clear both; each re-verifies under its own type. Once corrected their titles
-        differ, so this no longer fires. Full runs only."""
+        differ and nothing is found. Full runs only."""
         by_tmdb: dict[int, list[IdarrAssetCache]] = {}
         for row in self._cache_query().all():
             if isinstance(row.tmdb_id, int):
@@ -4823,48 +4752,6 @@ class IdarrRunner:
         except (UnidentifiedImageError, Exception) as exc:
             log_warning(LogTags.IDARR, f"Asset format conversion failed for '{file_path.name}': {exc}")
 
-    def _transfer_file(
-        self,
-        *,
-        source: Path,
-        destination: Path,
-        action_type: str,
-        dry_run: bool,
-        duplicates_dir: Path,
-    ) -> tuple[bool, bool, bool, str | None, str]:
-        normalized_action = str(action_type or "move").strip().lower() or "move"
-        if normalized_action not in {"move", "copy"}:
-            return False, False, False, None, "unsupported_action"
-
-        if not source.exists() or not source.is_file():
-            return False, False, False, None, "source_missing"
-
-        conflicted = destination.exists()
-        archived_duplicate = False
-        archived_path: str | None = None
-
-        if conflicted:
-            source_mtime = source.stat().st_mtime
-            destination_mtime = destination.stat().st_mtime
-            if source_mtime <= destination_mtime:
-                return False, False, True, None, "kept_newer_destination"
-
-            archived_duplicate, archived_path = self._archive_duplicate(destination, duplicates_dir, dry_run)
-            if not archived_duplicate:
-                return False, False, True, None, "archive_failed"
-
-        if dry_run:
-            reason = "replaced_older_destination" if conflicted else "transferred"
-            return True, archived_duplicate, conflicted, archived_path, reason
-
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if normalized_action == "move":
-            shutil.move(str(source), str(destination))
-        else:
-            shutil.copy2(str(source), str(destination))
-
-        reason = "replaced_older_destination" if conflicted else "transferred"
-        return True, archived_duplicate, conflicted, archived_path, reason
 
     @staticmethod
     def _is_filename_too_long(filename: str, limit: int = 255) -> bool:

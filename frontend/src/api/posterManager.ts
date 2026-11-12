@@ -16,14 +16,6 @@ export interface PosterConfig {
   action_type: string  // 'copy', 'move', 'hardlink', or 'symlink'
 }
 
-export interface PosterMatch {
-  source_path: string
-  media_title: string
-  media_type: string
-  media_year: number | null
-  confidence: number
-  destination_path: string
-}
 
 export interface DrivePriority {
   drive_ids: number[]
@@ -636,13 +628,6 @@ export interface FlowRunOptions {
   workflow_id?: number | null
 }
 
-export const getFlowConfig = async (): Promise<FlowConfig> => {
-  return getData('/api/posterflow/flow/config')
-}
-
-export const saveFlowConfig = async (config: FlowConfig) => {
-  return postData('/api/posterflow/flow/config', config)
-}
 
 export const runFlow = async (options?: FlowRunOptions): Promise<FlowResult> => {
   const payload: Record<string, unknown> = {}

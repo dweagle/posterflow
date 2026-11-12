@@ -1,5 +1,5 @@
 """Tests for services/match_report.py (single-item unmatched diagnosis)."""
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import services.match_report as match_report
 from services.match_report import (

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from core.logging import log_debug, log_info, log_warning, log_phase, LogTags, logger
+from core.logging import log_debug, log_warning, log_phase, LogTags, logger
 from util.posters.index import build_search_index, create_new_empty_index, search_matches
 from util.posters.match import is_match
 from util.data.construct import ITEM_SLOTS, SLOT_POSTER

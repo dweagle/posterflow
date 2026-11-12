@@ -1,10 +1,5 @@
 import { getData, postData } from './http'
 
-export interface Setting {
-  key: string
-  value: string
-  description?: string
-}
 
 export interface TestResult {
   success: boolean
@@ -571,21 +566,6 @@ export const getMakerIdarrPendingCandidates = async (payload: {
   return postData('/api/idarr/pending-matches/candidates', payload)
 }
 
-export const reviewMakerIdarrPendingCandidate = async (payload: {
-  asset_key: string
-  tmdb_id: number
-  action: 'accept' | 'reject' | 'clear'
-  note?: string
-  sync_target_index?: number
-}): Promise<{
-  success: boolean
-  asset_key: string
-  tmdb_id: number
-  action: string
-  candidate_reviews: Record<string, { status?: 'accept' | 'reject'; reviewed_at?: string; note?: string | null }>
-}> => {
-  return postData('/api/idarr/pending-matches/candidates/review', payload)
-}
 
 export const getMakerIdarrCacheStats = async (syncTargetIndex?: number): Promise<MakerIdarrCacheStats> => {
   return getData('/api/idarr/cache/stats', {

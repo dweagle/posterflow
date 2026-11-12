@@ -25,7 +25,6 @@ from api.maker_tools import (
     _check_show_status,
     _scan_library,
     _content_disposition,
-    _extract_name,
     _merge_recent_missing_items,
     _place_poster,
     _translate_year_season,
@@ -202,21 +201,6 @@ def test_sanitize_monitor_config_non_dict_returns_defaults():
 # _extract_name
 # ---------------------------------------------------------------------------
 
-
-def test_extract_name_strips_tmdb_tag():
-    assert _extract_name("Breaking Bad {tmdb-1396}") == "Breaking Bad"
-
-
-def test_extract_name_strips_year_in_parentheses():
-    assert _extract_name("The Batman (2022)") == "The Batman"
-
-
-def test_extract_name_returns_full_name_when_no_bracket():
-    assert _extract_name("No Brackets Here") == "No Brackets Here"
-
-
-def test_extract_name_handles_empty_string():
-    assert _extract_name("") == ""
 
 
 # ---------------------------------------------------------------------------
@@ -3451,8 +3435,8 @@ def test_save_gallery_logo_writes_canonical_png(tmp_path):
     assert resp["status"] == "added"
     written = resp["written"]
     assert written.endswith(" - logo.png") and "{tmdb-1}" in written and "Show (2020)" in written
-    saved = Image.open(tmp_path / written)
-    assert saved.format == "PNG"
+    with Image.open(tmp_path / written) as saved:
+        assert saved.format == "PNG"
 
 
 def test_save_gallery_background_writes_canonical_jpg(tmp_path):
@@ -3462,7 +3446,8 @@ def test_save_gallery_background_writes_canonical_jpg(tmp_path):
         resp = json.loads(mt.save_gallery_artwork(_artwork_request(subtype="background", path="/bg.jpg"), db=MagicMock()).body)
     written = resp["written"]
     assert written.endswith(" - background.jpg")
-    assert Image.open(tmp_path / written).format == "JPEG"
+    with Image.open(tmp_path / written) as saved:
+        assert saved.format == "JPEG"
 
 
 def test_save_gallery_squareart_crops_to_square(tmp_path):
@@ -3475,8 +3460,8 @@ def test_save_gallery_squareart_crops_to_square(tmp_path):
             db=MagicMock()).body)
     written = resp["written"]
     assert written.endswith(" - squareart.jpg")
-    saved = Image.open(tmp_path / written)
-    assert saved.format == "JPEG" and saved.size == (800, 800)
+    with Image.open(tmp_path / written) as saved:
+        assert saved.format == "JPEG" and saved.size == (800, 800)
 
 
 def test_save_gallery_artwork_rejects_crop_on_non_squareart():

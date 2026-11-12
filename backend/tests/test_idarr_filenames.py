@@ -2,7 +2,6 @@
 suffixes, parse_asset, rename-in-place, transfers, and rename history caps."""
 
 import json
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -150,35 +149,6 @@ def test_idarr_runner_update_cache_rename_history_caps_entries(test_db):
     assert history[-1]["from"] == "latest_old.jpg"
     assert history[-1]["to"] == "latest_new.jpg"
 
-
-def test_idarr_runner_transfer_file_replaces_older_destination_and_archives_duplicate(test_db, tmp_path):
-    runner = IdarrRunner(test_db)
-
-    source = tmp_path / "newer.jpg"
-    destination = tmp_path / "target.jpg"
-    duplicates_dir = tmp_path / "idarr_duplicates"
-    duplicates_dir.mkdir(parents=True, exist_ok=True)
-
-    destination.write_text("old")
-    time.sleep(0.01)
-    source.write_text("new")
-
-    transferred, archived_duplicate, conflicted, archived_path, reason = runner._transfer_file(
-        source=source,
-        destination=destination,
-        action_type="move",
-        dry_run=False,
-        duplicates_dir=duplicates_dir,
-    )
-
-    assert transferred is True
-    assert archived_duplicate is True
-    assert conflicted is True
-    assert reason == "replaced_older_destination"
-    assert archived_path is not None
-    assert destination.exists()
-    assert destination.read_text() == "new"
-    assert source.exists() is False
 
 
 def test_idarr_runner_generate_filename_preserves_hyphenated_season_suffix(test_db):

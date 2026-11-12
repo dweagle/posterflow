@@ -338,23 +338,6 @@ def compact_idarr_run_details_history(
     return int(compacted)
 
 
-def idarr_run_to_dict(run: IdarrRun) -> dict[str, Any]:
-    """Convert an IdarrRun ORM row into API-safe payload."""
-    return {
-        "id": run.id,
-        "job_id": run.job_id,
-        "success": bool(run.success),
-        "source_dir": run.source_dir,
-        "destination_dir": run.destination_dir,
-        "scope_token": run.scope_token,
-        "stats_json": run.stats_json,
-        "details_json": run.details_json,
-        "warnings_json": run.warnings_json,
-        "unmatched_count": run.unmatched_count,
-        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-        "created_at": run.created_at.isoformat() if run.created_at else None,
-    }
-
 
 def sanitize_idarr_scope_token(value: Any) -> str | None:
     """Return a normalized scope token string or None when missing."""

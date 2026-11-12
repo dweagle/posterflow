@@ -1,7 +1,5 @@
 """Tests for /api/posterflow/manual-media endpoints."""
 
-import json
-import pytest
 
 from models.manual_media import ManualMediaEntry
 

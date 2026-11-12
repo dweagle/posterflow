@@ -20,32 +20,6 @@ def test_rclone_service_creates_minimal_config(monkeypatch, tmp_path):
     assert "type = drive" in content
 
 
-def test_test_connection_returns_false_when_credentials_missing(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "config_dir", tmp_path)
-    service = RcloneService()
-    monkeypatch.setattr(service, "_get_credentials", lambda: (None, None, None, None))
-
-    assert service.test_connection() is False
-
-
-def test_test_connection_returns_true_when_credentials_present(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "config_dir", tmp_path)
-    service = RcloneService()
-    monkeypatch.setattr(service, "_get_credentials", lambda: ("id", "secret", '{"token":"abc"}', None))
-
-    assert service.test_connection() is True
-
-
-def test_test_connection_returns_true_when_service_account_present(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "config_dir", tmp_path)
-    service = RcloneService()
-
-    sa_file = tmp_path / "service-account.json"
-    sa_file.write_text('{"type":"service_account"}')
-    monkeypatch.setattr(service, "_get_credentials", lambda: (None, None, None, str(sa_file)))
-
-    assert service.test_connection() is True
-
 
 def test_list_files_returns_items_on_success(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "config_dir", tmp_path)
@@ -60,28 +34,6 @@ def test_list_files_returns_items_on_success(monkeypatch, tmp_path):
     assert isinstance(files, list)
     assert files[0]["Name"] == "one.jpg"
 
-
-def test_download_file_returns_true_or_false_from_rclone_result(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "config_dir", tmp_path)
-    monkeypatch.setattr("services.rclone.shutil.which", lambda _binary: "/usr/bin/rclone")
-    service = RcloneService()
-    monkeypatch.setattr(service, "_get_credentials", lambda: ("id", "secret", '{"token":"abc"}', None))
-
-    local_file = tmp_path / "downloads" / "poster.jpg"
-
-    ok_result = SimpleNamespace(returncode=0, stdout="", stderr="")
-    fail_result = SimpleNamespace(returncode=1, stdout="", stderr="boom")
-
-    calls = {"count": 0}
-
-    def _fake_run(*args, **kwargs):
-        calls["count"] += 1
-        return ok_result if calls["count"] == 1 else fail_result
-
-    monkeypatch.setattr("services.rclone.subprocess.run", _fake_run)
-
-    assert service.download_file("drive-123", "remote/poster.jpg", local_file) is True
-    assert service.download_file("drive-123", "remote/poster.jpg", local_file) is False
 
 
 def test_sync_folder_restricts_to_poster_filetypes_and_size(monkeypatch, tmp_path):

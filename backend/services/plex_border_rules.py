@@ -25,7 +25,6 @@ from models.setting import get_setting_value
 from util.constants import POSTER_ID_PATTERN  # canonical {tmdb-..}/{imdb-..}/{tvdb-..} token parser
 from util.data.normalization import normalize_titles  # canonical title normalization (shared with poster_renamer)
 
-RULE_RUN_TYPES = ("workflow", "webhook", "manual", "autorun", "scheduled")
 _MATCH_TYPES = ("label", "genre", "collection")
 _MODES = ("include", "except", "skip")
 

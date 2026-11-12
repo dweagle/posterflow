@@ -16,7 +16,7 @@ from urllib.parse import quote
 import requests
 import zlib
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_
@@ -456,12 +456,6 @@ def _get_monitor_last_result(db: Session) -> dict[str, Any]:
 
     return payload if isinstance(payload, dict) else {}
 
-
-def _extract_name(filename: str) -> str:
-    match = re.match(r"^(.*?)\s*[\(\{]", filename)
-    if match:
-        return match.group(1).strip()
-    return filename
 
 
 def _scan_library(path: str, library_name: str) -> tuple[dict[str, set[int]], set[str], dict[str, int]]:
@@ -3938,38 +3932,6 @@ def save_maker_monitor_config(config: MakerMonitorConfig, db: Session = Depends(
         log_error(LogTags.MONITOR, f"Failed saving maker monitor config: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to save monitor configuration")
 
-
-def _send_monitor_library_report_notification(db: Session, library_result: MakerMonitorLibraryResult) -> None:
-    shows_to_report = sorted(library_result.shows, key=lambda item: item.date)
-    needed_count = sum(1 for item in library_result.shows if not item.poster_exists)
-
-    lines: list[str] = []
-    max_items = 25
-    for show in shows_to_report[:max_items]:
-        icon = "✅" if show.poster_exists else "🎨"
-        ext_text = " (👥 Synced)" if show.external_sources else ""
-        season_text = "Specials" if show.season_number == 0 else f"S{show.season_number:02d}"
-        lines.append(f"{icon} **[{show.name}]({show.homepage})** ({season_text}){ext_text}\n`{show.date}`")
-
-    if len(shows_to_report) > max_items:
-        lines.append(f"\n...and {len(shows_to_report) - max_items} more items.")
-    if not lines:
-        lines.append("_No upcoming premieres found._")
-
-    send_notification(
-        db,
-        feature_key="maker_monitor",
-        event_type="info",
-        title="Posters Needed",
-        description=f"**Upcoming Seasons:**\n\n{'\n'.join(lines)}",
-        fields=[
-            {"name": "📂 Folder", "value": f"**{library_result.library_name}** ({library_result.library_type})", "inline": True},
-            {"name": "🔎 Premieres", "value": f"{library_result.premieres_found} Found", "inline": True},
-            {"name": "🎨 Action", "value": f"{needed_count} Needed", "inline": True},
-        ],
-        color=16750592 if needed_count > 0 else 5025616,
-        footer_text="Season Monitor Script",
-    )
 
 
 def _send_monitor_summary_notification(

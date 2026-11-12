@@ -29,7 +29,6 @@ ARTWORK_TYPE_TO_NAME: Dict[str, str] = {"logo": "logo", "background": "backgroun
 
 # On-disk basename → internal type, for recognising placed files.
 _ARTWORK_NAME_TO_TYPE: Dict[str, str] = {name: atype for atype, name in ARTWORK_TYPE_TO_NAME.items()}
-ARTWORK_STEMS = set(_ARTWORK_NAME_TO_TYPE)
 
 
 def artwork_type_of(filename: str) -> Optional[str]:

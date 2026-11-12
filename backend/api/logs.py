@@ -69,8 +69,6 @@ def read_log_window(end_offset: Optional[int] = None, max_lines: int = LOG_WINDO
             entries.append({'timestamp': timestamp, 'level': log_level, 'message': message})
     return entries, kept_start
 
-class LogSettings(BaseModel):
-    debug_enabled: bool
 
 @router.get("/", response_model=List[LogEntry])
 def get_logs(

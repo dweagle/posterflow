@@ -34,7 +34,6 @@ Image.MAX_IMAGE_PIXELS = None  # some TMDB logos are 12000px wide
 
 TMDB_API = "https://api.themoviedb.org/3"
 TMDB_IMG = "https://image.tmdb.org/t/p/original"
-TMDB_THUMB = "https://image.tmdb.org/t/p/w300"
 
 # subtype -> forced output extension (mirrors IDarr's _generate_new_filename)
 SUBTYPE_EXT = {"logo": ".png", "background": ".jpg", "squareart": ".jpg"}

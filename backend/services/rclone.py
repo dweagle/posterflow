@@ -335,10 +335,6 @@ scope = drive.readonly
             log_error(LogTags.RCLONE, problem)
         return auth_args
     
-    def test_connection(self) -> bool:
-        """Test rclone connection"""
-        auth_args = self._get_drive_auth_args()
-        return auth_args is not None
     
     def sync_folder(
         self,
@@ -1012,43 +1008,6 @@ scope = drive.readonly
                 except OSError:  # nosec B110
                     pass
 
-    def download_file(self, drive_id: str, remote_path: str, local_path: Path) -> bool:
-        """Download a file from Google Drive"""
-        try:
-            if not self.rclone_binary:
-                return False
-
-            auth_args = self._get_drive_auth_args()
-            if auth_args is None:
-                return False
-            
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            remote_root = self._build_remote_root_path(drive_id)
-            remote_relative_path = self._sanitize_remote_relative_path(remote_path)
-            remote_file = f"{remote_root}{remote_relative_path}"
-            
-            result = subprocess.run(  # nosec B603
-                [
-                    self.rclone_binary, 'copyto', remote_file, str(local_path),
-                    '--config', str(self.config_path),
-                    *auth_args,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
-            
-            if result.returncode == 0:
-                return True
-            else:
-                log_error(LogTags.RCLONE, f"Download failed: {result.stderr}")
-                return False
-                
-        except Exception as e:
-            import traceback
-            log_error(LogTags.RCLONE, f"Error downloading: {str(e)}\n{traceback.format_exc()}")
-            return False
     
     def sync_multiple_folders(
         self,

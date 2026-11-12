@@ -1,20 +1,12 @@
 import { useEffect, useCallback, useSyncExternalStore } from 'react'
 import { getMakerIdarrConfig, getSettings, saveSettings } from '../../api/client'
 import { quickAddFilesToIdarr } from '../../utils/idarrQuickAdd'
-import { useIdarrSyncTarget, resolvePosterSyncTargetIndex, readStoredSyncTarget, type IdarrSyncTargetOption } from '../../hooks/useIdarrSyncTarget'
-
-export type IdarrTargetOption = IdarrSyncTargetOption
+import { useIdarrSyncTarget, resolvePosterSyncTargetIndex, readStoredSyncTarget } from '../../hooks/useIdarrSyncTarget'
 
 /** What the request card's Upload button (and a drop on the card) does with the files. */
 export type CommunityUploadAction = 'discord' | 'discord_idarr' | 'idarr'
 /** The two actions that involve IDarr; the Requests page toggle switches between one of these and 'discord'. */
 export type IdarrUploadAction = Exclude<CommunityUploadAction, 'discord'>
-
-export const UPLOAD_ACTION_OPTIONS: { value: CommunityUploadAction; label: string }[] = [
-  { value: 'discord', label: 'Post to Discord' },
-  { value: 'discord_idarr', label: 'Post to Discord + add to IDarr' },
-  { value: 'idarr', label: 'Add to IDarr only' },
-]
 
 export const uploadActionPostsToDiscord = (action: CommunityUploadAction): boolean => action !== 'idarr'
 export const uploadActionAddsToIdarr = (action: CommunityUploadAction): boolean => action !== 'discord'

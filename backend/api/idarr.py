@@ -543,34 +543,6 @@ def _filter_pending_query_by_scope(query: Any, scope_token: str | None):
     return query.filter(~IdarrPendingMatch.asset_key.like("%::scope=%"))
 
 
-def _extract_payload_filenames(cache_row: IdarrAssetCache) -> set[str]:
-    filenames: set[str] = set()
-    if not isinstance(cache_row.payload_json, str) or not cache_row.payload_json.strip():
-        return filenames
-
-    try:
-        payload = json.loads(cache_row.payload_json)
-    except Exception:
-        return filenames
-
-    if not isinstance(payload, dict):
-        return filenames
-
-    for field_name in ("current_filenames", "original_filenames"):
-        field_value = payload.get(field_name)
-        if isinstance(field_value, list):
-            for item in field_value:
-                if isinstance(item, str) and item.strip():
-                    filenames.add(Path(item.strip()).name)
-
-    pending_entry = payload.get("pending_entry")
-    if isinstance(pending_entry, dict):
-        pending_file = pending_entry.get("files")
-        if isinstance(pending_file, str) and pending_file.strip():
-            filenames.add(Path(pending_file.strip()).name)
-
-    return filenames
-
 
 def _normalize_idarr_asset_type(asset_type: str | None) -> str:
     """Return the canonical Idarr asset type, falling back to the raw lowercased value."""

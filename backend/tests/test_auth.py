@@ -3,7 +3,6 @@ Tests for the authentication system:
   - core/auth.py  (PBKDF2 helpers, DB-level helpers, AppAuthMiddleware)
   - api/auth.py   (verify, set, clear, status endpoints)
 """
-import pytest
 import time
 from core.auth import (
     hash_password,
@@ -14,9 +13,8 @@ from core.auth import (
     invalidate_auth_cache,
     _cache,
     APP_PASSWORD_HASH_KEY,
-    APP_PASSWORD_SALT_KEY,
 )
-from models.setting import upsert_setting, get_setting
+from models.setting import upsert_setting
 
 
 # ---------------------------------------------------------------------------

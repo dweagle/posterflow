@@ -5,7 +5,6 @@ from util.data.normalization import (
     normalize_file_names,
     normalize_titles,
     remove_common_words,
-    remove_tokens,
 )
 
 

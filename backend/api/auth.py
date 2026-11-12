@@ -16,7 +16,7 @@ from core.auth import (
     set_password,
     invalidate_auth_cache,
 )
-from core.logging import LogTags, log_info, log_warning, log_error, log_user_action
+from core.logging import LogTags, log_warning, log_error, log_user_action
 from core.rate_limiter import limiter
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])

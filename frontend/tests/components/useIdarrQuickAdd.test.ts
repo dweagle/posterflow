@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  UPLOAD_ACTION_OPTIONS,
   effectiveUploadAction,
   readUploadPreferences,
   uploadActionAddsToIdarr,
@@ -11,8 +10,7 @@ import {
 } from '../../src/components/community/useIdarrQuickAdd'
 
 describe('community upload action helpers', () => {
-  it('offers the three actions and splits them into Discord / IDarr halves', () => {
-    expect(UPLOAD_ACTION_OPTIONS.map((o) => o.value)).toEqual(['discord', 'discord_idarr', 'idarr'])
+  it('splits the three actions into Discord / IDarr halves', () => {
     expect(uploadActionPostsToDiscord('discord')).toBe(true)
     expect(uploadActionPostsToDiscord('discord_idarr')).toBe(true)
     expect(uploadActionPostsToDiscord('idarr')).toBe(false)

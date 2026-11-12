@@ -6,20 +6,16 @@ Tests for the post-job scripts feature:
   - core/hooks.py  run_post_job_hook()
 """
 import json
-import stat
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from models.setting import Setting
 from core.hooks import (
     HOOK_KEY_SYNC_ONE,
     HOOK_KEY_WORKFLOW,
-    SCRIPTS_DIR,
     _validate_script,
-    list_available_scripts,
     run_post_job_hook,
 )
 
