@@ -6,6 +6,32 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-11
+### Added
+- Overlays: badges on posters for status, rating, content rating, resolution, audio, edition and streaming service.
+  - While overlays are on, they are part of every upload. The Workflow upload step, webhooks, manual uploads and scheduled Asset Upload runs all send the poster with its badge already drawn on.
+  - A badge is redrawn when it goes stale, and a scheduled Overlays job keeps badges current between uploads.
+  - The new Overlays page has a live preview, per-library picks and custom badge image uploads.
+  - Kometa users: do not run PosterFlow overlays alongside Kometa overlays. Each will keep replacing the other's poster.
+  - Kometa users: turn off `assets_for_all` too, or Kometa puts the plain poster back once its item cache expires. Keep the assets folder itself, as Kometa still needs it for collection posters.
+- Tools: a new Tools page for maintenance jobs, with a tab each for media servers, the Arr Renamer and the Arr Upgrader. Tools can be scheduled and show in the sidebar, Dashboard and Logs. Settings are saved as named profiles for each Sonarr and Radarr instance.
+- Tools (Media Servers): Plex can remove old uploaded images or put images back to the server's own. Jellyfin can clean its image cache or put images back to the server's own.
+  - The Plex image cleanup deletes files from Plex's Metadata folder directly. PosterFlow needs that folder mounted with write permission, and its path set under Plex Metadata folders on the Tools page.
+- Tools (Arr Renamer): renames files and folders in Sonarr and Radarr a few items at a time. It tags what it has checked so the next run carries on from there, holds back renames that look wrong, and confirms every file is still there afterwards.
+- Tools (Arr Upgrader): has Sonarr and Radarr search for better releases a few items at a time. It can search everything, only what is below its quality cutoff, or only what is missing, with filters by tag, quality profile, age and title. Reports what was grabbed and whether each grab imported, failed or got stuck.
+- Thank you Riyu and BZ for the legwork on the Arr Renamer and Arr Upgrader. Their scripts were the reference for both.
+- Border Replacer: holidays and Plex rules can set their own border width.
+- Notifications: Tools (Media, Arr Upgrader, Arr Renamer) get their own on/off switch.
+
+### Changed
+- Asset Upload: (performance) full runs handle four assets at a time with one upload per title, and Plex collections and border rule lookups are read in batches.
+- Asset Upload: when a run covers both Plex and Jellyfin, the upload notification lists what each server received.
+- Renamer: items with no TMDB/TVDB/IMDb id are named in the warning.
+- Backup: backups now include custom badge images for overlays.
+- UI: a shared design system gives pages a more consistent look.
+- Docs: the wiki is updated with a page for each new app feature and new screenshots.
+- Dependencies: rclone 1.76.0 and updated backend and frontend packages.
+
 ## [0.18.6] - 2026-11-02
 ### Fixed
 - Asset Upload: an edition upgrade no longer strands posters and artwork. The webhook waits for the edition-aware server to scan the new item in, even when another server already took the poster, and clearing a webhook target's upload records now covers the title's artwork as well as its posters.
