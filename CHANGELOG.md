@@ -6,6 +6,21 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-11-13
+### Added
+- Overlays: Audio has a "Same line as Resolution" switch. With both overlays on the Lettering style, the audio is drawn at the end of the Resolution badge after a dot, as one line (4K · DOLBY VISION · DTS:X).
+
+### Changed
+- Overlays: the bundled Avenir font is replaced with Albert Sans, and the licenses for bundled badge art and fonts are now stated. Lettering badges may look slightly different.  Users who had this font set will get the new font automatically put in place.
+
+### Fixed
+- Webhooks: a webhook job now checks with the media servers API every 5 seconds, for up to 90 seconds, until the media server has the title ready, instead of searching once and retrying on a fixed delay.
+  - Plex: a new item is left alone until Plex has finished loading it.
+  - Jellyfin: artwork is sent again with the poster when Jellyfin brings an item back with its own images.
+  - Editions: no false edition change in a job that covers only some libraries, and a Radarr upgrade clears the upload record only when the edition really changed.
+- Overlays: special characters a badge font lacks are now drawn instead of missing.
+- Overlays: Lettering-style Resolution badges now match Audio badges in height.
+
 ## [0.19.0] - 2026-11-11
 ### Added
 - Overlays: badges on posters for status, rating, content rating, resolution, audio, edition and streaming service.
