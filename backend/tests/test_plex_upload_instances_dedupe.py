@@ -444,6 +444,23 @@ def test_filter_libraries_scopes_to_mapped_library(test_db):
     assert [lib["key"] for lib in filtered["Main"]] == ["k_movies4k"]
 
 
+def test_filter_libraries_names_the_mapping_once_per_job(test_db, monkeypatch):
+    """A webhook job filters on every look at the servers; the mapping line is logged once."""
+    import services.plex_upload as pu
+
+    lines = []
+    monkeypatch.setattr(pu, "log_info", lambda tag, msg, **kw: lines.append(msg))
+    monkeypatch.setattr(pu, "log_debug", lambda tag, msg, **kw: lines.append(msg))
+    service = _filter_service(test_db, instance_map={
+        "Radarr-4K": [{"plex_instance": "Main", "library_key": "k_movies4k"}],
+    })
+
+    for _ in range(3):
+        service._filter_libraries_for_instance(_sample_selected(), "Radarr-4K")
+
+    assert [line for line in lines if "uploads to" in line] == ["'Radarr-4K' uploads to Main / Movies 4K"]
+
+
 def test_filter_libraries_error_when_mapping_matches_no_enabled_library(test_db):
     service = _filter_service(test_db, instance_map={
         "Radarr-4K": [{"plex_instance": "Main", "library_key": "does_not_exist"}],
@@ -533,6 +550,25 @@ def test_dedupe_identity_falls_back_to_title_year_without_id():
     assert "id|tmdb-603" in with_id
     assert "tmdb-603" not in no_id
     assert no_id.endswith("|tt|thematrix|1999|")
+
+
+def test_a_second_import_of_the_same_movie_under_another_file_is_not_a_duplicate(test_db):
+    """Radarr replacing a movie's file minutes after the first import is a new import: the media
+    servers make a new item for it, which needs its images. Only the same file again is a repeat."""
+    from modules.upload import _is_duplicate_webhook_event
+
+    base = {"source": "radarr", "event_type": "download", "media_type": "movie", "title": "The Matrix", "year": 1999, "tmdb_id": 603}
+    first = {**base, "movie_file_path": "/m/The Matrix (1999)/The Matrix (1999) [WEBDL-2160p].mkv"}
+    assert _is_duplicate_webhook_event(test_db, dict(first)) is False
+    assert _is_duplicate_webhook_event(test_db, dict(first)) is True
+
+    upgrade = {**base, "movie_file_path": "C:\\Movies\\The Matrix (1999)\\The Matrix (1999) [Remux-2160p].mkv"}
+    assert _is_duplicate_webhook_event(test_db, dict(upgrade)) is False
+    assert _is_duplicate_webhook_event(test_db, dict(upgrade)) is True
+
+    # No file named in the webhook: the title alone decides, as before
+    assert _is_duplicate_webhook_event(test_db, dict(base)) is False
+    assert _is_duplicate_webhook_event(test_db, dict(base)) is True
 
 
 def test_structured_dedupe_cache_persists_record_fields(client, test_db, monkeypatch):

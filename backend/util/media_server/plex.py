@@ -212,8 +212,24 @@ class PlexClient(MediaServerClient):
         except Exception:
             return default
 
+    @staticmethod
+    def _still_loading(item: Any) -> bool:
+        """A new movie or show Plex has not finished loading the details of: its row carries no
+        updatedAt yet. Fetching the item before that leaves it without ids and cast, so the row
+        is then read as delivered, never refetched."""
+        attrib = getattr(getattr(item, "_data", None), "attrib", None)
+        if attrib is None or attrib.get("type") not in ("movie", "show") or attrib.get("updatedAt"):
+            return False
+        try:
+            item._autoReload = False
+        except Exception:
+            pass
+        return True
+
     def _parse_item(self, item: Any, section: Any = None, *, bulk: bool = False) -> MediaServerItem:
         g = self._safe_getattr
+        loading = self._still_loading(item)
+        bulk = bulk or loading
         if bulk:
             # Read the row as delivered: plexapi otherwise refetches full metadata on the first empty attribute
             try:
@@ -291,6 +307,7 @@ class PlexClient(MediaServerClient):
             guid=str(g(item, "guid", "") or "") or None,
             parent_guid=str(g(item, "parentGuid", "") or "") or None,
             content_rating=str(g(item, "contentRating", "") or "").strip() or None,
+            loading=loading,
             native=None if bulk else item,
             client=self,
         )
@@ -437,6 +454,13 @@ class PlexClient(MediaServerClient):
             return []
         return [self._parse_item(row, section, bulk=True) for row in self._iter_listing(section, libtype="season")]
 
+    def item_is_loading(self, item_id: str) -> bool:
+        try:
+            rows = self.server.fetchItems(f"/library/all?id={quote(str(item_id), safe='')}&includeGuids=1")
+        except Exception:
+            return False
+        return any(self._still_loading(row) for row in rows)
+
     def get_item(self, item_id: str) -> Optional[MediaServerItem]:
         try:
             native = self.server.fetchItem(int(item_id))
@@ -507,6 +531,7 @@ class PlexClient(MediaServerClient):
                 continue
             hits = []
             for item in items:
+                self._still_loading(item)  # an empty guid list must not make plexapi refetch a loading item
                 guids = {str(getattr(g, "id", "") or "").lower() for g in (self._safe_getattr(item, "guids") or [])}
                 if not guids or wanted in guids:
                     hits.append(item)
@@ -519,10 +544,13 @@ class PlexClient(MediaServerClient):
         key = str(getattr(section, "key", ""))
         if key not in self._probe_item_cache:
             try:
-                found = section.search(maxresults=1)
+                found = section.search(maxresults=5)
             except Exception:
                 found = []
-            self._probe_item_cache[key] = found[0] if found else None
+            probe = next((row for row in found if not self._still_loading(row)), None)
+            if probe is None and found:
+                return None  # only loading items so far: look again on the next search
+            self._probe_item_cache[key] = probe
         return self._probe_item_cache[key]
 
     def find_by_title(

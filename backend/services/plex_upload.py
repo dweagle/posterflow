@@ -210,7 +210,8 @@ class PlexUploadService:
         self._arr_availability_incomplete: bool = False
         self._arr_instance_scope: Optional[str] = None
         self.quiet_scan_logging = False  # webhooks: the placed-folder scan lines go to DEBUG
-        self._instance_map_logged = False  # the instance → library line once per job, not per retry
+        self.quiet_targeted_logging = False  # webhooks: the looks of a wait leave the INFO lines to the search after it
+        self._targeted_said: Dict[Tuple[str, ...], str] = {}  # last search line logged per subject, so a repeat is not logged again
         self._targeted_pending_instance_names: List[str] = []  # scoped servers the targeted index found nothing on
         self._targeted_found_in: List[str] = []  # "Plex 'name' / Movies" where the targeted index found the item
         # Arr media folder basename (lowercased) -> instances it belongs to; filled by the availability build
@@ -227,9 +228,16 @@ class PlexUploadService:
         self._logged_missing_show_keys: set[str] = set()
         self._logged_unverified_season_keys: set[str] = set()
         self._quiet_unmatched_logging: bool = False
+        self._said_unmatched: Set[str] = set()  # single target: no-match lines already logged in this job
+        self._said_artwork_summary: List[str] = []  # single target: the last artwork outcome block logged
         # Targeted (webhook) index: scoped servers that had no item yet, so the webhook keeps
         # retrying while the slower server (Jellyfin behind Plex, or the reverse) scans it in
         self._targeted_pending_servers: List[str] = []
+        # The pending servers that hold the item but are still loading its details
+        self._targeted_loading_servers: List[str] = []
+        # Jellyfin items whose poster turned out not to be ours any more this run. Jellyfin brings a
+        # removed item back under the same id with its own images, so its artwork goes up again too.
+        self._server_lost_items: Set[str] = set()
         self._preflight_context_cache: Optional[
             Tuple[
                 Optional[Dict[str, Any]],
@@ -272,8 +280,13 @@ class PlexUploadService:
         return self._edition_pending_on
 
     def webhook_pending_servers(self) -> List[str]:
-        """Scoped media servers the last targeted index found no item on (still scanning it, or never getting it)."""
+        """Media servers the last targeted index could not use yet: scoped ones with no item (still
+        scanning it, or never getting it) and ones still loading the item's details."""
         return list(self._targeted_pending_servers)
+
+    def webhook_loading_servers(self) -> List[str]:
+        """The pending servers that have the item but are still loading its details."""
+        return list(self._targeted_loading_servers)
 
     def set_arr_instance_scope(self, arr_instance: Optional[str]) -> None:
         """Limit the ARR availability lookup to a single firing instance (webhook path).
@@ -341,6 +354,10 @@ class PlexUploadService:
 
     def _log_unmatched(self, message: str, **context: Any) -> None:
         if self._quiet_unmatched_logging:
+            # A webhook job's retries find the same thing until a server catches up; say it once
+            if message in self._said_unmatched:
+                return
+            self._said_unmatched.add(message)
             log_debug(LogTags.UPLOADER, message, **context)
         else:
             log_info(LogTags.UPLOADER, message, **context)
@@ -1506,16 +1523,22 @@ class PlexUploadService:
             for plex_instance, libs in filtered.items()
             for lib in libs
         )
-        log = log_debug if self._instance_map_logged else log_info
-        self._instance_map_logged = True
-        log(
-            LogTags.UPLOADER,
-            f"'{arr_instance}' uploads to {mapped}",
-            arr_instance=arr_instance,
-            plex_instances=sorted(filtered.keys()),
-            libraries=sum(len(libs) for libs in filtered.values()),
-        )
+        if self._is_news(("map",), f"{arr_instance}: {mapped}"):
+            log_info(
+                LogTags.UPLOADER,
+                f"'{arr_instance}' uploads to {mapped}",
+                arr_instance=arr_instance,
+                plex_instances=sorted(filtered.keys()),
+                libraries=sum(len(libs) for libs in filtered.values()),
+            )
         return filtered, None
+
+    def _is_news(self, subject: Tuple[str, ...], text: str) -> bool:
+        """True when `text` differs from the last search line logged about `subject` in this job."""
+        if self._targeted_said.get(subject) == text:
+            return False
+        self._targeted_said[subject] = text
+        return True
 
     def _instance_library_allowance(self, arr_instance: str) -> Optional[Dict[str, Set[str]]]:
         """Mapped {plex instance: {library key}} for an Arr instance; None when it has no mapping."""
@@ -1995,12 +2018,15 @@ class PlexUploadService:
             "shows": {},
             "collections": {},
         }
+        quiet = self.quiet_targeted_logging
         library_totals: List[Dict[str, Any]] = []
         found_any = False
         found_in: List[str] = []
         # Only explicitly scoped servers count as expected to hold the item
         searched: Dict[str, List[str]] = {}
         hit_instances: Set[str] = set()
+        # Server → libraries that hold the item while the server still loads its details
+        loading_in: Dict[str, List[str]] = {}
 
         for instance in plex_instances:
             instance_name = instance["name"]
@@ -2038,6 +2064,9 @@ class PlexUploadService:
                     if section_items:
                         matched_by = "title"
 
+                # A line about this library is logged when it differs from the last one logged about it.
+                # The looks of a wait (quiet) leave the INFO lines to the search that follows the wait
+                said_key = (instance_name, str(library.title))
                 stale: List[Any] = []
                 if (
                     section_items
@@ -2046,7 +2075,7 @@ class PlexUploadService:
                     and getattr(client, "server_type", "") == "jellyfin"
                 ):
                     section_items, stale = self._split_stale_jellyfin_movies(section_items)
-                    if stale:
+                    if stale and not quiet and self._is_news(("stale", *said_key), "stale"):
                         old_names = sorted({self._file_name(p) for item in stale for p in (item.paths or [])})
                         log_info(
                             LogTags.UPLOADER,
@@ -2062,24 +2091,58 @@ class PlexUploadService:
                             old_files=old_names,
                             expected_file=self._expected_movie_file,
                         )
+                    if section_items:
+                        # Says in the log that the imported file was checked for, and how that came out
+                        where = f"{server_label(instance_type(instance), instance_name)} / {library.title}"
+                        has_path = any(getattr(item, "paths", None) for item in section_items)
+                        if self._is_news(("file", *said_key), "listed" if has_path else "no path"):
+                            log_debug(
+                                LogTags.UPLOADER,
+                                f"{where} lists {title or 'the item'} under the imported file '{self._expected_movie_file}'"
+                                if has_path
+                                else f"{where} gave no file path for {title or 'the item'}, so it could not be compared with the "
+                                     f"imported file '{self._expected_movie_file}'",
+                            )
+                    else:
+                        self._targeted_said.pop(("file", *said_key), None)
+                if not stale:
+                    self._targeted_said.pop(("stale", *said_key), None)
+
+                # Reading or changing a new Plex item before its details are loaded damages them
+                loading = [item for item in section_items if getattr(item, "loading", False)]
+                if loading:
+                    section_items = [item for item in section_items if not getattr(item, "loading", False)]
+                    loading_in.setdefault(instance_name, []).append(str(library.title))
+                    if not quiet and self._is_news(("loading", *said_key), "loading"):
+                        log_info(
+                            LogTags.UPLOADER,
+                            f"{server_label(instance_type(instance), instance_name)} / {library.title} is still loading the details of "
+                            f"{f'{title} ({year})' if title and isinstance(year, int) else title or 'the item'}; "
+                            "leaving it alone until that finishes",
+                        )
+                else:
+                    self._targeted_said.pop(("loading", *said_key), None)
 
                 if section_items:
                     outcome = f"{len(section_items)} match{'' if len(section_items) == 1 else 'es'} by {matched_by}"
+                elif loading:
+                    outcome = f"{len(loading)} match{'' if len(loading) == 1 else 'es'} still loading on the server"
                 elif stale:
                     outcome = f"{len(stale)} stale match{'' if len(stale) == 1 else 'es'} on the old file; waiting for the rescan"
                 else:
                     outcome = "no match by id or title"
-                log_debug(
-                    LogTags.UPLOADER,
-                    f"Targeted search: {instance_name} / {library.title}: {outcome} in {time.monotonic() - started:.1f}s",
-                    instance=instance_name,
-                    library=str(library.title),
-                    provider_ids=provider_ids,
-                    title=title,
-                    year=year,
-                    matches=len(section_items),
-                    matched_by=matched_by or None,
-                )
+                if self._is_news(("search", *said_key), outcome):
+                    log_debug(
+                        LogTags.UPLOADER,
+                        f"Targeted search: {instance_name} / {library.title}: {outcome} in {time.monotonic() - started:.1f}s",
+                        instance=instance_name,
+                        library=str(library.title),
+                        provider_ids=provider_ids,
+                        title=title,
+                        year=year,
+                        matches=len(section_items),
+                        matched_by=matched_by or None,
+                    )
 
                 if not section_items:
                     continue
@@ -2123,27 +2186,33 @@ class PlexUploadService:
                     })
 
             if allowed and instance_name not in searched:
-                log_debug(
-                    LogTags.UPLOADER,
-                    f"Targeted search: {server_label(instance_type(instance), instance_name)} has no selected "
-                    f"{'/'.join(sorted(section_types))} library; skipped",
-                    instance=instance_name,
-                )
+                if self._is_news(("search", instance_name), "no library"):
+                    log_debug(
+                        LogTags.UPLOADER,
+                        f"Targeted search: {server_label(instance_type(instance), instance_name)} has no selected "
+                        f"{'/'.join(sorted(section_types))} library; skipped",
+                        instance=instance_name,
+                    )
 
         self._targeted_found_in = list(found_in)
+        # A server loading the item is waited for even beside a library that already has it
         pending_instances = [
             instance for instance in plex_instances
-            if instance["name"] in searched and instance["name"] not in hit_instances
+            if instance["name"] in loading_in or (instance["name"] in searched and instance["name"] not in hit_instances)
         ]
         self._targeted_pending_instance_names = [instance["name"] for instance in pending_instances]
-        self._targeted_pending_servers = [
-            f"{server_label(instance_type(instance), instance['name'])} / {', '.join(searched[instance['name']])}"
+        pending_labels = {
+            instance["name"]: f"{server_label(instance_type(instance), instance['name'])} / "
+                              f"{', '.join(loading_in.get(instance['name']) or searched[instance['name']])}"
             for instance in pending_instances
-        ]
-        if found_any:
+        }
+        self._targeted_pending_servers = list(pending_labels.values())
+        self._targeted_loading_servers = [label for name, label in pending_labels.items() if name in loading_in]
+        if found_any and not quiet:
             item_label = f"{title} ({year})" if title and isinstance(year, int) else str(title or "item")
-            pending_note = (
-                f"; not on {', '.join(self._targeted_pending_servers)} yet" if self._targeted_pending_servers else ""
+            not_scanned = [label for label in self._targeted_pending_servers if label not in self._targeted_loading_servers]
+            pending_note = (f"; not on {', '.join(not_scanned)} yet" if not_scanned else "") + (
+                f"; {', '.join(self._targeted_loading_servers)} still loading it" if self._targeted_loading_servers else ""
             )
             log_info(
                 LogTags.UPLOADER,
@@ -2233,15 +2302,17 @@ class PlexUploadService:
                 index, library_totals = self._build_plex_index(plex_instances, selected_libraries)
                 # The full index speaks for every server; nothing is pending behind a scan now
                 self._targeted_pending_servers = []
+                self._targeted_loading_servers = []
                 if not index or not library_totals:
                     return self.ERROR_INDEX_BUILD_FAILED
             else:
-                log_debug(
-                    LogTags.UPLOADER,
-                    "Targeted index: no results — will retry with targeted search",
-                    title=title,
-                    media_type=media_type,
-                )
+                if not self.quiet_targeted_logging:
+                    log_debug(
+                        LogTags.UPLOADER,
+                        "Targeted index: no results — will retry with targeted search",
+                        title=title,
+                        media_type=media_type,
+                    )
                 self._preflight_context_cache = (None, destination_dir, {"movies": {}, "shows": {}, "collections": {}}, [])
                 return None
 
@@ -2689,6 +2760,19 @@ class PlexUploadService:
         if inferred_filter == "movie" and uploaded_editions:
             live_editions = {self._movie_edition_title(m) for m in matched_items}
             stale_editions = uploaded_editions - live_editions
+            # An edition is only gone when this job sees every library the poster went to. A webhook
+            # for one Arr instance sees that instance's libraries; the other cut sits out of view.
+            seen_keys = {self._item_library_key(m) for m in matched_items}
+            seen_names = {self._item_library_name(m) for m in matched_items}
+            out_of_view = (uploaded_to_library_keys - seen_keys) if uploaded_to_library_keys else (uploaded_to_libraries - seen_names)
+            if stale_editions and out_of_view:
+                log_debug(
+                    LogTags.UPLOADER,
+                    f"Edition(s) {sorted(stale_editions)} of {asset_label} are not in the libraries this job covers; "
+                    f"the poster also went to {len(out_of_view)} other librar{'y' if len(out_of_view) == 1 else 'ies'}, so nothing is taken as gone",
+                    file=file_path,
+                )
+                stale_editions = set()
             if stale_editions:
                 log_info(
                     LogTags.UPLOADER,
@@ -2696,6 +2780,10 @@ class PlexUploadService:
                     f"on Plex (live: {sorted(live_editions)}); re-uploading current edition(s)",
                     file=file_path,
                 )
+                # The record goes, so ask now whether a Jellyfin item already on it lost our poster
+                for known in matched_items:
+                    if isinstance(getattr(known, "native", None), dict) and self._item_rating_key(known) in uploaded_rating_keys:
+                        self._server_poster_changed(known, file_path, persist=False)
                 if not dry_run:
                     self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == file_path).delete()
                     self.db.commit()
@@ -2988,7 +3076,14 @@ class PlexUploadService:
                 uploaded_to_libraries=uploaded_to_libraries,
                 uploaded_to_library_keys=uploaded_to_library_keys,
             )
-            if cached and not rating_key_changed:
+            server_lost = cached and not rating_key_changed and self._server_lost(item)
+            if server_lost:
+                log_debug(
+                    LogTags.UPLOADER,
+                    f"{self._item_target_label(item)} had lost our poster for {item_label}, so its {artwork_type} goes up again too",
+                    file=file_path,
+                )
+            if cached and not rating_key_changed and not server_lost:
                 self._record_rating_key_if_new(
                     file_path, rating_key, uploaded_rating_keys, dry_run=dry_run,
                     library_name=library_name, library_key=library_key, media_type=item_media_type,
@@ -3022,10 +3117,17 @@ class PlexUploadService:
         return AssetOutcome(uploaded, True, len(matched_items), {})
 
     def _log_artwork_summary(self, stats: Dict[str, Any], *, dry_run: bool) -> None:
-        """One line per run so artwork is visible without reading every per-file line.
-        Logged by both the full and single-item paths."""
-        for line in artwork_summary_lines(stats["artwork"], dry_run=dry_run):
-            log_info(LogTags.UPLOADER, line)
+        """The artwork outcome block of a single-item pass. A webhook job's retries log it again
+        only when it changed; with nothing matched while a server is still awaited it goes to DEBUG."""
+        lines = artwork_summary_lines(stats["artwork"], dry_run=dry_run)
+        if lines == self._said_artwork_summary:
+            return
+        self._said_artwork_summary = lines
+        artwork = stats["artwork"]
+        matched_any = int(artwork.get("uploaded_files", 0) or 0) or int(artwork.get("already_current", 0) or 0)
+        log = log_info if matched_any or not self._targeted_pending_servers else log_debug
+        for line in lines:
+            log(LogTags.UPLOADER, line)
 
     def _process_artwork_for_upload(
         self,
@@ -3368,11 +3470,22 @@ class PlexUploadService:
             log_debug(LogTags.UPLOADER, f"Server poster check failed for {label}: {e}", file=file_path)
             return False
         if changed:
+            if isinstance(getattr(item, "native", None), dict):
+                self._server_lost_items.add(self._server_item_key(item))
             log_info(LogTags.UPLOADER, f"{label}: the poster on {self._item_server_label(item)} is no longer ours — uploading again", file=file_path)
             return True
         if persist and hint is not None:
             self._save_server_poster(self._server_item_key(item), hint=hint, sha1=sha1, file_path=file_path)
         return False
+
+    def _server_lost(self, item: MediaServerItem) -> bool:
+        """Jellyfin only: did this run find the item's poster no longer ours? Then Jellyfin has
+        most likely brought the item back with its own images, artwork included."""
+        if not isinstance(getattr(item, "native", None), dict):
+            return False
+        key = self._server_item_key(item)
+        hook = None if self._overlay_hook is _UNSET else self._overlay_hook
+        return key in self._server_lost_items or key in getattr(hook, "lost_on_server", ())
 
     def _plex_poster_lost(self, item: MediaServerItem) -> Optional[bool]:
         """Plex: True when the item shows the agent's poster (or none) instead of a chosen one.

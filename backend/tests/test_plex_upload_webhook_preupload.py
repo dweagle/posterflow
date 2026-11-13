@@ -309,6 +309,70 @@ def test_webhook_preupload_fast_path_skips_when_exact_target_is_already_current(
     assert rename_called["value"] is False
 
 
+def test_webhook_preupload_reuses_the_placed_poster_scan_of_the_job(test_db, monkeypatch):
+    """A webhook job has scanned the placed posters before the rename pass; the pass reads that
+    scan instead of walking the folder (and logging its count) a second time."""
+    import modules.upload as plex_upload_module
+
+    scans = []
+    rename_called = {"value": False}
+    source_file = "/tmp/source/Zootopia (2016) {tmdb-269149} {imdb-tt2948356}.jpg"
+
+    class _NoSecondService:
+        def __init__(self, _db, **_kwargs):
+            raise AssertionError("the rename pass built its own upload service")
+
+    class _JobService:
+        def _get_local_assets(self, destination):
+            scans.append(str(destination))
+            return [
+                {
+                    "asset_type": "main",
+                    "season_number": None,
+                    "path": "/tmp/organized/Zootopia (2016) {tmdb-269149} {imdb-tt2948356}/poster.jpg",
+                }
+            ]
+
+    def _fake_rename_posters(self, **_kwargs):
+        rename_called["value"] = True
+        return {"success": True, "stats": {"total_matched": 1, "movies": 1, "series": 0, "collections": 0}}
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _NoSecondService)
+    monkeypatch.setattr("modules.upload.os.path.getmtime", lambda _path: 100.0)
+    monkeypatch.setattr("modules.upload.PosterRenameService.rename_posters", _fake_rename_posters)
+
+    test_db.add(Setting(key="poster_destination", value="/tmp/organized"))
+    test_db.add(Setting(key="poster_drive_priority", value=json.dumps({"drive_ids": [1]})))
+    test_db.add(Drive(id=1, name="MM2K Movies", drive_id="drive-1", style_type="MM2K", subscribed=True))
+    test_db.add(
+        Poster(
+            drive_id="drive-1",
+            file_name="Zootopia.jpg",
+            file_path=str(Path(source_file).resolve()),
+            file_mtime=100.0,
+            last_processed=datetime.fromtimestamp(150, timezone.utc),
+        )
+    )
+    job = Job(job_type="Plex Upload Webhook", status="pending", progress=0, message="Queued")
+    test_db.add(job)
+    test_db.commit()
+
+    parsed_payload = {
+        "media_type": "movie",
+        "title": "Zootopia",
+        "year": 2016,
+        "tmdb_id": 269149,
+        "imdb_id": "tt2948356",
+        "tvdb_id": None,
+        "season_number": None,
+    }
+
+    plex_upload_module._run_webhook_preupload_rename_pass(test_db, job, parsed_payload, service=_JobService())
+
+    assert scans == ["/tmp/organized"]
+    assert rename_called["value"] is False
+
+
 def test_webhook_preupload_fast_path_runs_when_source_changed_after_last_processed(test_db, monkeypatch):
     """Webhook preupload should run targeted rename when source mtime is newer than last_processed."""
     import modules.upload as plex_upload_module

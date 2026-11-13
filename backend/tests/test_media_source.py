@@ -843,6 +843,9 @@ def test_resolve_plex_ids_skips_unconfigured_server(test_db, monkeypatch):
         def get_server_info(self):
             return MediaServerInfo(server_id="plex-uuid-1", name="P", version="1")
 
+        def item_is_loading(self, item_id):
+            return False
+
         def get_item(self, item_id):
             return None
 
@@ -867,6 +870,9 @@ def test_resolve_plex_ids_still_errors_when_uuid_matches_but_item_missing(test_d
 
         def get_server_info(self):
             return MediaServerInfo(server_id="plex-uuid-1", name="P", version="1")
+
+        def item_is_loading(self, item_id):
+            return False
 
         def get_item(self, item_id):
             return None
@@ -942,3 +948,40 @@ def test_arr_exception_marks_its_type_failed(test_db, monkeypatch):
     service = PosterRenameService(test_db)
     service.get_media_from_instances()
     assert service.media_fetch_failed_types == {"movies", "series"}
+
+
+def test_resolve_plex_ids_never_fetches_an_item_plex_is_still_loading(test_db, monkeypatch):
+    import util.media_server as media_server_module
+    from modules.upload import _resolve_plex_webhook_ids
+    from util.media_server.types import MediaServerInfo, MediaServerItem
+
+    fetched = []
+
+    class _PlexResolverFake:
+        server_id = "plex-uuid-1"
+        loading = True
+
+        def get_server_info(self):
+            return MediaServerInfo(server_id="plex-uuid-1", name="P", version="1")
+
+        def item_is_loading(self, item_id):
+            return self.loading
+
+        def get_item(self, item_id):
+            fetched.append(item_id)
+            return MediaServerItem(item_id="101", item_type="movie", title="Heat", year=1995,
+                                   provider_ids={"tmdb": "949", "imdb": "tt0113277"})
+
+    plex = _PlexResolverFake()
+    upsert_setting(test_db, "plex_instances", json.dumps([{"name": "Plex", "url": "http://p", "api_key": "k"}]))
+    test_db.commit()
+    monkeypatch.setattr(media_server_module, "create_media_server_client", lambda instance: plex)
+
+    parsed = {"media_type": "movie", "title": "Heat", "plex_rating_key": "101", "plex_server_uuid": "plex-uuid-1"}
+    assert _resolve_plex_webhook_ids(test_db, parsed) is None
+    assert fetched == [] and parsed.pop("_plex_ids_pending") is True and parsed.get("tmdb_id") is None
+
+    plex.loading = False  # what the job's next attempt finds
+    assert _resolve_plex_webhook_ids(test_db, parsed) is None
+    assert fetched == ["101"] and (parsed["tmdb_id"], parsed["imdb_id"], parsed["year"]) == (949, "tt0113277", 1995)
+    assert "_plex_ids_pending" not in parsed

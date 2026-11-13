@@ -314,6 +314,10 @@ def test_no_match_log_level_depends_on_run_type(test_db, monkeypatch):
     assert any("No server match for asset" in m for m in debug_msgs)
     assert not any("No server match for asset" in m for m in info_msgs)
 
+    # A webhook retry finds the same: not said twice
+    service._upload_asset(asset, index, dry_run=True, media_type_filter="movie")
+    assert sum("No server match for asset" in m for m in debug_msgs) == 1
+
 
 def test_run_single_upload_series_season_only_processes_season_asset(test_db, monkeypatch):
     """Series single upload with season_number should only process season poster assets."""

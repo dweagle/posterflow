@@ -68,7 +68,7 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
     monkeypatch.setattr("modules.upload.add_job_log_handler", lambda *args, **kwargs: 1)
     monkeypatch.setattr("modules.upload.remove_job_log_handler", lambda *args, **kwargs: None)
 
-    def _fake_preupload(_db, _job, _payload, dry_run=False):
+    def _fake_preupload(_db, _job, _payload, dry_run=False, **_kwargs):
         captured["dry_run"] = dry_run
         return {
             "rename": {"matched": 2},
@@ -964,7 +964,7 @@ def _run_season_gate_job(test_db, monkeypatch, service_cls, rename_result, place
 
     state = rename_result["state"]
 
-    def _fake_rename(_db, _job, _payload, dry_run=False):
+    def _fake_rename(_db, _job, _payload, dry_run=False, **_kwargs):
         state["rename_calls"] += 1
         state["season_placed"] = places_season
         return {"rename": {"attempted": True, "matched": 1 if places_season else 0}, "border": {"enabled": False}}
@@ -1290,3 +1290,176 @@ def test_webhook_waits_for_the_edition_aware_server_after_another_server_uploade
     refreshed = test_db.query(Job).filter(Job.id == job_id).first()
     assert refreshed.status == "completed"
     assert len(run_calls) == 2
+
+
+def test_webhook_logs_the_overlay_summary_before_its_section_end(test_db, monkeypatch):
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    order: list = []
+
+    class _Fake(_PendingServerFakeService):
+        def webhook_pending_servers(self):
+            return []
+
+        def run_single_upload(self, **_kwargs):
+            return _single_upload_result(uploaded=1)
+
+        def finish_overlays(self):
+            order.append("overlay summary")
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+    monkeypatch.setattr("modules.upload.log_success", lambda _tag, message, **_kw: order.append(message))
+    monkeypatch.setattr("modules.upload.log_section_end", lambda _tag, message, **_kw: order.append(message))
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 3, 1)
+
+    assert order[:3] == ["overlay summary", "Webhook finished for Verity (2026)", "Webhook Upload Complete"]
+
+
+def test_webhook_waits_for_a_server_that_is_still_loading_the_item(test_db, monkeypatch):
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    searches: list = []
+    lines: list = []
+
+    class _Fake(_PendingServerFakeService):
+        def prepare_webhook_context(self, **_kwargs):
+            searches.append(1)
+            return None
+
+        def webhook_pending_servers(self):
+            return ["Plex / Movies"] if len(searches) < 2 else []
+
+        def webhook_loading_servers(self):
+            return self.webhook_pending_servers()
+
+        def run_single_upload(self, **_kwargs):
+            result = _single_upload_result(uploaded=1 if len(searches) > 1 else 0)
+            if len(searches) < 2:
+                result["stats"].update(matched=0, already_current=0)  # the loading item is no target yet
+            return result
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+    monkeypatch.setattr("modules.upload.log_info", lambda _tag, message, **_kw: lines.append(message))
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 3, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed" and len(searches) == 2
+    assert "Waiting up to 1s for Plex / Movies to finish loading Verity (2026) (attempt 1 of 3)" in lines
+    assert not any(line.startswith("No media server has") for line in lines)
+    assert "still loading" not in (refreshed.message or "")
+
+
+def _ready_after(searches_until_ready, events):
+    """A service whose targeted search finds the title on a server from the nth search on."""
+
+    class _Fake(_PendingServerFakeService):
+        searches = 0
+
+        def prepare_webhook_context(self, **_kwargs):
+            type(self).searches += 1
+            events.append("search")
+            return None
+
+        def webhook_found_servers(self):
+            return ["Plex / Movies"] if type(self).searches >= searches_until_ready else []
+
+        def webhook_pending_servers(self):
+            return []
+
+        def run_single_upload(self, **_kwargs):
+            events.append("upload")
+            return _single_upload_result(uploaded=1)
+
+    return _Fake
+
+
+def _run_settle_job(test_db, monkeypatch, fake, events, *, limit=90, arrived_seconds_ago=0):
+    from datetime import datetime, timedelta, timezone
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    if arrived_seconds_ago:
+        job = test_db.query(Job).filter(Job.id == job_id).first()
+        job.started_at = datetime.now(timezone.utc) - timedelta(seconds=arrived_seconds_ago)
+        test_db.commit()
+    monkeypatch.setattr("modules.upload.PLEX_WEBHOOK_SETTLE_SECONDS", limit)
+    monkeypatch.setattr("modules.upload.PlexUploadService", fake)
+    monkeypatch.setattr("modules.upload.time.sleep", lambda seconds: events.append(seconds))
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 3, 1)
+    assert test_db.query(Job).filter(Job.id == job_id).first().status == "completed"
+    return events[:events.index("upload")]
+
+
+def test_webhook_starts_the_moment_a_server_has_the_item_ready(test_db, monkeypatch):
+    """No fixed pause: the job looks every few seconds and goes as soon as a server has the title."""
+    events: list = []
+    lines: list = []
+    monkeypatch.setattr("modules.upload.log_info", lambda _tag, message, **_kw: lines.append(message))
+
+    before_upload = _run_settle_job(test_db, monkeypatch, _ready_after(3, events), events)
+
+    # two looks that find nothing, each followed by one-second steps (so a stop is noticed), the look
+    # that finds it, then the job's own search
+    assert before_upload == ["search", 1, 1, 1, 1, 1, "search", 1, 1, 1, 1, 1, "search", "search"]
+    waiting = [line for line in lines if line.startswith("Waiting for")]
+    assert len(waiting) == 1  # said once, not at every look
+    assert waiting[0].startswith("Waiting for a media server to list Verity (2026); looking every 5s, for up to ")
+
+
+def test_webhook_does_not_wait_when_a_server_already_has_the_item(test_db, monkeypatch):
+    events: list = []
+    assert _run_settle_job(test_db, monkeypatch, _ready_after(1, events), events) == ["search", "search"]
+
+
+def test_webhook_stops_waiting_at_the_limit_and_lets_the_retries_take_over(test_db, monkeypatch):
+    events: list = []
+    before_upload = _run_settle_job(test_db, monkeypatch, _ready_after(99, events), events, arrived_seconds_ago=120)
+    assert before_upload == ["search", "search"]  # past the limit already: one look, then straight on
+
+
+def test_a_retry_wait_ends_as_soon_as_the_waited_for_server_is_ready(test_db):
+    """Thirty seconds is the longest a retry waits, not how long it always waits."""
+    import modules.upload as upload_module
+
+    looks: list = []
+    steps: list = []
+
+    class _Service:
+        quiet_targeted_logging = False
+
+        def prepare_webhook_context(self, **kwargs):
+            looks.append((kwargs.get("only_instances"), self.quiet_targeted_logging))
+            return None
+
+        def webhook_found_servers(self):
+            return ["Plex / Movies"] if len(looks) >= 2 else []
+
+    import pytest
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(upload_module.time, "sleep", lambda seconds: steps.append(seconds))
+        patch.setattr(upload_module, "check_cancelled", lambda _job_id: None)
+        upload_module._wait_for_a_server(1, _Service(), dict(_PENDING_PAYLOAD), "movie", 30, ["P"])
+        assert steps == [1] * 10 and looks == [(["P"], True), (["P"], True)]  # ready at the second look, 10s in
+
+        steps.clear(); looks.clear()
+        upload_module._wait_for_a_server(1, _Service(), dict(_PENDING_PAYLOAD), "movie", 3)
+        assert steps == [1] * 3 and looks == []  # a wait shorter than one look just waits
+
+
+def test_webhook_settle_time_counts_the_time_spent_in_the_queue():
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from modules.upload import _webhook_settle_wait_seconds
+
+    def job(seconds_ago):
+        return SimpleNamespace(started_at=datetime.now(timezone.utc) - timedelta(seconds=seconds_ago))
+
+    assert _webhook_settle_wait_seconds(job(0), 0) == 0
+    assert _webhook_settle_wait_seconds(job(5), 60) == 55
+    assert _webhook_settle_wait_seconds(job(90), 60) == 0
+    assert _webhook_settle_wait_seconds(job(-30), 60) == 60  # a clock that disagrees never stretches the wait
+    assert _webhook_settle_wait_seconds(SimpleNamespace(started_at=None), 60) == 60

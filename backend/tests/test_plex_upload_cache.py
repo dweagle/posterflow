@@ -154,6 +154,81 @@ def test_handle_radarr_upgrade_skips_clear_when_edition_already_cached(test_db, 
     assert "Extended Cut" in json.loads(remaining.uploaded_editions)
 
 
+def _aliens_record(test_db, tmp_path, editions):
+    from models.setting import upsert_setting as _upsert_setting
+
+    (tmp_path / "Aliens (1986)").mkdir()
+    poster = tmp_path / "Aliens (1986)" / "poster.jpg"
+    poster.write_bytes(b"fake")
+    _upsert_setting(test_db, "poster_destination", str(tmp_path))
+    test_db.add(PlexUploadRecord(
+        file_path=str(poster),
+        uploaded_to_libraries=json.dumps(["Movies", "Movies 4K"]),
+        uploaded_to_library_keys=json.dumps(["abc123", "def456"]),
+        uploaded_editions=json.dumps(editions),
+        uploaded_media_types=json.dumps(["movies"]),
+        file_hash=None,
+    ))
+    test_db.commit()
+    return poster
+
+
+def _aliens_upgrade(new_file, replaced):
+    return {"source": "radarr", "is_upgrade": True, "movie_file_path": new_file, "replaced_movie_files": replaced,
+            "year": 1986, "tmdb_id": 679, "tvdb_id": None, "imdb_id": "tt0090605"}
+
+
+def test_radarr_upgrade_reads_the_edition_change_from_the_replaced_file(test_db, tmp_path):
+    """The record also covers the title's cut in another library, so it cannot say whether THIS
+    instance's file changed edition. Radarr names the file it replaced, and that can."""
+    from modules.upload import _handle_radarr_upgrade_edition_check
+
+    poster = _aliens_record(test_db, tmp_path, ["Special Edition", "default_edition"])
+    kept = lambda: test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(poster)).first() is not None  # noqa: E731
+
+    # A plain 4K copy gets a better plain file; the Special Edition on record sits in the other library
+    service = PlexUploadService(test_db)
+    _handle_radarr_upgrade_edition_check(service, _aliens_upgrade(
+        "/movies4k/Aliens (1986)/Aliens (1986) [Remux-2160p].mkv", ["/movies4k/Aliens (1986)/Aliens (1986) [WEBDL-2160p].mkv"]), "movie", "Aliens")
+    assert kept() and service._expected_edition is None
+
+    # Same edition before and after: nothing changed either
+    service = PlexUploadService(test_db)
+    _handle_radarr_upgrade_edition_check(service, _aliens_upgrade(
+        "/m/Aliens (1986) {edition-Special Edition} [Remux-2160p].mkv", ["/m/Aliens (1986) {edition-special edition} [WEBDL-2160p].mkv"]), "movie", "Aliens")
+    assert kept() and service._expected_edition is None
+
+    # The plain 4K copy becomes a Special Edition: on record already, from the other library, yet new here
+    service = PlexUploadService(test_db)
+    _handle_radarr_upgrade_edition_check(service, _aliens_upgrade(
+        "/m/Aliens (1986) {edition-Special Edition} [Remux-2160p].mkv", ["/m/Aliens (1986) [WEBDL-2160p].mkv"]), "movie", "Aliens")
+    assert not kept() and service._expected_edition == "Special Edition"
+
+
+def test_radarr_upgrade_that_drops_the_edition_waits_for_the_plain_item(test_db, tmp_path):
+    from modules.upload import _handle_radarr_upgrade_edition_check
+
+    poster = _aliens_record(test_db, tmp_path, ["Special Edition"])
+    service = PlexUploadService(test_db)
+    _handle_radarr_upgrade_edition_check(service, _aliens_upgrade(
+        "/m/Aliens (1986) [Remux-2160p].mkv", ["/m/Aliens (1986) {edition-Special Edition} [WEBDL-2160p].mkv"]), "movie", "Aliens")
+    assert test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(poster)).first() is None
+    assert service._expected_edition == PlexUploadService.DEFAULT_EDITION_MOVIE
+
+
+def test_radarr_webhook_payload_carries_the_replaced_files():
+    from modules.upload import _parse_arr_webhook_payload
+
+    parsed = _parse_arr_webhook_payload({
+        "eventType": "Download", "isUpgrade": True,
+        "movie": {"title": "Aliens", "year": 1986, "tmdbId": 679},
+        "movieFile": {"relativePath": "Aliens (1986) [Remux-2160p].mkv", "path": "/m/Aliens (1986)/Aliens (1986) [Remux-2160p].mkv"},
+        "deletedFiles": [{"relativePath": "Aliens (1986) [WEBDL-2160p].mkv", "path": "/m/Aliens (1986)/Aliens (1986) [WEBDL-2160p].mkv"}, "junk"],
+    })
+    assert parsed["replaced_movie_files"] == ["/m/Aliens (1986)/Aliens (1986) [WEBDL-2160p].mkv"]
+    assert _parse_arr_webhook_payload({"eventType": "Download", "movie": {"title": "Aliens"}})["replaced_movie_files"] == []
+
+
 def test_handle_radarr_upgrade_skips_action_when_no_edition_in_path(test_db, tmp_path):
     """When the upgrade path has no edition token it is a quality-only upgrade — cache is left alone."""
     (tmp_path / "Aliens (1986)").mkdir()
@@ -1124,6 +1199,115 @@ def test_cached_jellyfin_poster_follows_the_image_tag(test_db, tmp_path, monkeyp
     assert test_db.query(ServerPoster).one().hint == "jf:t3"
     item.native = {"ImageTags": {}}  # and then removed altogether
     assert service()._upload_asset(asset, index, dry_run=False)[0] == 1 and jf.uploads == 3
+
+
+def test_a_job_that_sees_only_some_libraries_does_not_call_another_librarys_edition_gone(test_db, tmp_path, monkeypatch):
+    """The IMAX cut sits in Movies, the plain cut in Movies 4K, one poster file for both. A webhook
+    for the 4K instance sees only the 4K library: IMAX is not gone, it is out of view, so the
+    record stays and nothing is sent again."""
+    poster = tmp_path / "Knight (2012)" / "poster.jpg"
+    poster.parent.mkdir()
+    poster.write_bytes(b"knight-poster")
+    imax = _SimplePlex("movie", "Knight", key="501")
+    imax.edition_title, imax.library_key, imax.library_name = "IMAX", "/library/sections/1", "Movies"
+    plain = _SimplePlex("movie", "Knight", key="502")
+    plain.library_key, plain.library_name = "/library/sections/2", "Movies 4K"
+    in_view = [imax, plain]
+    marker = object()
+    index = {"movies": marker, "shows": {}, "collections": {}}
+    asset = {"media_key": "knight", "path": str(poster), "asset_type": "main", "display_name": "Knight", "folder_year": 2012}
+
+    def run():
+        svc = PlexUploadService(test_db)
+        monkeypatch.setattr(svc, "_resolve_target_media_type", lambda *a, **k: ("movie", "id-match"))
+        monkeypatch.setattr(svc, "_asset_has_arr_availability", lambda *a, **k: (True, None))
+        monkeypatch.setattr(svc, "_resolve_index_candidates", lambda sub, *a, **k: list(in_view) if sub is marker else [])
+        monkeypatch.setattr(svc, "_plex_poster_lost", lambda _item: False)
+        return svc._upload_asset(asset, index, dry_run=False)[0]
+
+    assert run() == 2
+    in_view[:] = [plain]  # the 4K instance's webhook
+    assert run() == 0
+    in_view[:] = [imax, plain]  # the next full run still finds both done
+    assert run() == 0
+
+    # With every library on the record in view, an edition that is nowhere to be found is gone
+    imax.edition_title = None
+    assert run() == 2
+
+
+class _FakeJellyfinWithArtwork(_FakeJellyfin):
+    """Only a poster upload changes the Primary tag; every upload is noted by kind."""
+
+    def __init__(self):
+        super().__init__()
+        self.sent = []
+
+    def upload_image(self, item, kind, path):
+        self.sent.append(kind)
+        if kind == "poster":
+            self.tag = f"t{self.sent.count('poster') + 1}"
+        return True
+
+
+def test_artwork_follows_a_jellyfin_item_that_came_back_with_its_own_images(test_db, tmp_path, monkeypatch):
+    """Jellyfin brings a removed movie back under the same id, so the id says nothing changed.
+    The poster check does: when the server's poster is no longer ours, the artwork goes up again."""
+    folder = tmp_path / "Jelly (2021)"
+    folder.mkdir()
+    (folder / "poster.jpg").write_bytes(b"jelly-poster")
+    (folder / "background.jpg").write_bytes(b"jelly-background")
+    jf = _FakeJellyfinWithArtwork()
+    item = _tagged("200", jf.tag)
+    item.client = jf
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    poster = {"media_key": "jelly", "path": str(folder / "poster.jpg"), "asset_type": "main", "display_name": "Jelly", "folder_year": 2021}
+    background = {**poster, "path": str(folder / "background.jpg"), "artwork_type": "background"}
+
+    def run():
+        svc = service()
+        return svc._upload_asset(poster, index, dry_run=False)[0], svc._upload_artwork_asset(background, index, dry_run=False).uploaded
+
+    assert run() == (1, 1) and jf.sent == ["poster", "background"]
+    item.native = {"ImageTags": {"Primary": jf.tag}}  # the next listing shows our poster
+    assert run() == (0, 0)
+    item.native = {"ImageTags": {"Primary": "provider-image"}}  # same id, Jellyfin's own images
+    assert run() == (1, 1) and jf.sent == ["poster", "background", "poster", "background"]
+    item.native = {"ImageTags": {"Primary": jf.tag}}
+    assert run() == (0, 0)
+
+
+def test_a_badged_poster_the_overlay_engine_found_replaced_counts_too(test_db):
+    from types import SimpleNamespace
+
+    svc = PlexUploadService(test_db)
+    item = _tagged("200", "t1")
+    item.client = _FakeJellyfin()
+    assert not svc._server_lost(item)
+    svc._overlay_hook = SimpleNamespace(lost_on_server={"JF|200"})
+    assert svc._server_lost(item)
+
+
+def test_artwork_stays_put_when_a_plex_poster_was_replaced(test_db, tmp_path, monkeypatch):
+    """Plex gives a re-added title a new id, which the artwork rule already sees. A poster someone
+    swapped on Plex says nothing about the artwork."""
+    folder = tmp_path / "Plexy (2021)"
+    folder.mkdir()
+    (folder / "poster.jpg").write_bytes(b"plexy-poster")
+    (folder / "background.jpg").write_bytes(b"plexy-background")
+    item = _SimplePlex("movie", "Plexy", key="300")
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    poster = {"media_key": "plexy", "path": str(folder / "poster.jpg"), "asset_type": "main", "display_name": "Plexy", "folder_year": 2021}
+    background = {**poster, "path": str(folder / "background.jpg"), "artwork_type": "background"}
+
+    svc = service()
+    assert svc._upload_asset(poster, index, dry_run=False)[0] == 1
+    assert svc._upload_artwork_asset(background, index, dry_run=False).uploaded == 1
+
+    again = service()
+    monkeypatch.setattr(again, "_plex_poster_lost", lambda _item: True)
+    assert again._upload_asset(poster, index, dry_run=False)[0] == 1
+    assert again._upload_artwork_asset(background, index, dry_run=False).uploaded == 0
 
 
 def test_cleared_poster_is_resent_even_without_a_ledger_row(test_db, tmp_path, monkeypatch):

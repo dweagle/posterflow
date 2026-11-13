@@ -69,6 +69,11 @@ class MediaServerClient(ABC):
         """One item by its server id (e.g. a webhook rating key); None when missing/unsupported."""
         return None
 
+    def item_is_loading(self, item_id: str) -> bool:
+        """The server is still loading this new item's details (Plex), so get_item() must wait.
+        Answered from a library listing, which is safe to ask at any time."""
+        return False
+
     @abstractmethod
     def get_collection_items(self, collection: MediaServerItem) -> List[MediaServerItem]:
         """Member items of a collection/box set."""

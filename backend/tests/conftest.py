@@ -61,6 +61,13 @@ _bootstrap_engine.dispose()
 from main import app
 
 @pytest.fixture(autouse=True)
+def _no_webhook_settle_wait(monkeypatch):
+    """A webhook job waits for the media servers to settle before it looks. Tests don't sit that
+    out; the test of the wait itself sets it back."""
+    monkeypatch.setattr("modules.upload.PLEX_WEBHOOK_SETTLE_SECONDS", 0)
+
+
+@pytest.fixture(autouse=True)
 def _clear_upstream_caches():
     """Upstream response caches are process-wide, so one test's fetch must not answer another's.
 

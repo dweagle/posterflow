@@ -93,6 +93,10 @@ PLEX_WEBHOOK_RETRY_ATTEMPTS = 10
 PLEX_WEBHOOK_RETRY_DELAY_SECONDS = 30
 PLEX_WEBHOOK_RETRY_ATTEMPTS_MAX = 20
 PLEX_WEBHOOK_RETRY_DELAY_SECONDS_MAX = 120
+# A webhook job starts once a media server has the item ready, and looks for that every few seconds.
+# This is the longest it waits after the webhook arrived; Jellyfin alone takes about 60s to notice a file.
+PLEX_WEBHOOK_SETTLE_SECONDS = 90
+PLEX_WEBHOOK_SETTLE_POLL_SECONDS = 5
 
 
 def _load_priority_source_dirs(db: Session) -> tuple[list[str], Optional[str]]:
@@ -216,6 +220,7 @@ def _run_webhook_preupload_rename_pass(
     job: Job,
     parsed_payload: Dict[str, Any],
     dry_run: bool = False,
+    service: Any = None,
 ) -> Dict[str, Any]:
     summary: Dict[str, Any] = {
         "fast_path_skipped": False,
@@ -264,8 +269,12 @@ def _run_webhook_preupload_rename_pass(
             return destination_assets_cache
 
         try:
-            service = PlexUploadService(db)
-            destination_assets_cache = service._discover_local_assets(Path(destination_dir))
+            # The job's own service has scanned the placed posters already
+            reuse = getattr(service, "_get_local_assets", None)
+            if callable(reuse):
+                destination_assets_cache = reuse(Path(destination_dir))
+            else:
+                destination_assets_cache = PlexUploadService(db)._discover_local_assets(Path(destination_dir))
         except Exception:
             destination_assets_cache = []
         return destination_assets_cache
@@ -788,6 +797,20 @@ def _get_webhook_retry_delay_seconds(db: Session) -> int:
         minimum=1,
         maximum=PLEX_WEBHOOK_RETRY_DELAY_SECONDS_MAX,
     )
+
+
+def _webhook_settle_wait_seconds(job: Any, delay_seconds: int) -> int:
+    """Seconds left of the settle time, counted from when the webhook arrived, so time spent
+    waiting in the queue counts toward it."""
+    if delay_seconds <= 0:
+        return 0
+    received = getattr(job, "started_at", None)
+    if received is None:
+        return delay_seconds
+    if received.tzinfo is None:
+        received = received.replace(tzinfo=timezone.utc)
+    waited = (datetime.now(timezone.utc) - received).total_seconds()
+    return max(0, min(delay_seconds, int(round(delay_seconds - waited))))
 
 
 def _default_webhook_stats() -> Dict[str, Any]:
@@ -1330,6 +1353,10 @@ def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         movie_file = payload.get("movieFile") or {}
         movie_file_path = str(movie_file.get("path") or movie_file.get("relativePath") or "").strip()
+        replaced_files = [
+            str(old.get("path") or old.get("relativePath") or "").strip()
+            for old in (payload.get("deletedFiles") or []) if isinstance(old, dict)
+        ]
 
         return {
             "event_type": event_type,
@@ -1343,6 +1370,7 @@ def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "tvdb_id": None,
             "is_upgrade": bool(payload.get("isUpgrade", False)),
             "movie_file_path": movie_file_path,
+            "replaced_movie_files": [path for path in replaced_files if path],
             "instance_name": instance_name,
             "application_url": application_url,
         }
@@ -1485,6 +1513,17 @@ def _resolve_plex_webhook_ids(db: Session, parsed_payload: Dict[str, Any]) -> Op
                 if info and info.server_id and info.server_id != server_uuid:
                     continue
             uuid_matched_any = True
+            if client.item_is_loading(rating_key):
+                # Fetching it now would leave it without ids in Plex; a retry reads them once it is loaded
+                parsed_payload["_plex_ids_pending"] = True
+                log_info(
+                    LogTags.UPLOADER,
+                    f"Plex '{instance.get('name')}' is still loading the details of {parsed_payload.get('title')}; "
+                    "its ids are read once that finishes",
+                    title=parsed_payload.get("title"),
+                    rating_key=rating_key,
+                )
+                return None
             item = client.get_item(rating_key)
             if item is None:
                 continue
@@ -1767,6 +1806,8 @@ def _webhook_dedupe_record(parsed_payload: Dict[str, Any]) -> Dict[str, Any]:
         "title": normalize_titles(parsed_payload.get("title", "")),
         "year": year if isinstance(year, int) else None,
         "season": season if isinstance(season, int) else None,
+        # The movie file Radarr imported: a second import under another file is a new event
+        "file": re.split(r"[\\/]", str(parsed_payload.get("movie_file_path") or "").strip())[-1].strip().lower() or None,
     }
 
 
@@ -1794,6 +1835,8 @@ def _webhook_dedupe_identity(record: Dict[str, Any]) -> str:
             str(record.get("year") if record.get("year") is not None else ""),
         ]
     parts.append(str(record.get("season") if record.get("season") is not None else ""))
+    if record.get("file"):
+        parts.append(str(record["file"]).replace("|", " "))
     return "|".join(parts)
 
 
@@ -2384,6 +2427,7 @@ def run_plex_upload_background_job(
                 color=embed["color"],
             )
 
+        _finish_overlays(service)  # the overlay summary reads inside the section, before its end line
         log_section_end(LogTags.UPLOADER, "Asset Upload Complete")
         success = True
 
@@ -2431,6 +2475,14 @@ def run_plex_upload_background_job(
             pass
         remove_job_log_handler(handler_id, "plex_upload", success=success)
         db.close()
+
+def _finish_overlays(service: Any) -> None:
+    """Log the overlay engine's summary and keep what it learned. Never fails the job."""
+    try:
+        service.finish_overlays()
+    except Exception:  # nosec B110
+        pass
+
 
 def _has_destination_assets_for_target(
     service: PlexUploadService,
@@ -2632,6 +2684,107 @@ def _webhook_pending_servers(service: Any) -> list[str]:
     return [str(entry) for entry in pending if str(entry or "").strip()]
 
 
+def _webhook_loading_servers(service: Any) -> list[str]:
+    """The pending servers that have the item but are still loading its details; [] for services that don't track it."""
+    getter = getattr(service, "webhook_loading_servers", None)
+    try:
+        loading = getter() if callable(getter) else []
+    except Exception:
+        return []
+    return [str(entry) for entry in loading or [] if str(entry or "").strip()]
+
+
+def _webhook_wait_text(service: Any, pending_servers: list[str], item: str) -> str:
+    """What a waiting line says the pending servers still owe: scanning the item in, or loading its details."""
+    loading = [server for server in _webhook_loading_servers(service) if server in pending_servers]
+    scanning = [server for server in pending_servers if server not in loading]
+    parts = []
+    if scanning:
+        parts.append(f"{', '.join(scanning)} to scan {item}")
+    if loading:
+        parts.append(f"{', '.join(loading)} to finish loading {'it' if scanning else item}")
+    return " and ".join(parts)
+
+
+def _wait_until_a_server_is_ready(
+    db: Session, job: Any, job_id: int, service: Any, parsed_payload: Dict[str, Any], media_type: Any, item: str,
+) -> None:
+    """Hold a webhook job until a media server has the title ready: listed, done loading, and on
+    the imported file. Looks every few seconds and stops waiting PLEX_WEBHOOK_SETTLE_SECONDS after
+    the webhook arrived; the job's own retries take over from there."""
+    if PLEX_WEBHOOK_SETTLE_SECONDS <= 0:
+        return
+    found = getattr(service, "webhook_found_servers", None)
+    if not callable(found):
+        return
+    said = None
+    service.quiet_targeted_logging = True
+    try:
+        while True:
+            if parsed_payload.pop("_plex_ids_pending", False):
+                _resolve_plex_webhook_ids(db, parsed_payload)
+            error = service.prepare_webhook_context(
+                tmdb_id=parsed_payload.get("tmdb_id"),
+                tvdb_id=parsed_payload.get("tvdb_id"),
+                imdb_id=parsed_payload.get("imdb_id"),
+                title=parsed_payload.get("title"),
+                year=parsed_payload.get("year"),
+                media_type=media_type,
+                allow_full_fallback=False,
+                arr_instance=parsed_payload.get("arr_instance"),
+            )
+            if error or found():
+                return
+            left = _webhook_settle_wait_seconds(job, PLEX_WEBHOOK_SETTLE_SECONDS)
+            if left <= 0:
+                return
+            pending = _webhook_pending_servers(service)
+            waiting_for = _webhook_wait_text(service, pending, item) if pending else f"a media server to list {item}"
+            if waiting_for != said:
+                said = waiting_for
+                log_info(LogTags.UPLOADER, f"Waiting for {waiting_for}; looking every {PLEX_WEBHOOK_SETTLE_POLL_SECONDS}s, for up to {left}s")
+                update_job_state(db, job, message=f"Waiting for {waiting_for}")
+            for _ in range(min(PLEX_WEBHOOK_SETTLE_POLL_SECONDS, left)):
+                check_cancelled(job_id)
+                time.sleep(1)
+    finally:
+        service.quiet_targeted_logging = False
+
+
+def _wait_for_a_server(
+    job_id: int, service: Any, parsed_payload: Dict[str, Any], media_type: Any, seconds: int, only_instances: Optional[List[str]] = None,
+) -> None:
+    """A retry's wait for servers that do not have the title ready yet: up to `seconds`, looking
+    every few seconds and ending as soon as one of them does."""
+    found = getattr(service, "webhook_found_servers", None)
+    waited = 0
+    while waited < seconds:
+        step = min(PLEX_WEBHOOK_SETTLE_POLL_SECONDS, seconds - waited)
+        for _ in range(int(step)):
+            check_cancelled(job_id)
+            time.sleep(1)
+        waited += step
+        if waited >= seconds or not callable(found):
+            return
+        service.quiet_targeted_logging = True
+        try:
+            error = service.prepare_webhook_context(
+                only_instances=only_instances or None,
+                tmdb_id=parsed_payload.get("tmdb_id"),
+                tvdb_id=parsed_payload.get("tvdb_id"),
+                imdb_id=parsed_payload.get("imdb_id"),
+                title=parsed_payload.get("title"),
+                year=parsed_payload.get("year"),
+                media_type=media_type,
+                allow_full_fallback=False,
+                arr_instance=parsed_payload.get("arr_instance"),
+            )
+        finally:
+            service.quiet_targeted_logging = False
+        if not error and found():
+            return
+
+
 def _webhook_edition_pending(service: Any) -> str:
     """Servers still missing the expected edition; '' for services that don't track it."""
     getter = getattr(service, "webhook_edition_pending", None)
@@ -2647,9 +2800,13 @@ def _webhook_completion_message(
     uploaded_count: int,
     missing_targets: list[str],
     pending_servers: list[str] | None = None,
+    loading_servers: list[str] | None = None,
 ) -> str:
     missing = ", ".join(missing_targets)
-    pending = f"; {', '.join(pending_servers)} not scanned yet" if pending_servers else ""
+    not_scanned = [server for server in pending_servers or [] if server not in (loading_servers or [])]
+    pending = (f"; {', '.join(not_scanned)} not scanned yet" if not_scanned else "") + (
+        f"; {', '.join(loading_servers)} still loading it" if loading_servers else ""
+    )
     if uploaded_count > 0:
         note = f"; no local poster for {missing}" if missing else ""
         return format_complete_message("Webhook upload", f"{title} — {match_detail}{note}{pending}")
@@ -2682,6 +2839,39 @@ def _handle_radarr_upgrade_edition_check(
     """
     movie_file_path = str(parsed_payload.get("movie_file_path") or "")
     edition_hint = _extract_edition_from_radarr_path(movie_file_path)
+
+    replaced = [str(path) for path in (parsed_payload.get("replaced_movie_files") or []) if path]
+    if replaced:
+        # Radarr named the file it replaced, so the change is read from this instance's own two
+        # files. The upload record cannot say: it also covers the title's cuts in other libraries.
+        old_editions = sorted({_extract_edition_from_radarr_path(path) or "" for path in replaced})
+        if {edition.strip().lower() for edition in old_editions} == {(edition_hint or "").strip().lower()}:
+            log_debug(
+                LogTags.UPLOADER,
+                f"Radarr upgrade: the replaced file had the same edition ({edition_hint or 'none'}); upload cache left as it is",
+                title=title,
+                movie_file_path=movie_file_path or "(not provided)",
+            )
+            return
+        log_info(
+            LogTags.UPLOADER,
+            f"Radarr upgrade: edition changed from {', '.join(edition or 'none' for edition in old_editions)} "
+            f"to {edition_hint or 'none'}; clearing the upload cache to send the images again",
+            title=title,
+            replaced_editions=old_editions,
+            edition_hint=edition_hint,
+        )
+        removed = service.clear_upload_cache_for_target(
+            media_type=media_type,
+            title=title,
+            year=parsed_payload.get("year"),
+            tmdb_id=parsed_payload.get("tmdb_id"),
+            tvdb_id=parsed_payload.get("tvdb_id"),
+            imdb_id=parsed_payload.get("imdb_id"),
+        )
+        log_info(LogTags.UPLOADER, "Radarr upgrade: upload cache cleared for re-upload", title=title, removed_entries=removed)
+        service.set_expected_edition(edition_hint or PlexUploadService.DEFAULT_EDITION_MOVIE)
+        return
 
     if not edition_hint:
         # No {edition-*} token in the new file path. This is either:
@@ -2831,6 +3021,15 @@ def run_plex_webhook_background_job(
             source=parsed_payload.get("source"),
         )
 
+        imported_file = re.split(r"[\\/]", str(parsed_payload.get("movie_file_path") or "").strip())[-1].strip()
+        replaced_names = [re.split(r"[\\/]", str(path))[-1] for path in parsed_payload.get("replaced_movie_files") or []]
+        log_debug(
+            LogTags.UPLOADER,
+            f"Event '{parsed_payload.get('event_type') or 'unknown'}'"
+            + (f", imported file '{imported_file}'" if imported_file else ", no imported file named")
+            + (f", replaced {', '.join(repr(name) for name in replaced_names)}" if replaced_names else ""),
+        )
+
         service = PlexUploadService(db, upload_delay_ms=_get_webhook_upload_delay_ms(db))
         service.quiet_scan_logging = True  # the placed-folder scan matters for full runs, not one item
         service.set_arr_instance_scope(parsed_payload.get("arr_instance"))
@@ -2896,6 +3095,8 @@ def run_plex_webhook_background_job(
             tvdb_id=parsed_payload.get("tvdb_id"),
             imdb_id=parsed_payload.get("imdb_id"),
         )
+        _wait_until_a_server_is_ready(db, job, job_id, service, parsed_payload, media_type, f"{title}{year_label}")
+
         webhook_context_error = service.prepare_webhook_context(
             tmdb_id=parsed_payload.get("tmdb_id"),
             tvdb_id=parsed_payload.get("tvdb_id"),
@@ -3040,6 +3241,7 @@ def run_plex_webhook_background_job(
                 season_number=season_number,
                 targets_checked=len(target_cache_checks),
             )
+            _finish_overlays(service)  # the overlay summary reads inside the section, before its end line
             log_section_end(LogTags.UPLOADER, "Webhook Upload Complete")
             success = True
             return
@@ -3064,7 +3266,7 @@ def run_plex_webhook_background_job(
         # A new season's poster is never placed before the import (the renamer waits for the
         # Arr to report episodes), so a present show poster must not skip the rename pass
         if missing_targets and rename_then_upload:
-            rename_summary = _run_webhook_preupload_rename_pass(db, job, parsed_payload, dry_run=False)
+            rename_summary = _run_webhook_preupload_rename_pass(db, job, parsed_payload, dry_run=False, service=service)
             service.invalidate_local_assets_cache()
 
             rename_info = rename_summary.get("rename", {}) if isinstance(rename_summary, dict) else {}
@@ -3184,7 +3386,8 @@ def run_plex_webhook_background_job(
                 )
 
                 waiting_on = _webhook_pending_servers(service) if retry_only else []
-                log_info(
+                # The waiting line before it and the Found or waiting line after it carry the INFO story
+                log_debug(
                     LogTags.UPLOADER,
                     (f"Checking {', '.join(waiting_on)} again for {title}{year_label}" if waiting_on
                      else f"Searching the media servers again for {title}{year_label}")
@@ -3196,6 +3399,8 @@ def run_plex_webhook_background_job(
                 )
                 if not retry_only:
                     carried = None
+                if parsed_payload.pop("_plex_ids_pending", False):
+                    _resolve_plex_webhook_ids(db, parsed_payload)
                 retry_context_error = service.prepare_webhook_context(
                     only_instances=retry_only or None,
                     tmdb_id=parsed_payload.get("tmdb_id"),
@@ -3422,7 +3627,7 @@ def run_plex_webhook_background_job(
                 carried = result["stats"] if retry_only else None
                 log_info(
                     LogTags.UPLOADER,
-                    f"Waiting {delay_seconds}s for {', '.join(pending_servers)} to scan {title}{year_label} "
+                    f"Waiting up to {delay_seconds}s for {_webhook_wait_text(service, pending_servers, f'{title}{year_label}')} "
                     f"(attempt {attempt} of {attempts})",
                     attempt=attempt,
                     max_attempts=attempts,
@@ -3433,7 +3638,7 @@ def run_plex_webhook_background_job(
                     uploaded=uploaded_count,
                     pending_servers=pending_servers,
                 )
-                time.sleep(delay_seconds)
+                _wait_for_a_server(job_id, service, parsed_payload, media_type, delay_seconds, retry_only)
                 continue
 
             retry_only, carried = [], None
@@ -3494,17 +3699,23 @@ def run_plex_webhook_background_job(
 
             if attempt < attempts:
                 no_match_reasons = format_unmatched_reasons(stats.get("unmatched_reasons"))
+                loading_servers = _webhook_loading_servers(service)
                 log_info(
                     LogTags.UPLOADER,
-                    f"No media server has {title}{year_label} yet"
-                    + (f" ({no_match_reasons})" if no_match_reasons else "")
-                    + f"; checking again in {delay_seconds}s (attempt {attempt} of {attempts})",
+                    (
+                        f"Waiting up to {delay_seconds}s for {', '.join(loading_servers)} to finish loading {title}{year_label} "
+                        f"(attempt {attempt} of {attempts})"
+                    ) if loading_servers else (
+                        f"No media server has {title}{year_label} yet"
+                        + (f" ({no_match_reasons})" if no_match_reasons else "")
+                        + f"; looking again within {delay_seconds}s (attempt {attempt} of {attempts})"
+                    ),
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,
                     media_type=media_type,
                 )
-                time.sleep(delay_seconds)
+                _wait_for_a_server(job_id, service, parsed_payload, media_type, delay_seconds)
 
         if not result.get("success", False):
             raise Exception(result.get("error", "Webhook upload failed"))
@@ -3514,6 +3725,7 @@ def run_plex_webhook_background_job(
         if last_uploading_result is not None and int(result.get("stats", {}).get("uploaded", 0)) == 0:
             result = last_uploading_result
         pending_servers = _webhook_pending_servers(service)
+        loading_servers = [server for server in _webhook_loading_servers(service) if server in pending_servers]
 
         stats = result.get("stats", {})
         uploaded_count = int(stats.get("uploaded", 0))
@@ -3563,22 +3775,35 @@ def run_plex_webhook_background_job(
             status=JOB_STATUS_COMPLETED,
             progress=100,
             message=_webhook_completion_message(
-                title, match_detail, uploaded_count, missing_targets, pending_servers=pending_servers
+                title, match_detail, uploaded_count, missing_targets,
+                pending_servers=pending_servers, loading_servers=loading_servers,
             ),
             completed_at=datetime.now(timezone.utc),
         )
 
-        if pending_servers:
+        not_scanned = [server for server in pending_servers if server not in loading_servers]
+        if not_scanned:
             log_warning(
                 LogTags.UPLOADER,
-                f"{', '.join(pending_servers)} never showed {title}{year_label} across {attempts} attempt(s); "
+                f"{', '.join(not_scanned)} never showed {title}{year_label} across {attempts} attempt(s); "
                 "the next full upload run pushes it once that server has scanned it. If that server should not get "
                 "this Arr instance's items, map the instance's libraries on the Asset Upload page",
                 media_type=media_type,
                 title=title,
                 season_number=season_number,
                 attempts=attempts,
-                pending_servers=pending_servers,
+                pending_servers=not_scanned,
+            )
+        if loading_servers:
+            log_warning(
+                LogTags.UPLOADER,
+                f"{', '.join(loading_servers)} was still loading the details of {title}{year_label} after {attempts} attempt(s); "
+                "the next full upload run sends its poster. A metadata refresh of the item in Plex gets it loading again",
+                media_type=media_type,
+                title=title,
+                season_number=season_number,
+                attempts=attempts,
+                loading_servers=loading_servers,
             )
 
         if matched_count > 0 and uploaded_count == 0:
@@ -3596,6 +3821,7 @@ def run_plex_webhook_background_job(
                 scanned=scanned_count,
             )
 
+        _finish_overlays(service)  # the overlay summary reads inside the section, before its end line
         log_success(
             LogTags.UPLOADER,
             f"Webhook finished for {title}{year_label}{season_label}",
@@ -3884,6 +4110,7 @@ def run_plex_single_manual_background_job(
             preupload_border_changed=int(preupload_border.get("changed", 0)),
             preupload_border_enabled=bool(preupload_border.get("enabled", False)),
         )
+        _finish_overlays(service)  # the overlay summary reads inside the section, before its end line
         log_section_end(LogTags.UPLOADER, "Single Upload Complete")
         success = True
 

@@ -112,6 +112,7 @@ class ServerOverlayEngine:
         self._plex_prune_roots: Dict[str, Optional[str]] = {}  # per server: the Metadata folder to prune under, None = leave bundles alone this run
         self._no_data_examples: List[str] = []
         self._summary_logged = False
+        self.lost_on_server: Set[str] = set()  # items whose badged poster the server no longer shows this run
 
     # ── configuration ──────────────────────────────────────────────────────
     def instances(self) -> List[Dict[str, Any]]:
@@ -196,9 +197,7 @@ class ServerOverlayEngine:
             return
         self._summary_logged = True
         s = self.stats
-        m = self.metadata.stats
-        if m.get("requests") or m.get("cached"):
-            log_info(LogTags.OVERLAYS, f"TMDB: {m['requests']} request(s) this run ({m['refreshed']} refreshed, {m['cached']} served from cache)")
+        self.metadata.log_stats()
         if not any(s[k] for k in self._COUNTED):
             return
         log_info(
@@ -589,6 +588,7 @@ class ServerOverlayEngine:
                 return ""  # the server could not tell us: leave the item alone
             changed = "blank" if selected == PLEX_NO_POSTER else "replaced" if upload_sha(selected) != entry.get("composite_sha1") else ""
         if changed:
+            self.lost_on_server.add(key)
             self._log_item(f"{label} | " + ("Plex shows no poster for it" if changed == "blank" else "the poster on the server is no longer ours"))
             return changed
         if persist:

@@ -119,6 +119,7 @@ class MetadataProvider:
         self.run_started = self._clock()
         self.refresh_all = False  # a rebuild: nothing cached before this run is trusted
         self.stats = {"requests": 0, "refreshed": 0, "cached": 0}
+        self._stats_logged = False
         self._load()
 
     def begin_run(self, *, refresh: bool = False) -> None:
@@ -146,13 +147,19 @@ class MetadataProvider:
             self._db.rollback()
             log_warning(LogTags.OVERLAYS, f"Ignoring unreadable overlay metadata cache: {exc}")
 
+    def log_stats(self) -> None:
+        """What this run asked TMDB, logged once."""
+        if self._stats_logged or not (self.stats["requests"] or self.stats["cached"]):
+            return
+        self._stats_logged = True
+        log_info(
+            LogTags.OVERLAYS,
+            f"TMDB: {self.stats['requests']} request(s) this run "
+            f"({self.stats['refreshed']} refreshed, {self.stats['cached']} served from cache)",
+        )
+
     def flush(self) -> None:
-        if self.stats["requests"] or self.stats["cached"]:
-            log_info(
-                LogTags.OVERLAYS,
-                f"TMDB: {self.stats['requests']} request(s) this run "
-                f"({self.stats['refreshed']} refreshed, {self.stats['cached']} served from cache)",
-            )
+        self.log_stats()
         with self._lock:
             if not self._dirty or self._db is None:
                 self._dirty = set()

@@ -322,6 +322,27 @@ def _stats(**artwork):
     return {"artwork": art}
 
 
+def test_log_artwork_summary_is_logged_again_only_when_it_changed(test_db, monkeypatch, logged):
+    """A webhook job's retries end in the same block until a server catches up. While a server
+    is still awaited, a block with nothing matched stays out of the INFO log."""
+    debugged = []
+    monkeypatch.setattr("services.plex_upload.log_debug", lambda tag, message, **kw: debugged.append(message))
+    service = PlexUploadService(test_db)
+    header = "Outcome per artwork file (final): 3 scanned"
+
+    for _ in range(3):
+        service._log_artwork_summary(_stats(scanned=3, already_current=3), dry_run=False)
+    assert logged.count(header) == 1
+
+    service._targeted_pending_servers = ["Jellyfin 'J' / Movies"]
+    for _ in range(3):
+        service._log_artwork_summary(_stats(scanned=3), dry_run=False)
+    assert logged.count(header) == 1 and debugged.count(header) == 1
+
+    service._log_artwork_summary(_stats(scanned=3, uploaded=2, already_current=1), dry_run=False)
+    assert logged.count(header) == 2
+
+
 def test_log_artwork_summary_emits_the_shared_block(test_db, logged):
     """The method is a thin wrapper over the shared formatter; this checks it delegates
     and carries the per-type split. Bucket wording itself is covered where it is built."""

@@ -57,6 +57,7 @@ class MediaServerItem:
     guid: Optional[str] = None  # Plex guid as the server reports it (plex://… or a legacy agent string); bundle folders hash it
     parent_guid: Optional[str] = None  # seasons: the show's guid
     content_rating: Optional[str] = None  # the age rating as the server shows it (R, TV-14, gb/15); None = unrated
+    loading: bool = False  # Plex: a new item whose details are still loading; fetching or changing it now damages them
     native: Any = field(default=None, repr=False)
     client: Any = field(default=None, repr=False)  # owning MediaServerClient (multi-instance indexes)
 

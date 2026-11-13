@@ -66,6 +66,9 @@ class FakeMetadata:
     def flush(self):
         pass
 
+    def log_stats(self):
+        pass
+
 
 # ── registry / status resolution ─────────────────────────────────────────────
 
@@ -745,6 +748,18 @@ def _has_badge(raw: bytes) -> bool:
         return sum(1 for px in edges if max(abs(c - 90) for c in px) > 30) > 500
 
 
+def test_the_tmdb_line_is_logged_once_however_often_the_job_ends(test_db, monkeypatch):
+    lines = []
+    monkeypatch.setattr("services.overlays.metadata.log_info", lambda tag, message, **kw: lines.append(message))
+    provider = MetadataProvider("key", db=test_db)
+    provider.stats.update(requests=1, cached=4)
+    engine = _engine(test_db, FakeClient(), provider)
+    for _ in range(2):  # an upload job ends the engine before its section end and again on the way out
+        engine.flush()
+        engine.log_summary()
+    assert lines == ["TMDB: 1 request(s) this run (0 refreshed, 4 served from cache)"]
+
+
 def test_server_engine_badges_from_source_files_and_refreshes(test_db, isolated_overlay_files):
     client = FakeClient()
     sources = _sources(isolated_overlay_files, 10, 20, 30)
@@ -1131,12 +1146,13 @@ def test_jellyfin_poster_replaced_on_the_server_is_pushed_again(test_db, isolate
     recorded = _state_items(test_db)["srv|30"]["server_key"]
     assert recorded.startswith("jf:") and recorded != "jf:tag-30"  # the tag of what we uploaded
     second = _engine(test_db, client, meta, sources=sources)
-    assert second.run()["current"] == 1 and len(client.uploads) == 1
+    assert second.run()["current"] == 1 and len(client.uploads) == 1 and not second.lost_on_server
     client.items["2"][1].native["ImageTags"]["Primary"] = "someone-elses"
     third = _engine(test_db, client, meta, sources=sources)
     stats = third.run()
     third.flush()
     assert stats["refreshed"] == 1 and len(client.uploads) == 2
+    assert third.lost_on_server == {"srv|30"}  # the uploader sends this item's artwork again as well
     assert _state_items(test_db)["srv|30"]["server_key"] == "jf:" + hashlib.sha1(client.uploads[-1][1]).hexdigest()[:8]
     client.items["2"][1].native["ImageTags"] = {}  # the image was deleted outright
     fourth = _engine(test_db, client, meta, sources=sources)

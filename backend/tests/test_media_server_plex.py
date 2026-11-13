@@ -129,6 +129,9 @@ class FakeServer:
         if key.startswith("/library/collections/"):
             raw = self._raw(key.split("/")[3])
             return list(getattr(raw, "members", []) or [])
+        if key.startswith("/library/all?id="):
+            raw = self._raw(key.split("id=")[1].split("&")[0])
+            return [raw] if raw is not None else []
         prefix = "/library/metadata/"
         if key.startswith(prefix) and "/children" in key:
             raw = self._raw(key[len(prefix):].split("/")[0])
@@ -234,6 +237,63 @@ def test_find_by_provider_ids_translates_external_id_to_plex_guid():
     assert [m.item_id for m in client.find_by_provider_ids({"tmdb": "949"}, "movie")] == ["101"]
     assert [m.item_id for m in client.find_by_provider_ids({"imdb": "tt0113277"}, "movie")] == ["101"]
     assert client.find_by_provider_ids({"tmdb": "999"}, "movie") == []
+
+
+def _row(loaded: bool) -> Element:
+    # A library row as Plex delivers it: updatedAt appears once the item's details are loaded
+    return Element("Video", type="movie", **({"updatedAt": "1794461217"} if loaded else {}))
+
+
+def test_an_item_plex_is_still_loading_is_read_as_delivered():
+    loading = make_movie(ratingKey=301, title="New", guids=[], _data=_row(False), _autoReload=True)
+    ready = make_movie(ratingKey=302, title="New", _data=_row(True), _autoReload=True)
+    section = FakeSection(1, "Movies", "movie", items=[loading, ready])
+    client = make_client([section])
+
+    found = {m.item_id: m for m in client.find_by_title("New", "movie")}
+
+    # plexapi would refetch the item on its empty guid list; that fetch is what damages a loading item
+    assert found["301"].loading and found["301"].native is None and loading._autoReload is False
+    assert not found["302"].loading and found["302"].native is ready and ready._autoReload is True
+    assert not any(key.startswith("/library/metadata/") for key, _method, _data in client.server.calls)
+
+
+def test_the_id_search_holds_a_loading_item_it_finds_by_its_plex_guid():
+    # The agent already matched the new item (plex:// guid) but its tmdb/imdb ids are not written yet
+    ready = make_movie(ratingKey=302, guid="plex://movie/abc", _data=_row(True))
+    loading = make_movie(ratingKey=301, guid="plex://movie/abc", guids=[], _data=_row(False), _autoReload=True)
+    client = make_client([FakeSection(1, "Movies", "movie", items=[ready, loading])])
+
+    found = {m.item_id: m.loading for m in client.find_by_provider_ids({"tmdb": "949"}, "movie")}
+
+    assert found == {"302": False, "301": True}
+    assert loading._autoReload is False
+
+
+def test_item_is_loading_asks_the_library_listing_not_the_item():
+    loading = make_movie(ratingKey=301, guids=[], _data=_row(False))
+    ready = make_movie(ratingKey=302, _data=_row(True))
+    client = make_client([FakeSection(1, "Movies", "movie", items=[loading, ready])])
+
+    assert client.item_is_loading("301") is True
+    assert client.item_is_loading("302") is False
+    assert client.item_is_loading("999") is False
+    assert client.server.fetches == [f"/library/all?id={key}&includeGuids=1" for key in ("301", "302", "999")]
+    assert client.server.calls == []
+
+
+def test_the_probe_item_is_never_one_plex_is_still_loading():
+    loading = make_movie(ratingKey=301, title="A New One", guids=[], _data=_row(False))
+    ready = make_movie(ratingKey=302, _data=_row(True))
+    section = FakeSection(1, "Movies", "movie", items=[loading, ready])
+    client = make_client([section])
+
+    assert client._section_probe_item(section) is ready
+
+    only_loading = FakeSection(2, "New Library", "movie", items=[make_movie(ratingKey=401, guids=[], _data=_row(False))])
+    assert client._section_probe_item(only_loading) is None
+    only_loading.items[0]._data.set("updatedAt", "1794461217")
+    assert client._section_probe_item(only_loading) is only_loading.items[0]  # asked again, not remembered as empty
 
 
 def test_find_by_provider_ids_handles_empty_section():

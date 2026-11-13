@@ -447,6 +447,123 @@ def test_targeted_index_waits_for_jellyfin_to_rescan_an_upgraded_movie_file(test
     assert service.webhook_pending_servers() == []
 
 
+def _loading_plex_movie(key: str):
+    from xml.etree.ElementTree import Element
+    from plex_upload_fakes import _SimplePlex
+
+    movie = _SimplePlex("movie", "Heat", key=key)
+    movie._data = Element("Video", type="movie")  # the row carries no updatedAt until Plex has loaded the details
+    return movie
+
+
+def test_targeted_index_leaves_an_item_plex_is_still_loading_alone(test_db, monkeypatch):
+    """Fetching or changing a new Plex item before its details are loaded damages them, so it is
+    no target yet and its server counts as pending, scoped or not."""
+    import plexapi.server as plexapi_server
+    from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted
+
+    movie = _loading_plex_movie("7")
+    section = _FakePlexSection(section_type="movie", title="Movies", guid_results=[movie])
+    monkeypatch.setattr(plexapi_server, "PlexServer", lambda url, token: _FakePlexServerForTargeted([section]))
+    service = PlexUploadService(test_db)
+    instances = [{"name": "P", "url": "http://p", "api_key": "t", "type": "plex"}]
+
+    assert _targeted_movie_index(service, instances, {}) == ({}, [])
+    assert service.webhook_pending_servers() == service.webhook_loading_servers() == ["Plex 'P' / Movies"]
+    assert service.webhook_pending_instances() == ["P"]
+
+    movie._data.set("updatedAt", "1794461217")
+    index, totals = _targeted_movie_index(service, instances, {})
+    assert index["movies"] and [t["instance"] for t in totals] == ["P"]
+    assert service.webhook_pending_servers() == service.webhook_loading_servers() == []
+
+
+def test_targeted_index_waits_for_a_loading_copy_beside_a_ready_one(test_db, monkeypatch):
+    """The title is ready in one library and still loading in another of the same server:
+    the ready copy is indexed and the server stays pending for the other."""
+    import plexapi.server as plexapi_server
+    from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted, _SimplePlex
+
+    sections = [
+        _FakePlexSection(section_type="movie", title="Movies", guid_results=[_SimplePlex("movie", "Heat", key="7")]),
+        _FakePlexSection(section_type="movie", title="4K Movies", guid_results=[_loading_plex_movie("8")]),
+    ]
+    monkeypatch.setattr(plexapi_server, "PlexServer", lambda url, token: _FakePlexServerForTargeted(sections))
+    service = PlexUploadService(test_db)
+    instances = [{"name": "P", "url": "http://p", "api_key": "t", "type": "plex"}]
+
+    index, totals = _targeted_movie_index(service, instances, {})
+
+    assert [t["library"] for t in totals] == ["Movies"]
+    assert service.webhook_pending_servers() == service.webhook_loading_servers() == ["Plex 'P' / 4K Movies"]
+    assert service.webhook_pending_instances() == ["P"]
+
+
+def test_targeted_search_lines_are_not_repeated_while_a_job_waits(test_db, monkeypatch):
+    """A wait looks every few seconds. A line about a library is logged again only when it
+    changed, and the Found line is left to the search that follows the wait."""
+    import re
+    import plexapi.server as plexapi_server
+    import services.plex_upload as pu
+    from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted
+
+    lines = []
+    monkeypatch.setattr(pu, "log_info", lambda tag, msg, **kw: lines.append(("INFO", re.sub(r" in [0-9.]+s$", "", msg))))
+    monkeypatch.setattr(pu, "log_debug", lambda tag, msg, **kw: lines.append(("DEBUG", re.sub(r" in [0-9.]+s$", "", msg))))
+    movie = _loading_plex_movie("7")
+    section = _FakePlexSection(section_type="movie", title="Movies", guid_results=[movie])
+    monkeypatch.setattr(plexapi_server, "PlexServer", lambda url, token: _FakePlexServerForTargeted([section]))
+    service = PlexUploadService(test_db)
+    instances = [{"name": "P", "url": "http://p", "api_key": "t", "type": "plex"}]
+    loading = "Plex 'P' / Movies is still loading the details of Heat (1995); leaving it alone until that finishes"
+
+    service.quiet_targeted_logging = True
+    for _ in range(3):
+        _targeted_movie_index(service, instances, {})
+    assert lines == [("DEBUG", "Targeted search: P / Movies: 1 match still loading on the server")]
+
+    # The job's own search says why it holds off, once however often it finds the same
+    service.quiet_targeted_logging = False
+    _targeted_movie_index(service, instances, {})
+    _targeted_movie_index(service, instances, {})
+    assert lines[1:] == [("INFO", loading)]
+
+    movie._data.set("updatedAt", "1794461217")
+    service.quiet_targeted_logging = True
+    _targeted_movie_index(service, instances, {})
+    assert lines[2:] == [("DEBUG", "Targeted search: P / Movies: 1 match by id")]
+
+    service.quiet_targeted_logging = False
+    _targeted_movie_index(service, instances, {})
+    assert lines[3:] == [("INFO", "Found Heat (1995) on Plex 'P' / Movies")]
+
+
+def test_targeted_search_says_a_stale_jellyfin_file_once_per_change(test_db, monkeypatch):
+    """Jellyfin still on the old file: one INFO line and its file detail, not one set per look."""
+    import services.plex_upload as pu
+
+    lines = []
+    monkeypatch.setattr(pu, "log_info", lambda tag, msg, **kw: lines.append(("INFO", msg)))
+    monkeypatch.setattr(pu, "log_debug", lambda tag, msg, **kw: lines.append(("DEBUG", msg)))
+    _patch_jellyfin(monkeypatch)
+    service = PlexUploadService(test_db)
+    instances = [{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}]
+    selected = {"J": [{"key": "lib1", "title": "Movies", "enabled": True}]}
+    service.set_expected_movie_file("/data/movies/Heat (1995)/Heat (1995) Bluray-1080p.mkv")
+
+    _targeted_movie_index(service, instances, selected)
+    first = [text for level, text in lines]
+    assert first[0] == "Jellyfin 'J' / Movies still has the old file for Heat; waiting for it to scan in the new one"
+    assert first[1].startswith("Old file(s): ") and len(first) == 3
+
+    service.quiet_targeted_logging = True
+    for _ in range(4):
+        _targeted_movie_index(service, instances, selected)
+    service.quiet_targeted_logging = False
+    _targeted_movie_index(service, instances, selected)
+    assert len(lines) == 3
+
+
 class _FakePathlessJellyfinClient(_FakeJellyfinClient):
     def __init__(self, url, api_key, logger=None, app_version=""):
         super().__init__(url, api_key, logger=logger, app_version=app_version)
