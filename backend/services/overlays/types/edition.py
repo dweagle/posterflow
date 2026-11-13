@@ -1,11 +1,9 @@
 """Edition badge: the cut of a movie (Director's Cut, IMAX, Extended Edition …), read from
-the {edition-...} tag in its file name the way jmxd's Media Info overlay reads it (see
-editions.py). Movies only.
+the {edition-...} tag in its file name (see editions.py). Movies only.
 
-One style, lettering: the pack's edition marks, white lettering with no box, cropped to the
-art and sized by height, bundled under backend/assets/overlays/edition/lettering/ (the dot
-the pack draws before an edition is cut off: this badge stands on its own). A file with the
-same path under config/overlays/edition replaces the bundled one.
+One style, lettering: white lettering with no box, cropped to the art and sized by height,
+bundled under backend/assets/overlays/edition/lettering/. A file with the same path under
+config/overlays/edition replaces the bundled one.
 """
 
 from __future__ import annotations
@@ -18,7 +16,7 @@ from ..images import ImageLibrary
 
 IMAGES = ImageLibrary("edition", sets=(("lettering", "Lettering"),), noun="badge", cropped=True, height=84)
 _STYLE = IMAGES.default_set
-BADGE_HEIGHT = 42  # the pack's own size: its marks are 84 px of art drawn at half size
+BADGE_HEIGHT = 42  # the art's own size: 84 px of art drawn at half size
 DEFAULT_HEIGHT = 35
 
 

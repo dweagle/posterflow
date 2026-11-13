@@ -7,8 +7,7 @@ badge. A show or a season is judged by its episodes (see media.py). Three styles
 under backend/assets/overlays/audio/<set>/, every file cropped to its art: Kometa's compact
 and standard images, sized in percent of their own size (an offset reaches the art and the
 backdrop box hugs it; 26 px of padding and a 305 px minimum width give Kometa's box back),
-and lettering, white lettering with no box from jmxd's Media Info pack (80 px tall, sized by
-height). A file with the same path under config/overlays/audio replaces the bundled one.
+and lettering, white lettering with no box (80 px tall, sized by height). A file with the same path under config/overlays/audio replaces the bundled one.
 """
 
 from __future__ import annotations

@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from services.text_logo import _resolve_font
+
 
 MEDIA_MOVIE = "movie"
 MEDIA_SHOW = "show"
@@ -26,6 +28,10 @@ TARGET_SEASON = "season"
 
 H_ALIGNS = ("left", "center", "right")
 V_ALIGNS = ("top", "center", "bottom")
+
+# Fonts that no longer ship: a placement naming one takes the bundled font beside it, unless
+# the user's own copy is in config/artwork/fonts.
+RETIRED_FONTS = {"AvenirNextLTPro-Bold": "AlbertSans-Black"}
 
 # Kometa-style placement defaults, in 1000x1500 poster space.
 DEFAULT_PLACEMENT: Dict[str, Any] = {
@@ -321,5 +327,7 @@ def normalize_placement(raw: Any, defaults: Optional[Dict[str, Any]] = None) -> 
     back_enabled = raw.get("back_enabled", base["back_enabled"])
     out["back_enabled"] = back_enabled if isinstance(back_enabled, bool) else str(back_enabled).lower() != "false"
     out["font"] = os.path.basename(str(raw.get("font", base["font"]) or base["font"]))
+    if out["font"] in RETIRED_FONTS and _resolve_font([out["font"]]) is None:
+        out["font"] = RETIRED_FONTS[out["font"]]
     out["font_weight"] = str(raw.get("font_weight", base["font_weight"]) or "").strip()[:40]
     return out

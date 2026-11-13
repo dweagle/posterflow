@@ -341,8 +341,8 @@ def test_stand_in_symbol_is_centered_on_the_capitals():
 
 
 def test_stand_in_letter_shares_the_baseline():
-    """Avenir Next has no Cyrillic: Ж comes from the stand-in font and stands where H stands."""
-    assert abs(_ink_rows_of("Ж", font="AvenirNextLTPro-Bold")[1] - _ink_rows_of("H", font="AvenirNextLTPro-Bold")[1]) <= 3
+    """Bebas Neue has no Greek sigma: Σ comes from the stand-in font and stands where H stands."""
+    assert abs(_ink_rows_of("Σ", font="BebasNeue-Regular")[1] - _ink_rows_of("H", font="BebasNeue-Regular")[1]) <= 3
 
 
 def test_ink_below_the_capitals_is_not_cut_off_without_a_backdrop():
@@ -475,6 +475,22 @@ def test_normalize_placement_clamps_and_validates():
     p = normalize_placement({"horizontal_align": "middle", "font_size": 9999, "back_color": "blue", "font": "../x/Font"})
     assert p["horizontal_align"] == DEFAULT_PLACEMENT["horizontal_align"]
     assert p["font_size"] == 400 and p["back_color"] == DEFAULT_PLACEMENT["back_color"] and p["font"] == "Font"
+
+
+def test_retired_font_moves_to_its_bundled_replacement(tmp_path, monkeypatch):
+    """A saved placement naming a font that no longer ships draws in the bundled replacement,
+    and its signature changes so the badges are redrawn. The user's own copy keeps the font."""
+    from core.config import settings as app_settings
+    monkeypatch.setattr(app_settings, "config_dir", tmp_path)
+    saved = {"font": "AvenirNextLTPro-Bold", "font_size": 60}
+    moved = normalize_placement(saved)
+    assert moved["font"] == "AlbertSans-Black" and moved["font_size"] == 60
+    assert overlay_signature({"placement": moved}) != overlay_signature({"placement": {**moved, "font": "AvenirNextLTPro-Bold"}})
+
+    fonts = tmp_path / "artwork" / "fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "AvenirNextLTPro-Bold.otf").write_bytes(b"stub")
+    assert normalize_placement(saved)["font"] == "AvenirNextLTPro-Bold"
 
 
 # ── metadata ─────────────────────────────────────────────────────────────────
@@ -2744,7 +2760,7 @@ def test_resolution_and_audio_types_describe_and_resolve():
     lettering = {**opts, "badge_style": "lettering"}
     letter = res.resolve(movie, lettering, {})
     name = lambda path: path.rsplit("/", 1)[1]
-    # DV HDR is two marks with a dot, as the pack writes it, so every dot in "4K · DOLBY VISION · HDR" follows the settings.
+    # DV HDR is two marks with a dot, so every dot in "4K · DOLBY VISION · HDR" follows the settings.
     assert name(letter.image) == "_res-4k.png" and [(name(p), h) for p, h in letter.image_tail] == [("_dot.png", 11), ("_fmt-dv.png", 40), ("_dot.png", 11), ("_fmt-hdr.png", 40)]
     assert (letter.image_height, letter.image_width, letter.image_gap) == (50, 0, 30) and letter.signature.endswith("|0|h=50+11+40+11+40|g=30") and "+" in letter.image_stamp
     assert letter.signature != badge.signature
@@ -2956,7 +2972,7 @@ def test_edition_type_badges_movies_from_the_packs_marks(client, monkeypatch, tm
     table = next(f for f in ed.schema() if f["kind"] == "states")
     assert (table["item_label"], table["split"], [f["key"] for f in table["items"][0]["fields"]]) == ("Edition", 2, ["priority"])
     assert ed.variants(opts)[0] == {"key": "ultimate-edition", "label": "Ultimate Edition", "group": "editions", "item": "ultimate-edition"} and len(ed.variants(opts)) == 18
-    # The pack's 18 marks, white lettering cropped to the art, the pack's leading dot cut off; IMAX is 80 px tall, the rest 84 (round letters overshoot).
+    # The 18 marks, white lettering cropped to the art, with no leading dot; IMAX is 80 px tall, the rest 84 (round letters overshoot).
     lib = edition.IMAGES
     assert (lib.default_set, lib.cropped, lib.height) == ("lettering", True, 84)
     assert {f.stem for f in (lib.bundled_dir / "lettering").glob("*.png")} == set(k for k, _l in ed.image_items()) and len(ed.image_items()) == 18
@@ -2965,7 +2981,7 @@ def test_edition_type_badges_movies_from_the_packs_marks(client, monkeypatch, tm
             assert img.mode == "RGBA" and img.getchannel("A").getbbox() == (0, 0, img.width, img.height) and 80 <= img.height <= 84, key
             assert {img.getchannel(c).getextrema() for c in "RGB"} == {(255, 255)} and img.width > 400, key
             left = img.crop((0, 0, 40, img.height)).getchannel("A").getbbox()
-            assert left is not None and left[3] - left[1] > 40, key  # the badge starts with lettering, not the pack's small dot
+            assert left is not None and left[3] - left[1] > 40, key  # the badge starts with lettering, not a small dot
     # A movie's edition comes from its file name; the badge is sized by height in proportion to its art.
     movie = _ctx("movie", "Film", 2021)
     movie.media = [_file("Film (2021) {edition-Director's Cut} [Remux-2160p][DV HDR10][TrueHD Atmos 7.1].mkv", "4k")]

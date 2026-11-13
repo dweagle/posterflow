@@ -1,7 +1,3 @@
-These images are Kometa's default overlay images (github.com/Kometa-Team/Kometa, defaults/overlays/images),
+standard/ and compact/: Kometa's default overlay images (github.com/Kometa-Team/Kometa, defaults/overlays/images),
 created by Yozora, Bullmoose20 and Sohjiro with base images by Magic815. Each is centered, unscaled, on
-Kometa's 305 x 105 backdrop box (305 x 189 for the two tall ones).
-
-lettering/: from jmxd's Media Info overlay pack for Kometa (jmxd-overlays, https://buymeacoffee.com/jmxd): the pack's
-marks cropped to the lettering, joined with its own dot and spacing. Badges the pack has no mark for are set in the
-pack's font (Avenir Next LT Pro Bold) or cut from its marks.
+Kometa's 305 x 105 backdrop box (305 x 189 for the two tall ones). Kometa is MIT licensed: see ../LICENSE-Kometa.txt.

@@ -11,10 +11,10 @@ Three styles, bundled under backend/assets/overlays/resolution/<set>/, every fil
 its art. Color (Kometa's images, the format logos in color) and white (the same images with
 every pixel made white) are sized in percent of their own size, so an offset reaches the art
 and the backdrop box hugs it (26 px of padding and a 305 px minimum width give Kometa's box
-back). Lettering is white lettering with no box, sized by height, from jmxd's Media Info pack.
+back). Lettering is white lettering with no box, sized by height.
 Its set ships parts (_res-<resolution>, _fmt-<format>, _dot) and a badge is joined at draw
 time, resolution · format on one line, the dots and the air around them being settings (DV HDR
-and DV HDR10+ are two marks with a dot, as the pack writes them); the resolution lettering is
+and DV HDR10+ are two marks with a dot); the resolution lettering is
 100 px tall and the format lettering 80, drawn at one scale. A file
 with the same path under config/overlays/resolution replaces the bundled one; in the
 lettering set a file named by a badge's key (4kdv.png) is drawn whole instead of joined.
@@ -58,7 +58,7 @@ _SCALED = [s for s in _SET_KEYS if s not in _LETTERING]
 BADGES = [(resolution_image(res, flavor), resolution_label(res, flavor)) for res, flavor in RESOLUTION_ORDER]
 _LABELS = dict(BADGES)
 _PARTS = {resolution_image(res, flavor): (res, flavor) for res, flavor in RESOLUTION_ORDER}
-_FORMAT_MARKS = {"dvhdr": ("dv", "hdr"), "dvhdrplus": ("dv", "plus")}  # formats the pack writes as two marks with a dot
+_FORMAT_MARKS = {"dvhdr": ("dv", "hdr"), "dvhdrplus": ("dv", "plus")}  # formats written as two marks with a dot
 DOT_GAP = 60  # the set's own air on each side of the dot, in percent of the badge height
 # The Badges table as three tables side by side, each ending where a resolution's badges end:
 # 4K and 1080p, 720p and 576p, 480p and the formats on their own.

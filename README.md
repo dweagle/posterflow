@@ -148,3 +148,8 @@ Without this, everything else works; only the clean-up of old Plex uploads is un
 ## License
 
 PosterFlow is released under the [MIT License](LICENSE).
+
+Bundled third-party files keep their own licenses, and each license sits beside the files it covers:
+
+- Fonts in `backend/assets/fonts`: Albert Sans, Bebas Neue, Liberation Sans and Noto Serif (SIL OFL 1.1), Roboto Condensed (Apache 2.0), DejaVu Sans (Bitstream Vera license).
+- Badge images in `backend/assets/overlays`: Kometa's default overlay images are MIT (`LICENSE-Kometa.txt`). A folder's `CREDITS.txt` says which images those are.

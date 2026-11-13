@@ -1,0 +1,2 @@
+color/ and white/: made for PosterFlow by the project author, under the project's MIT license (LICENSE at the
+repo root).

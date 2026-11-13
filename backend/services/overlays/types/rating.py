@@ -65,9 +65,8 @@ class RatingOverlay(OverlayType):
             "horizontal_offset": 35,
             "vertical_align": "bottom",
             "vertical_offset": 35,
-            # The user's Kometa ratings font; falls back to the bundled Roboto Condensed when the
-            # file is not in config/artwork/fonts (it is a commercial font, so it is not bundled).
-            "font": "AvenirNextLTPro-Bold",
+            # Bundled open font, close to Avenir Next Bold (commercial, so it cannot ship).
+            "font": "AlbertSans-Black",
             "font_weight": "SemiBold",
             "font_size": 60,
             "font_color": "#111111",

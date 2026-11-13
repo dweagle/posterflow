@@ -1,7 +1,7 @@
 """The edition of a movie (Director's Cut, IMAX, Extended Edition …), read from the
-{edition-...} tag of its file name the way jmxd's Media Info overlay reads it (TRaSH naming).
+{edition-...} tag of its file name (TRaSH naming).
 
-Every edition has the pack's weight and the heaviest one named wins; the patterns tell the
+Every edition has a weight and the heaviest one named wins; the patterns tell the
 near-names apart (Extended Cut vs Extended, Theatrical vs Theatrical Cut, Ultimate Edition
 vs Ultimate Director's Cut).
 """
@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .media import File
 
-# key (also the image name), label, what follows "{edition-" in the file name; the pack's
+# key (also the image name), label, what follows "{edition-" in the file name; the
 # weights run 420, 430 … in this order.
 _EDITIONS = [
     ("imax", "IMAX", r"IMAX"),
@@ -48,7 +48,7 @@ _PATTERNS = {e[0]: e[3] for e in EDITIONS}
 def edition_badge(files: Optional[Iterable[File]], priorities: Optional[Dict[str, int]] = None) -> Optional[str]:
     """The key of the edition badge a movie's files earn, or None: the highest priority among
     the editions named in a file name. `priorities` (key → priority) also says which editions
-    are in play; None = all of them at the pack's weights."""
+    are in play; None = all of them at their default weights."""
     paths = [str(f.get("path") or "") for f in (files or []) if isinstance(f, dict)]
     if not paths:
         return None
