@@ -10,12 +10,13 @@ from __future__ import annotations
 import math
 import os
 import re
+import unicodedata
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
-from services.text_logo import _resolve_font
+from services.text_logo import BUNDLED_FONT_DIR, _resolve_font
 
 from .base import OverlayBadge
 
@@ -23,6 +24,8 @@ REF_WIDTH = 1000
 REF_HEIGHT = 1500
 _SUPERSAMPLE = 2
 _FALLBACK_FONTS = ["RobotoCondensed-Variable", "LiberationSans-Regular", "BebasNeue-Regular"]
+# Bundled fonts that stand in, in this order, for a character the badge's own font has no glyph for
+_GLYPH_FALLBACKS = ("fallback/DejaVuSans.ttf", "LiberationSans-Regular.ttf")
 
 Rect = Tuple[int, int, int, int]  # x, y, w, h in reference space
 
@@ -60,18 +63,100 @@ def _load_font(path: str, size: int, weight: str) -> ImageFont.FreeTypeFont:
     return font
 
 
+def _glyph_print(font: ImageFont.FreeTypeFont, ch: str) -> Tuple[Tuple[int, int], bytes, float]:
+    mask = font.getmask(ch)
+    return mask.size, bytes(mask), font.getlength(ch)
+
+
+@lru_cache(maxsize=32)
+def _glyph_probe(path: str) -> Tuple[ImageFont.FreeTypeFont, Tuple[Tuple[int, int], bytes, float]]:
+    """A small instance of the font, and what it draws for a character it does not have."""
+    font = ImageFont.truetype(path, 48)
+    return font, _glyph_print(font, "\uFFFE")  # U+FFFE is no character, so no font carries it
+
+
+@lru_cache(maxsize=4096)
+def _has_glyph(path: str, ch: str) -> bool:
+    font, missing = _glyph_probe(path)
+    return _glyph_print(font, ch) != missing
+
+
+@lru_cache(maxsize=1)
+def _glyph_fallbacks() -> Tuple[str, ...]:
+    return tuple(str(BUNDLED_FONT_DIR / name) for name in _GLYPH_FALLBACKS if (BUNDLED_FONT_DIR / name).is_file())
+
+
+def _font_for(ch: str, font: ImageFont.FreeTypeFont) -> ImageFont.FreeTypeFont:
+    """The font that draws `ch`: the badge's own, or a bundled stand-in at the same size when
+    that font has no glyph for it (a symbol such as ● would come out as an empty box)."""
+    stand_in = _stand_in_path(str(font.path), ch)
+    return _load_font(stand_in, int(font.size), "") if stand_in else font
+
+
+def _stand_in_path(path: str, ch: str) -> Optional[str]:
+    """The bundled font that draws `ch` in place of the font at `path`; None when that font
+    draws it itself, or when no bundled font has it either."""
+    if ch.isspace() or _has_glyph(path, ch):
+        return None
+    return next((fallback for fallback in _glyph_fallbacks() if fallback != path and _has_glyph(fallback, ch)), None)
+
+
+def stand_in_mark(badge: OverlayBadge, placement: Dict[str, Any]) -> str:
+    """'|glyphs=1' when a stand-in font draws part of the badge's text, '' otherwise. It is part
+    of an item's signature, so a poster badged while such a character came out as an empty box
+    is badged again."""
+    if badge.image or not badge.text:
+        return ""
+    path = resolve_font_path(_merged_placement(badge, placement).get("font"))
+    return "|glyphs=1" if any(_stand_in_path(path, ch) for ch in badge.text) else ""
+
+
+@lru_cache(maxsize=4096)
+def _ink_rows(font: ImageFont.FreeTypeFont, ch: str, stroke: int) -> Optional[Tuple[int, int]]:
+    """Top and bottom row of the character's ink, measured from where it is drawn; None = no ink."""
+    mask, (_ox, oy) = font.getmask2(ch, stroke_width=stroke)
+    box = mask.getbbox()
+    return (int(oy + box[1]), int(oy + box[3])) if box else None
+
+
+def _glyph_shift(ch: str, font: ImageFont.FreeTypeFont, used: ImageFont.FreeTypeFont) -> float:
+    """How far down a stand-in font's glyph is drawn so it lines up with the badge's own font:
+    a symbol (●, ★, →) is centered on that font's capitals, anything else shares its baseline."""
+    if used is font:
+        return 0.0
+    if unicodedata.category(ch) in ("So", "Sm"):
+        caps, ink = _ink_rows(font, "H", 0), _ink_rows(used, ch, 0)
+        if caps and ink:
+            return (caps[0] + caps[1]) / 2 - (ink[0] + ink[1]) / 2
+    return float(font.getmetrics()[0] - used.getmetrics()[0])
+
+
+def _ink_span(text: str, font: ImageFont.FreeTypeFont, stroke: int) -> Optional[Tuple[float, float]]:
+    """Top and bottom of the text's real ink, from where it is drawn. Descenders and stand-in
+    symbols reach past the cap-height band the badge is sized by."""
+    rows = []
+    for ch in text:
+        used = _font_for(ch, font)
+        ink = _ink_rows(used, ch, stroke)
+        if ink:
+            shift = _glyph_shift(ch, font, used)
+            rows.append((ink[0] + shift, ink[1] + shift))
+    return (min(top for top, _ in rows), max(bottom for _, bottom in rows)) if rows else None
+
+
 def _text_width(font: ImageFont.FreeTypeFont, text: str, spacing: float) -> float:
     if not text:
         return 0.0
-    return sum(font.getlength(ch) for ch in text) + spacing * (len(text) - 1)
+    return sum(_font_for(ch, font).getlength(ch) for ch in text) + spacing * (len(text) - 1)
 
 
 def _draw_spaced(draw: ImageDraw.ImageDraw, x: float, y: float, text: str, font: ImageFont.FreeTypeFont,
                  spacing: float, fill: Tuple[int, int, int, int], stroke_width: int,
                  stroke_fill: Tuple[int, int, int, int]) -> None:
     for ch in text:
-        draw.text((x, y), ch, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
-        x += font.getlength(ch) + spacing
+        used = _font_for(ch, font)
+        draw.text((x, y + _glyph_shift(ch, font, used)), ch, font=used, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
+        x += used.getlength(ch) + spacing
 
 
 def _has_box(placement: Dict[str, Any]) -> bool:
@@ -366,6 +451,22 @@ def render_badges(image: Image.Image, layers: List[Tuple[OverlayBadge, Dict[str,
     return canvas, rects
 
 
+def _ink_overflow(badge: OverlayBadge, geo: Dict[str, Any]) -> Tuple[int, int]:
+    """Rows the text's ink reaches above and below the badge's own height (a "g" or a symbol in
+    a badge without a backdrop), in whole output pixels: the layer grows by that much on that
+    side so none is cut off."""
+    if badge.image or not badge.text:
+        return 0, 0
+    span = _ink_span(badge.text, geo["font"], geo["stroke"])
+    if span is None:
+        return 0, 0
+    ss = geo["ss"]
+    room = (geo["h"] - geo["ink_h"]) / 2  # what the badge leaves above and below its capitals
+    above = geo["ink_top"] - span[0] - room
+    below = span[1] - (geo["ink_top"] + geo["ink_h"]) - room
+    return (ss * math.ceil(above / ss) if above > 0 else 0, ss * math.ceil(below / ss) if below > 0 else 0)
+
+
 def render_badge(image: Image.Image, badge: OverlayBadge, placement: Dict[str, Any], band: bool = True) -> Tuple[Image.Image, Rect]:
     """Composite one badge onto a copy of `image`. Returns (image, rect in reference space).
     `band=False` leaves the edge band to the caller (render_badges paints it once per poster)."""
@@ -389,9 +490,12 @@ def render_badge(image: Image.Image, badge: OverlayBadge, placement: Dict[str, A
     # A glowing box needs room around it: the layer grows by the glow's reach on every side,
     # while the reported rect (and the anchor) stay the box itself.
     m = int(round(merged.get("gradient_spread", 0) * scale * ss)) if glow else 0
-    layer = Image.new("RGBA", (w + 2 * m, h + 2 * m), (0, 0, 0, 0))
+    # Ink past the badge's height gets rows of its own on that side, for the same reason
+    over_top, over_bottom = _ink_overflow(badge, geo)
+    mt, mb = max(m, over_top), max(m, over_bottom)
+    layer = Image.new("RGBA", (w + 2 * m, h + mt + mb), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
-    box = (m, m, m + w - 1, m + h - 1)
+    box = (m, mt, m + w - 1, mt + h - 1)
     radius = min(int(round(merged["back_radius"] * scale * ss)), min(w, h) // 2)
     line_w = int(round(merged["back_line_width"] * scale * ss))
     back = parse_color(merged["back_color"])
@@ -407,7 +511,7 @@ def render_badge(image: Image.Image, badge: OverlayBadge, placement: Dict[str, A
             ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
             fill = _fade_layer(w, h, color, merged["gradient_angle"])
         fill.putalpha(ImageChops.multiply(fill.getchannel("A"), mask))
-        layer.alpha_composite(fill)
+        layer.alpha_composite(fill, (0, 0) if glow else (m, mt))
     if has_box and ((back[3] > 0 and not box_gradient) or (line_w > 0 and line[3] > 0)):
         draw.rounded_rectangle(
             box, radius=radius,
@@ -418,7 +522,7 @@ def render_badge(image: Image.Image, badge: OverlayBadge, placement: Dict[str, A
     if badge.box and geo.get("inner"):
         # The badge's own box, centered inside the backdrop (or alone when the backdrop is off).
         iw, ih = geo["inner"]
-        ix, iy = m + (w - iw) // 2, m + (h - ih) // 2
+        ix, iy = m + (w - iw) // 2, mt + (h - ih) // 2
         ifill = parse_color(badge.box.get("fill"))
         iline = parse_color(badge.box.get("line_color"))
         iline_w = int(round(float(badge.box.get("line_width") or 0) * scale * ss))
@@ -431,17 +535,17 @@ def render_badge(image: Image.Image, badge: OverlayBadge, placement: Dict[str, A
                 width=iline_w if iline_w > 0 else 0,
             )
     if badge.image:
-        layer.alpha_composite(geo["logo"], (m + (w - geo["logo_w"]) // 2, m + (h - geo["logo_h"]) // 2))
+        layer.alpha_composite(geo["logo"], (m + (w - geo["logo_w"]) // 2, mt + (h - geo["logo_h"]) // 2))
     elif badge.text:
         tx = m + (w - geo["text_w"]) / 2 + geo["stroke"]
-        ty = m + (h - geo["ink_h"]) / 2 - geo["ink_top"]
+        ty = mt + (h - geo["ink_h"]) / 2 - geo["ink_top"]
         _draw_spaced(
             draw, tx, ty, badge.text, geo["font"], geo["spacing"],
             parse_color(merged["font_color"], (255, 255, 255, 255)),
             geo["stroke"], parse_color(merged["stroke_color"], (0, 0, 0, 255)),
         )
-    out_w, out_h, out_m = max(1, w // ss), max(1, h // ss), m // ss
-    layer = layer.resize((out_w + 2 * out_m, out_h + 2 * out_m), Image.LANCZOS)
+    out_w, out_h, out_m, out_mt, out_mb = max(1, w // ss), max(1, h // ss), m // ss, mt // ss, mb // ss
+    layer = layer.resize((out_w + 2 * out_m, out_h + out_mt + out_mb), Image.LANCZOS)
 
     x = _anchor(merged["horizontal_align"], merged["horizontal_offset"] * scale, out_w, image.width)
     y = _anchor(merged["vertical_align"], merged["vertical_offset"] * scale, out_h, image.height)
@@ -450,6 +554,6 @@ def render_badge(image: Image.Image, badge: OverlayBadge, placement: Dict[str, A
     canvas = image.convert("RGB")
     if band and _wants_band(merged):
         _paste_band(canvas, merged, scale)
-    _paste_clipped(canvas, layer, x - out_m, y - out_m)  # where the (possibly glow-padded) layer lands
+    _paste_clipped(canvas, layer, x - out_m, y - out_mt)  # where the (possibly glow-padded) layer lands
     rect = (int(round(x / scale)), int(round(y / scale)), int(round(out_w / scale)), int(round(out_h / scale)))
     return canvas, rect

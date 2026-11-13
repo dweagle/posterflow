@@ -44,7 +44,7 @@ from .config import SETTING_TMDB_API_KEY, overlay_signature
 from .finales import FinaleLookup
 from .metadata import MetadataProvider, describe_record
 from .registry import all_types
-from .render import render_badges
+from .render import render_badges, stand_in_mark
 
 ProgressCallback = Callable[[str, int, int, str], None]
 _STATE_LOCK = threading.Lock()  # process-wide: two runs may flush at once (workflow + webhook)
@@ -443,7 +443,7 @@ class ServerOverlayEngine:
         """What was drawn, and the settings it was drawn with: one line per badge, then one
         "cfg:<type>:<hash>" line per badge for the overlay definition that produced it. A settings
         edit changes the lines of every item it touches, so any run or upload sees it per item."""
-        lines = [f"{otype.key}:{badge.signature}" for otype, badge, _ in resolved]
+        lines = [f"{otype.key}:{badge.signature}{stand_in_mark(badge, placement)}" for otype, badge, placement in resolved]
         for otype, _badge, _placement in resolved:
             tcfg = next((t for o, t in self.active if o.key == otype.key), None)
             overlay = self._overlay_for(tcfg, ctx.library_id) if tcfg else None

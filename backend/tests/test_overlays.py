@@ -285,6 +285,89 @@ def test_render_badge_without_backdrop_draws_text_only():
     assert normalize_placement({"back_enabled": "false"})["back_enabled"] is False
 
 
+def test_badge_text_uses_a_stand_in_font_for_a_character_its_font_lacks():
+    """Roboto Condensed has no ●. A bundled font draws that one character, at the same size,
+    instead of the font's empty box; everything the font does have it still draws itself."""
+    from services.overlays import render
+
+    assert render._glyph_fallbacks()[0].endswith("DejaVuSans.ttf")
+    font = render._load_font(render.resolve_font_path("RobotoCondensed-Variable"), 80, "")
+    assert all(render._font_for(ch, font) is font for ch in "Aa9/ •")
+    stand_in = render._font_for("●", font)
+    assert stand_in is not font and stand_in.size == font.size
+    assert render._text_width(font, "A●", 0) == font.getlength("A") + stand_in.getlength("●")
+    assert render._font_for("\uFFFE", font) is font  # no font has it: nothing to switch to
+
+    # Drawn: a filled disc in the text color, where the missing-glyph box was hollow
+    img = Image.new("RGB", (1000, 1500), (90, 90, 90))
+    plain = normalize_placement({"back_enabled": False, "font": "RobotoCondensed-Variable", "font_size": 120, "font_color": "#FFFFFF"})
+    out, (x, y, w, h) = render_badge(img, OverlayBadge(key="x", text="●"), plain)
+    ink = [(px, py) for px in range(x, x + w) for py in range(y - 20, y + h + 20) if out.getpixel((px, py)) != (90, 90, 90)]
+    cx = sum(px for px, _ in ink) // len(ink)
+    cy = sum(py for _, py in ink) // len(ink)
+    assert out.getpixel((cx, cy)) == (255, 255, 255)
+
+
+def test_stand_in_mark_names_only_badges_drawn_with_a_stand_in_font():
+    """The mark goes into an item's signature: posters badged while ● was an empty box are
+    redone, and no other poster's signature moves."""
+    from services.overlays.render import stand_in_mark
+
+    roboto = normalize_placement({"font": "RobotoCondensed-Variable"})
+    assert stand_in_mark(OverlayBadge(key="airing", text="AIRING 09/05"), roboto) == ""
+    assert stand_in_mark(OverlayBadge(key="airing", text="● AIRING"), roboto) == "|glyphs=1"
+    # A font that has the character draws it itself
+    assert stand_in_mark(OverlayBadge(key="airing", text="● AIRING"), normalize_placement({"font": "LiberationSans-Regular"})) == ""
+    assert stand_in_mark(OverlayBadge(key="logo", text="●", image="/x/logo.png"), roboto) == ""
+
+
+def _ink_rows_of(text: str, **placement) -> tuple[int, int, int, int]:
+    """(first ink row, last ink row, rect top, rect height) of a badge drawn without a backdrop."""
+    img = Image.new("RGB", (1000, 1500), (90, 90, 90))
+    plain = normalize_placement({"back_enabled": False, "font_size": 120, "vertical_align": "center", **placement})
+    out, (x, y, w, h) = render_badge(img, OverlayBadge(key="x", text=text), plain)
+    rows = [py for py in range(y - 80, y + h + 80) if any(out.getpixel((px, py)) != (90, 90, 90) for px in range(max(0, x - 4), x + w + 4))]
+    return rows[0], rows[-1], y, h
+
+
+def test_stand_in_symbol_is_centered_on_the_capitals():
+    """The stand-in font draws its shapes lower than capitals sit; a dot alone, or beside
+    text, is centered on the badge font's capital letters."""
+    top, bottom, y, h = _ink_rows_of("●", font="RobotoCondensed-Variable")
+    assert abs((top + bottom) / 2 - (y + h / 2)) <= 2
+
+
+def test_stand_in_letter_shares_the_baseline():
+    """Avenir Next has no Cyrillic: Ж comes from the stand-in font and stands where H stands."""
+    assert abs(_ink_rows_of("Ж", font="AvenirNextLTPro-Bold")[1] - _ink_rows_of("H", font="AvenirNextLTPro-Bold")[1]) <= 3
+
+
+def test_ink_below_the_capitals_is_not_cut_off_without_a_backdrop():
+    """A badge without a backdrop is as tall as its capitals. A "g" (or a symbol) reaches past
+    that and is drawn in full; the badge's rect stays the capital band."""
+    cap_top, cap_bottom, y, h = _ink_rows_of("H", font="RobotoCondensed-Variable")
+    g_top, g_bottom, g_y, g_h = _ink_rows_of("Hg", font="RobotoCondensed-Variable")
+    assert (g_y, g_h) == (y, h) and g_top == cap_top
+    assert g_bottom - cap_bottom >= 15  # the whole descender, where one row used to survive
+
+
+def test_ink_above_the_box_leaves_the_box_where_it_is():
+    """An accent taller than a tight box gets rows of its own above it; the box, a fading one
+    included, is still drawn at the badge's rect."""
+    bg = (90, 90, 90)
+    img = Image.new("RGB", (1000, 1500), bg)
+    for style in ("solid", "gradient"):
+        tight = normalize_placement({"font": "RobotoCondensed-Variable", "font_size": 120, "back_padding": 0, "back_radius": 0,
+                                     "back_min_width": 600, "vertical_align": "center", "back_style": style,
+                                     "gradient_mode": "linear", "gradient_angle": 0})
+        out, (x, y, w, h) = render_badge(img, OverlayBadge(key="x", text="É"), tight)
+        edge = x + 4  # in the box, away from the letter
+        assert out.getpixel((edge, y - 4)) == bg and out.getpixel((edge, y + h + 3)) == bg, style
+        assert out.getpixel((edge, y + h - 2)) != bg, style  # the box reaches the rect's last rows
+        # The accent itself is above the box, drawn in full
+        assert any(out.getpixel((px, py)) != bg for px in range(x + w // 2 - 40, x + w // 2 + 40) for py in range(y - 24, y - 6)), style
+
+
 def test_render_badge_baseline_is_stable_with_descenders():
     img = Image.new("RGB", (1000, 1500), (90, 90, 90))
     plain = normalize_placement({"back_enabled": False, "font_size": 80})
