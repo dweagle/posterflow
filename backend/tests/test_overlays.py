@@ -2727,7 +2727,7 @@ def test_resolution_and_audio_types_describe_and_resolve():
     assert len(opts["badges"]) == 39 and all(row == {"enabled": True} for row in opts["badges"].values())
     assert [f["key"] for f in res.schema() if f.get("section") == "Badge"] == ["badge_style", "badge_scale", "badge_height", "dot_gap", "show_dot", "episode_percent", "source"]
     assert opts["source"] == "both" and [o["value"] for o in next(f for f in res.schema() if f["key"] == "source")["options"]] == ["both", "server", "filename"]
-    assert (opts["dot_gap"], opts["show_dot"]) == (60, True) and all(f["show_when"] == {"badge_style": ["lettering"]} for f in res.schema() if f["key"] in ("dot_gap", "show_dot"))
+    assert (opts["badge_height"], opts["dot_gap"], opts["show_dot"]) == (40, 60, True) and all(f["show_when"] == {"badge_style": ["lettering"]} for f in res.schema() if f["key"] in ("dot_gap", "show_dot"))
     assert [f["show_when"]["badge_style"] for f in res.schema() if f["key"] in ("badge_scale", "badge_height")] == [["color", "white"], ["lettering"]]
     assert next(f for f in res.schema() if f["kind"] == "images")["set_option"] == "badge_style"
     # One row per badge, a switch and nothing else, in three tables that end where a resolution's badges end.
@@ -2755,23 +2755,23 @@ def test_resolution_and_audio_types_describe_and_resolve():
     white = res.resolve(movie, {**opts, "badge_style": "white"}, {})
     assert white.image.endswith("/resolution/white/4kdvhdr.png") and white.signature != badge.signature
     assert res.resolve_variant("4khlg", {**opts, "badge_style": "white"}).image.endswith("/resolution/white/4khlg.png")
-    # Lettering is sized by height: the resolution lettering (100 px of art) gets the setting, the format lettering (80) follows in proportion.
-    # A lettering badge is joined from its parts: the resolution, the dot (11 px of art at this size) and the format, 60 % of the height apart.
+    # Lettering is sized by height: the resolution and the format lettering are one height, the same as the Audio lettering's default.
+    # A lettering badge is joined from its parts: the resolution, the dot (11 px at this size) and the format, 60 % of the height apart.
     lettering = {**opts, "badge_style": "lettering"}
     letter = res.resolve(movie, lettering, {})
     name = lambda path: path.rsplit("/", 1)[1]
     # DV HDR is two marks with a dot, so every dot in "4K · DOLBY VISION · HDR" follows the settings.
     assert name(letter.image) == "_res-4k.png" and [(name(p), h) for p, h in letter.image_tail] == [("_dot.png", 11), ("_fmt-dv.png", 40), ("_dot.png", 11), ("_fmt-hdr.png", 40)]
-    assert (letter.image_height, letter.image_width, letter.image_gap) == (50, 0, 30) and letter.signature.endswith("|0|h=50+11+40+11+40|g=30") and "+" in letter.image_stamp
+    assert (letter.image_height, letter.image_width, letter.image_gap) == (40, 0, 24) and letter.signature.endswith("|0|h=40+11+40+11+40|g=24") and "+" in letter.image_stamp
     assert letter.signature != badge.signature
     alone = res.resolve_variant("dvhdr", lettering)
-    assert name(alone.image) == "_fmt-dv.png" and ([name(p) for p, _h in alone.image_tail], alone.image_height, alone.image_gap) == (["_dot.png", "_fmt-hdr.png"], 40, 30)
+    assert name(alone.image) == "_fmt-dv.png" and ([name(p) for p, _h in alone.image_tail], alone.image_height, alone.image_gap) == (["_dot.png", "_fmt-hdr.png"], 40, 24)
     single = res.resolve_variant("hdr", lettering)
     assert name(single.image) == "_fmt-hdr.png" and (single.image_height, single.image_tail, single.image_gap) == (40, (), 0)
     no_dot = res.resolve_variant("4kdvhdr", {**lettering, "show_dot": False, "dot_gap": 100})
-    assert [name(p) for p, _h in no_dot.image_tail] == ["_fmt-dv.png", "_fmt-hdr.png"] and no_dot.image_gap == 50
+    assert [name(p) for p, _h in no_dot.image_tail] == ["_fmt-dv.png", "_fmt-hdr.png"] and no_dot.image_gap == 40
     big = res.resolve_variant("4kdvhdr", {**lettering, "badge_height": 80})
-    assert (big.image_height, [h for _p, h in big.image_tail], big.image_gap) == (80, [18, 64, 18, 64], 48)
+    assert (big.image_height, [h for _p, h in big.image_tail], big.image_gap) == (80, [22, 80, 22, 80], 48)
     # Read from the server only (no flags here) or the file name only.
     assert res.resolve(movie, {**opts, "source": "server"}, {}).key == "4k" and res.resolve(movie, {**opts, "source": "filename"}, {}).key == "4kdvhdr"
     assert res.normalize_options({"source": "filename"})["source"] == "filename" and res.normalize_options({"source": "junk"})["source"] == "both"
@@ -2848,15 +2848,16 @@ def test_bundled_resolution_and_audio_images_are_kometas_on_its_backdrop_box():
     assert parts == {"_res-4k", "_res-1080p", "_res-720p", "_res-576p", "_res-480p", "_fmt-dv", "_fmt-hdr", "_fmt-plus", "_fmt-hlg", "_dot"}
     assert resolution.IMAGES.file("4k", "lettering") is None and resolution.IMAGES.cropped
     assert {f.stem for f in (audio.IMAGES.bundled_dir / "lettering").glob("*.png")} == set(audio_keys)
-    checks = [(resolution.IMAGES, n, 100 if n.startswith("_res") else 22 if n == "_dot" else 80) for n in parts] + [(audio.IMAGES, k, 80) for k in audio_keys]
+    # Every mark of both sets is one height, so a resolution lines up with its format and with the audio badge.
+    checks = [(resolution.IMAGES, n, 22 if n == "_dot" else 80) for n in parts] + [(audio.IMAGES, k, 80) for k in audio_keys]
     for lib, name, height in checks:
         with Image.open(lib.file(name, "lettering")) as img:
             assert img.mode == "RGBA" and img.getchannel("A").getbbox() == (0, 0, img.width, img.height) and img.height == height, (lib.name, name)
             assert {img.getchannel(c).getextrema() for c in "RGB"} == {(255, 255)}, (lib.name, name)
-    assert (resolution.IMAGES.height, audio.IMAGES.height) == (100, 80)
-    assert (resolution.IMAGES.drawn_height("_res-4k", "lettering", 50), resolution.IMAGES.drawn_height("_fmt-hdr", "lettering", 50),
-            resolution.IMAGES.drawn_height("_dot", "lettering", 50), audio.IMAGES.drawn_height("aac", "lettering", 40)) == (50, 40, 11, 40)
-    assert resolution.IMAGES.drawn_height("_res-4k", "lettering", 0) == 0 and resolution.IMAGES.bundled_height("nope", "lettering") == 100
+    assert (resolution.IMAGES.height, audio.IMAGES.height) == (80, 80)
+    assert (resolution.IMAGES.drawn_height("_res-4k", "lettering", 40), resolution.IMAGES.drawn_height("_fmt-hdr", "lettering", 40),
+            resolution.IMAGES.drawn_height("_dot", "lettering", 40), audio.IMAGES.drawn_height("aac", "lettering", 40)) == (40, 40, 11, 40)
+    assert resolution.IMAGES.drawn_height("_res-4k", "lettering", 0) == 0 and resolution.IMAGES.bundled_height("nope", "lettering") == 80
 
 
 def test_server_engine_badges_resolution_and_audio_from_the_media_files(test_db, isolated_overlay_files):
@@ -2911,15 +2912,15 @@ def test_image_endpoints_default_to_the_types_first_set(client, monkeypatch, tmp
         assert img.size == (188, 47) and img.getchannel("A").getbbox() == (0, 0, 188, 47)  # cropped, as tall as the bundled 4K art (47)
     assert get_type("resolution").resolve_variant("4k", get_type("resolution").default_options()).image == str(tmp_path / "overlays" / "resolution" / "color" / "4k.png")
     assert client.delete("/api/overlays/images/resolution/4k").json()["custom"] is False
-    # A lettering badge is joined from parts: listed as bundled, drawn on request with the set's own spacing.
+    # A lettering badge is joined from parts: listed as bundled, drawn on request with the default spacing.
     lettered = client.get("/api/overlays/images/resolution", params={"set": "lettering"}).json()
     assert {i["source"] for i in lettered["images"]} == {"bundled"} and len(lettered["images"]) == 39
     joined = client.get("/api/overlays/images/resolution/4kdv", params={"set": "lettering"})
     assert joined.status_code == 200 and joined.headers["content-type"] == "image/png"
     with Image.open(io.BytesIO(joined.content)) as img:
-        assert img.size == (192 + 60 + 22 + 60 + 608, 100)  # 4K, the dot and DOLBY VISION, 60 px of air each side of the dot
+        assert img.size == (154 + 48 + 22 + 48 + 608, 80)  # 4K, the dot and DOLBY VISION at one height, 48 px of air each side of the dot
     with Image.open(io.BytesIO(client.get("/api/overlays/images/resolution/1080pdvhdrplus", params={"set": "lettering"}).content)) as img:
-        assert img.size == (222 + 142 + 608 + 142 + 426, 100)  # HD · DOLBY VISION · HDR10+: both dots with the same air
+        assert img.size == (178 + 118 + 608 + 118 + 426, 80)  # HD · DOLBY VISION · HDR10+: both dots with the same air
     # A lettering set: the upload is cropped to its art and scaled to the bundled badge's height, with no frame.
     buf = io.BytesIO()
     canvas = Image.new("RGBA", (600, 300), (0, 0, 0, 0))
@@ -2927,12 +2928,12 @@ def test_image_endpoints_default_to_the_types_first_set(client, monkeypatch, tmp
     canvas.save(buf, format="PNG")
     assert client.post("/api/overlays/images/resolution/720p", params={"set": "lettering"}, files={"file": ("mine.png", buf.getvalue(), "image/png")}).json()["set"] == "lettering"
     with Image.open(tmp_path / "overlays" / "resolution" / "lettering" / "720p.png") as img:
-        assert img.size == (400, 100) and img.getchannel("A").getbbox() == (0, 0, 400, 100)
+        assert img.size == (320, 80) and img.getchannel("A").getbbox() == (0, 0, 320, 80)
     own = get_type("resolution").resolve_variant("720p", {**get_type("resolution").default_options(), "badge_style": "lettering"})
-    assert own.image == str(tmp_path / "overlays" / "resolution" / "lettering" / "720p.png") and (own.image_height, own.image_tail) == (50, ())  # drawn whole
+    assert own.image == str(tmp_path / "overlays" / "resolution" / "lettering" / "720p.png") and (own.image_height, own.image_tail) == (40, ())  # drawn whole
     assert next(i for i in client.get("/api/overlays/images/resolution", params={"set": "lettering"}).json()["images"] if i["key"] == "720p")["source"] == "custom"
     with Image.open(io.BytesIO(client.get("/api/overlays/images/resolution/720p", params={"set": "lettering"}).content)) as img:
-        assert img.size == (400, 100)  # the thumbnail is the custom file itself
+        assert img.size == (320, 80)  # the thumbnail is the custom file itself
     assert client.post("/api/overlays/images/audio/aac", params={"set": "lettering"}, files={"file": ("mine.png", buf.getvalue(), "image/png")}).status_code == 200
     with Image.open(tmp_path / "overlays" / "audio" / "lettering" / "aac.png") as img:
         assert img.size == (320, 80)  # the audio lettering is 80 tall

@@ -14,8 +14,8 @@ and the backdrop box hugs it (26 px of padding and a 305 px minimum width give K
 back). Lettering is white lettering with no box, sized by height.
 Its set ships parts (_res-<resolution>, _fmt-<format>, _dot) and a badge is joined at draw
 time, resolution · format on one line, the dots and the air around them being settings (DV HDR
-and DV HDR10+ are two marks with a dot); the resolution lettering is
-100 px tall and the format lettering 80, drawn at one scale. A file
+and DV HDR10+ are two marks with a dot); every mark is 80 px tall, like the Audio lettering,
+so a badge is one height. A file
 with the same path under config/overlays/resolution replaces the bundled one; in the
 lettering set a file named by a badge's key (4kdv.png) is drawn whole instead of joined.
 """
@@ -49,7 +49,7 @@ from ..media import (
     resolution_label,
 )
 
-IMAGES = ImageLibrary("resolution", sets=(("color", "Color"), ("white", "White"), ("lettering", "Lettering")), noun="badge", cropped=True, height=100)
+IMAGES = ImageLibrary("resolution", sets=(("color", "Color"), ("white", "White"), ("lettering", "Lettering")), noun="badge", cropped=True, height=80)
 _SET_KEYS = [s for s, _l in IMAGES.sets]
 _LETTERING = ("lettering",)  # sized by height in px; the other sets in percent of their own size
 _SCALED = [s for s in _SET_KEYS if s not in _LETTERING]
@@ -59,7 +59,7 @@ BADGES = [(resolution_image(res, flavor), resolution_label(res, flavor)) for res
 _LABELS = dict(BADGES)
 _PARTS = {resolution_image(res, flavor): (res, flavor) for res, flavor in RESOLUTION_ORDER}
 _FORMAT_MARKS = {"dvhdr": ("dv", "hdr"), "dvhdrplus": ("dv", "plus")}  # formats written as two marks with a dot
-DOT_GAP = 60  # the set's own air on each side of the dot, in percent of the badge height
+DOT_GAP = 60  # default air on each side of the dot, in percent of the badge height
 # The Badges table as three tables side by side, each ending where a resolution's badges end:
 # 4K and 1080p, 720p and 576p, 480p and the formats on their own.
 _PER_RES = [sum(1 for res, _f in RESOLUTION_ORDER if res == key) for key in (*RESOLUTION_KEYS, "")]
@@ -101,7 +101,7 @@ class ResolutionOverlay(OverlayType):
         return {
             "badge_style": IMAGES.default_set,
             "badge_scale": 100,
-            "badge_height": 50,
+            "badge_height": 40,  # the Audio lettering's, so the two line up
             "dot_gap": DOT_GAP,
             "show_dot": True,
             "episode_percent": DEFAULT_PERCENT,
@@ -117,9 +117,9 @@ class ResolutionOverlay(OverlayType):
             {"kind": "number", "key": "badge_scale", "label": "Badge size (%)", "section": "Badge", "min": 10, "max": 400, "show_when": {"badge_style": _SCALED},
              "help": "100 is the badges' own size. The badges keep their sizes relative to each other."},
             {"kind": "number", "key": "badge_height", "label": "Badge height", "section": "Badge", "min": 20, "max": 300, "show_when": {"badge_style": list(_LETTERING)},
-             "help": "Height of the resolution lettering in px of a 1000x1500 poster; the width follows. The format lettering is a little smaller, as in the set."},
+             "help": "Height of the lettering in px of a 1000x1500 poster; the width follows. The resolution and the format are the same height."},
             {"kind": "number", "key": "dot_gap", "label": "Dot spacing (%)", "section": "Badge", "min": 0, "max": 200, "show_when": {"badge_style": list(_LETTERING)},
-             "help": f"Space on each side of the dot between the resolution and the format, as a share of the badge height. {DOT_GAP} is the set's own spacing."},
+             "help": f"Space on each side of the dot between the resolution and the format, as a share of the badge height. The default is {DOT_GAP}."},
             {"kind": "toggle", "key": "show_dot", "label": "Dot between them", "section": "Badge", "show_when": {"badge_style": list(_LETTERING)},
              "help": "Draw the dot between the resolution and the format. Off leaves just the space."},
             {"kind": "number", "key": "episode_percent", "label": "Episode share (%)", "section": "Badge", "min": 1, "max": 100,
@@ -198,7 +198,7 @@ class ResolutionOverlay(OverlayType):
         return "bundled" if _parts(key, image_set, IMAGES.height, True) else "none"
 
     def image_png(self, key: str, image_set: str) -> Optional[bytes]:
-        """A lettering badge joined from its parts at the art's own size, with the set's own spacing."""
+        """A lettering badge joined from its parts at the art's own size, with the default spacing."""
         if image_set not in _LETTERING or IMAGES.file(key, image_set) is not None:
             return None
         parts = _parts(key, image_set, IMAGES.height, True)
