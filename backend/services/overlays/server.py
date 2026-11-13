@@ -44,7 +44,7 @@ from .config import SETTING_TMDB_API_KEY, overlay_signature
 from .finales import FinaleLookup
 from .metadata import MetadataProvider, describe_record
 from .registry import all_types
-from .render import render_badges, stand_in_mark
+from .render import join_lines, render_badges, stand_in_mark
 
 ProgressCallback = Callable[[str, int, int, str], None]
 _STATE_LOCK = threading.Lock()  # process-wide: two runs may flush at once (workflow + webhook)
@@ -484,7 +484,8 @@ class ServerOverlayEngine:
         """`source` is a poster file path, or the bytes of the media server's own poster."""
         with Image.open(io.BytesIO(source) if isinstance(source, (bytes, bytearray)) else source) as img:
             out = img.convert("RGB")
-        out, _rects = render_badges(out, [(badge, placement) for _otype, badge, placement in resolved])  # the edge band once, then every badge
+        layers = join_lines([(otype.key, badge, placement) for otype, badge, placement in resolved])  # badges that share a line become one
+        out, _rects = render_badges(out, [(badge, placement) for _key, badge, placement in layers])  # the edge band once, then every badge
         buf = io.BytesIO()
         out.save(buf, format="JPEG", quality=92)
         data = buf.getvalue()

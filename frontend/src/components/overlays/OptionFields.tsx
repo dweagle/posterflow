@@ -4,6 +4,7 @@ import NumberField from '../poster-manager/NumberField'
 import ImageUploads from './ImageUploads'
 import ListPicker from './ListPicker'
 import type { OverlayField } from '../../api/overlays'
+import { optionsMatch } from '../../utils/optionsMatch'
 
 const HEX_RGB = /^#[0-9a-fA-F]{6}$/
 const HEX_RGBA = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/
@@ -339,7 +340,7 @@ function OptionFields({ schema, options, onChange, idPrefix = 'ov', typeKey = ''
   const lockReason = (field: OverlayField) => (!backdropEnabled && field.key.startsWith('back_') ? 'Backdrop is off (Backdrop panel)' : undefined)
   const set = (key: string, value: unknown) => onChange({ ...options, [key]: value })
   const shown = (field: OverlayField) =>
-    !field.show_when || Object.entries(field.show_when).every(([key, value]) => (Array.isArray(value) ? value : [value]).includes(String(options[key] ?? '')))
+    !field.show_when || optionsMatch(field.show_when, options)
   const simple = render === 'states' ? [] : schema.filter((f) => f.kind !== 'states' && !exclude.includes(f.key) && shown(f))
   const groups = render === 'fields' ? [] : schema.filter((f) => f.kind === 'states')
   const dependencyOff = (field: OverlayField) => Boolean(field.depends_on) && options[field.depends_on as string] !== true

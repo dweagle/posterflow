@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import OptionFields from '../../src/components/overlays/OptionFields'
 import PlacementControls from '../../src/components/overlays/PlacementControls'
 import type { OverlayField, OverlayPlacement } from '../../src/api/overlays'
+import { optionsMatch } from '../../src/utils/optionsMatch'
 
 const placement: OverlayPlacement = {
   horizontal_align: 'center',
@@ -78,6 +79,40 @@ describe('PlacementControls', () => {
     expect(screen.queryByRole('heading', { name: 'Position' })).toBeNull()
     expect(screen.getByRole('heading', { name: 'Text' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Backdrop' })).toBeTruthy()
+  })
+
+  it('greys out the position and backdrop panels while another overlay places the badge', () => {
+    const onChange = vi.fn()
+    const note = 'Same line as Resolution is on. The Resolution overlay sets the position and backdrop of this badge.'
+    render(<PlacementControls placement={placement} fonts={[]} onChange={onChange} lockedNote={note} />)
+    expect(screen.getByText(note)).toBeTruthy()
+    expect(screen.queryByText('Offsets are pixels on a 1000×1500 poster.')).toBeNull()  // the note takes the tips' place
+    expect((screen.getByLabelText('Horizontal offset') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Vertical offset') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Horizontal', { selector: 'button' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Top left' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Backdrop on') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Padding') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Size') as HTMLInputElement).disabled).toBe(false)  // the text panel is not part of it
+    fireEvent.click(screen.getByRole('button', { name: 'Top left' }))
+    expect(onChange).not.toHaveBeenCalled()
+    cleanup()
+    render(<PlacementControls placement={placement} fonts={[]} onChange={onChange} />)
+    expect(screen.getByText('Offsets are pixels on a 1000×1500 poster.')).toBeTruthy()
+    expect((screen.getByLabelText('Horizontal offset') as HTMLInputElement).disabled).toBe(false)
+    expect((screen.getByLabelText('Backdrop on') as HTMLInputElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Top left' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+})
+
+describe('optionsMatch', () => {
+  it('holds when every named option has one of the listed values, switches included', () => {
+    const when = { badge_style: ['lettering'], same_line: true }
+    expect(optionsMatch(when, { badge_style: 'lettering', same_line: true })).toBe(true)
+    expect(optionsMatch(when, { badge_style: 'lettering', same_line: false })).toBe(false)
+    expect(optionsMatch(when, { badge_style: 'compact', same_line: true })).toBe(false)
+    expect(optionsMatch(when, { badge_style: 'lettering' })).toBe(false)
+    expect(optionsMatch({ style: 'colored' }, { style: 'colored' })).toBe(true)
   })
 })
 

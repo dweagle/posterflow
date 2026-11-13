@@ -19,17 +19,21 @@ type Props = {
   hidden?: string[]
   // Which panel(s) to draw; the page lays each one out as its own card.
   part?: 'all' | 'position' | 'style' | 'text' | 'backdrop'
+  // Set while another overlay places the badge: the Position and Backdrop cards are greyed out
+  // and the Position card shows this note.
+  lockedNote?: string
 }
 
 // Kometa-style placement: where the badge sits (align + offset in 1000x1500 poster space),
 // how the text looks, and the backdrop behind it. Shared by every overlay type.
-function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'all' }: Props) {
+function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'all', lockedNote }: Props) {
   const draw = (name: 'position' | 'text' | 'backdrop') => part === 'all' || part === name || (part === 'style' && name !== 'position')
   const show = (key: keyof OverlayPlacement) => !hidden.includes(key)
   const panel = (name: 'text' | 'backdrop') => !hidden.includes(name)
   const weights = fonts.find((f) => f.id === placement.font)?.weights ?? []
   const isVariable = weights.length > 0
-  const backOff = !placement.back_enabled
+  const locked = Boolean(lockedNote)
+  const backOff = !placement.back_enabled || locked
   const style = placement.back_style
   const hasBox = style !== 'band'
   const num = (key: keyof OverlayPlacement, label: string, min: number, max: number, help?: string, disabled = false) => (
@@ -51,28 +55,34 @@ function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'al
   return (
     <>
       {draw('position') && (
-      <div className="overlay-panel">
+      <div className={`overlay-panel ${locked ? 'off' : ''}`}>
         <h3>Position</h3>
+        <fieldset className="overlay-panel-fields" disabled={locked}>
         <div className="overlay-panel-grid">
           <div className="field-group">
             <InfoLabel htmlFor="pl-horizontal_align" label="Horizontal" help="Which side of the poster the badge is measured from." />
-            <ListPicker id="pl-horizontal_align" value={placement.horizontal_align} options={H_ALIGNS} onChange={(v) => onChange({ horizontal_align: v as OverlayPlacement['horizontal_align'] })} />
+            <ListPicker id="pl-horizontal_align" value={placement.horizontal_align} disabled={locked} options={H_ALIGNS} onChange={(v) => onChange({ horizontal_align: v as OverlayPlacement['horizontal_align'] })} />
           </div>
-          {num('horizontal_offset', 'Horizontal offset', -1000, 1000, 'Distance from that side in px of a 1000×1500 poster; from the middle when centered.')}
+          {num('horizontal_offset', 'Horizontal offset', -1000, 1000, 'Distance from that side in px of a 1000×1500 poster; from the middle when centered.', locked)}
           <div className="field-group">
             <InfoLabel htmlFor="pl-vertical_align" label="Vertical" help="Whether the badge is measured from the top, the middle or the bottom." />
-            <ListPicker id="pl-vertical_align" value={placement.vertical_align} options={V_ALIGNS} onChange={(v) => onChange({ vertical_align: v as OverlayPlacement['vertical_align'] })} />
+            <ListPicker id="pl-vertical_align" value={placement.vertical_align} disabled={locked} options={V_ALIGNS} onChange={(v) => onChange({ vertical_align: v as OverlayPlacement['vertical_align'] })} />
           </div>
-          {num('vertical_offset', 'Vertical offset', -1500, 1500, 'Distance from that edge in px; from the middle when centered.')}
+          {num('vertical_offset', 'Vertical offset', -1500, 1500, 'Distance from that edge in px; from the middle when centered.', locked)}
         </div>
+        </fieldset>
         <div className="overlay-position-footer">
-          <PositionAnchors placement={placement} onChange={onChange} />
-          <ul className="overlay-panel-hint overlay-position-tips">
-            <li>Offsets are pixels on a 1000×1500 poster.</li>
-            <li>Drag any badge to move it, another overlay's too.</li>
-            <li>Arrow keys nudge a selected badge (Shift = 10px).</li>
-            <li className="overlay-snap-hint">Hold Alt to skip the snap lines.</li>
-          </ul>
+          <PositionAnchors placement={placement} onChange={onChange} disabled={locked} />
+          {locked ? (
+            <p className="overlay-panel-hint overlay-lock-note">{lockedNote}</p>
+          ) : (
+            <ul className="overlay-panel-hint overlay-position-tips">
+              <li>Offsets are pixels on a 1000×1500 poster.</li>
+              <li>Drag any badge to move it, another overlay's too.</li>
+              <li>Arrow keys nudge a selected badge (Shift = 10px).</li>
+              <li className="overlay-snap-hint">Hold Alt to skip the snap lines.</li>
+            </ul>
+          )}
         </div>
       </div>
       )}
@@ -135,11 +145,11 @@ function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'al
       )}
 
       {draw('backdrop') && panel('backdrop') && (
-      <div className={`overlay-panel ${placement.back_enabled ? '' : 'off'}`}>
+      <div className={`overlay-panel ${backOff ? 'off' : ''}`} title={lockedNote}>
         <div className="overlay-panel-head">
           <h3>Backdrop</h3>
           <div className="overlay-toggle-row">
-            <Toggle checked={placement.back_enabled} onChange={(v) => onChange({ back_enabled: v })} label={placement.back_enabled ? 'Backdrop on' : 'Backdrop off'} visibleLabel={false} />
+            <Toggle checked={placement.back_enabled} disabled={locked} onChange={(v) => onChange({ back_enabled: v })} label={placement.back_enabled ? 'Backdrop on' : 'Backdrop off'} visibleLabel={false} />
             <span className="overlay-toggle-state">{placement.back_enabled ? 'On' : 'Off'}</span>
           </div>
         </div>

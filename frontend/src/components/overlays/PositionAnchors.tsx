@@ -13,17 +13,18 @@ const ANCHORS: { h: HAlign; v: VAlign; label: string }[] = [
 type Props = {
   placement: OverlayPlacement
   onChange: (patch: Partial<OverlayPlacement>) => void
+  disabled?: boolean
 }
 
 // 3×3 grid of snap positions: the poster's center lines and SNAP_MARGIN inside each edge.
-function PositionAnchors({ placement, onChange }: Props) {
+function PositionAnchors({ placement, onChange, disabled = false }: Props) {
   const isAnchor = (h: HAlign, v: VAlign) =>
     placement.horizontal_align === h && placement.vertical_align === v
     && placement.horizontal_offset === (h === 'center' ? 0 : SNAP_MARGIN)
     && placement.vertical_offset === (v === 'center' ? 0 : SNAP_MARGIN)
 
   return (
-    <div className="overlay-anchors" role="group" aria-label="Snap to position">
+    <div className={`overlay-anchors ${disabled ? 'disabled' : ''}`} role="group" aria-label="Snap to position">
       {ANCHORS.map((a) => (
         <button
           key={a.label}
@@ -31,6 +32,7 @@ function PositionAnchors({ placement, onChange }: Props) {
           className={isAnchor(a.h, a.v) ? 'active' : ''}
           title={a.label}
           aria-label={a.label}
+          disabled={disabled}
           onClick={() => onChange({
             horizontal_align: a.h,
             horizontal_offset: a.h === 'center' ? 0 : SNAP_MARGIN,

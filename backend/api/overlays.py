@@ -21,7 +21,7 @@ from services.overlays.base import normalize_placement
 from services.overlays.config import SETTING_TMDB_API_KEY, load_config, save_config
 from services.overlays.registry import describe_types, get_type
 from services.overlays.server import ServerOverlayEngine
-from services.overlays.render import render_badges
+from services.overlays.render import join_lines, render_badges
 from services.text_logo import list_fonts
 
 router = APIRouter(prefix="/api/overlays", tags=["overlays"])
@@ -275,7 +275,6 @@ def overlay_preview(payload: OverlayPreviewRequest, db: Session = Depends(get_db
             base = _apply_saved_borders(db, base)
         # The other overlays under the edited one, then the edited one on top; the edge band once for all.
         layers = []
-        drawn: List[str] = []  # the other layers' types, in the order their badges are drawn
         for layer in payload.others:
             other = get_type(layer.type)
             if other is None or other.key == otype.key:
@@ -285,14 +284,15 @@ def overlay_preview(payload: OverlayPreviewRequest, db: Session = Depends(get_db
             o_variants = other.variants(o_options)
             o_badge = other.resolve_variant(layer.variant or (o_variants[0]["key"] if o_variants else ""), o_options)
             if o_badge is not None:
-                layers.append((o_badge, o_placement))
-                drawn.append(other.key)
+                layers.append((other.key, o_badge, o_placement))
         if badge is not None:
-            layers.append((badge, placement))
-        base, rects = render_badges(base, layers)
-        if badge is not None:
-            rect = rects[-1]
-        others_drawn = [{"type": key, "rect": [int(v) for v in r]} for key, r in zip(drawn, rects)]
+            layers.append((otype.key, badge, placement))
+        # A badge that shares another type's line has no rectangle of its own: that type's covers the line.
+        layers = join_lines(layers)
+        base, rects = render_badges(base, [(b, p) for _key, b, p in layers])
+        keyed = [(key, r) for (key, _b, _p), r in zip(layers, rects)]  # in the order the badges are drawn
+        rect = next((r for key, r in keyed if key == otype.key), rect)
+        others_drawn = [{"type": key, "rect": [int(v) for v in r]} for key, r in keyed if key != otype.key]
     except Exception as exc:
         log_error(LogTags.OVERLAYS, f"Overlay preview failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Preview failed: {exc}")

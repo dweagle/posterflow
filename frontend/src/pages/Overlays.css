@@ -1288,6 +1288,13 @@
   margin: 0 0 var(--sp-2);
 }
 
+.overlay-lock-note {
+  margin: 0;
+  min-width: 0;
+  max-width: 340px;
+  color: var(--color-text-secondary);
+}
+
 .overlay-anchors {
   flex: 0 0 auto;
   display: grid;
@@ -1318,6 +1325,16 @@
 .overlay-anchors button.active {
   border-color: var(--color-warning-strong);
   background: var(--color-warning-strong);
+}
+
+/* Another overlay places the badge: the snap grid is shown but not in use. */
+.overlay-anchors.disabled {
+  opacity: 0.45;
+}
+
+.overlay-anchors.disabled button {
+  cursor: default;
+  pointer-events: none;
 }
 
 /* Info tooltips (globals.css) are 300px wide and stay in layout at opacity 0, so an icon in

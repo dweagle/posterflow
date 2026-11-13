@@ -2812,6 +2812,77 @@ def test_resolution_and_audio_types_describe_and_resolve():
     assert n["badge_style"] == "compact" and n["codecs"]["aac"] == {"enabled": False, "priority": 1000} and n["codecs"]["mp3"] == aopts["codecs"]["mp3"]
 
 
+def test_audio_lettering_can_share_the_resolution_line(client, tmp_path):
+    from services.overlays.render import join_lines
+
+    res, audio = get_type("resolution"), get_type("audio")
+    ropts = {**res.default_options(), "badge_style": "lettering"}
+    aopts = {**audio.default_options(), "badge_style": "lettering"}
+    together = {**aopts, "same_line": True}
+    name = lambda path: path.rsplit("/", 1)[1]
+    # The switch: off by default, in the Badge card, offered with Lettering only.
+    field = next(f for f in audio.schema() if f["key"] == "same_line")
+    assert aopts["same_line"] is False and (field["kind"], field["section"], field["show_when"]) == ("toggle", "Badge", {"badge_style": ["lettering"]})
+    assert audio.normalize_options({"same_line": "true"})["same_line"] is True and audio.normalize_options({"same_line": "junk"})["same_line"] is False
+    # While it is on the page greys out Audio's Position and Backdrop cards: the type says when, and why.
+    lock = audio.describe()["placement_lock"]
+    assert lock["when"] == {"badge_style": ["lettering"], "same_line": True} and lock["note"].startswith("Same line as Resolution is on.")
+    assert all(t.describe()["placement_lock"] is None for key, t in all_types().items() if key != "audio")
+    plain, joiner = audio.resolve_variant("dtsx", aopts), audio.resolve_variant("dtsx", together)
+    assert (plain.joins, joiner.joins) == ("", "resolution") and joiner.signature == plain.signature + "|join=resolution"
+    assert audio.resolve_variant("dtsx", {**audio.default_options(), "same_line": True}).joins == ""  # Kometa's art keeps its own box
+    # A Resolution lettering badge says how its line goes on: its height, the gap and the dot.
+    host = res.resolve_variant("4kdv", ropts)
+    assert (host.line["height"], host.line["gap"], name(host.line["dot"][0]), host.line["dot"][1]) == (40, 24, "_dot.png", 11)
+    assert res.resolve_variant("4kdv", res.default_options()).line is None and res.resolve_variant("4kdv", {**ropts, "show_dot": False}).line["dot"] is None
+    rp, ap = res.default_placement(), audio.default_placement()
+    # Joined: one layer, Resolution's, with the dot and the audio lettering at its end.
+    layers = join_lines([("resolution", host, rp), ("audio", joiner, ap)])
+    assert [(key, placement is rp) for key, _b, placement in layers] == [("resolution", True)]
+    line = layers[0][1]
+    assert [(name(path), h) for path, h in line.image_tail] == [("_dot.png", 11), ("_fmt-dv.png", 40), ("_dot.png", 11), ("dtsx.png", 40)]
+    assert (line.key, line.text, line.image_gap, line.fit) == ("4kdv", f"{host.text} \u00b7 {joiner.text}", 24, True)
+    # The line takes Resolution's height, whatever the Audio overlay's own is.
+    tall = audio.resolve_variant("dtsx", {**together, "badge_height": 90})
+    assert tall.image_height == 90 and join_lines([("resolution", host, rp), ("audio", tall, ap)])[0][1].image_tail[-1][1] == 40
+    # A resolution on its own takes the dot and the gap from its settings, in either order of the layers.
+    single = join_lines([("audio", joiner, ap), ("resolution", res.resolve_variant("4k", ropts), rp)])
+    assert [key for key, _b, _p in single] == ["resolution"] and single[0][1].image_gap == 24
+    assert [(name(path), h) for path, h in single[0][1].image_tail] == [("_dot.png", 11), ("dtsx.png", 40)]
+    no_dot = join_lines([("resolution", res.resolve_variant("4k", {**ropts, "show_dot": False}), rp), ("audio", joiner, ap)])
+    assert [name(path) for path, _h in no_dot[0][1].image_tail] == ["dtsx.png"]
+    # Nothing to join: the switch is off, the poster has no Resolution badge, or that badge is not lettering.
+    boxed = res.resolve_variant("4kdv", res.default_options())
+    for pair in ([("resolution", host, rp), ("audio", plain, ap)], [("audio", joiner, ap)], [("resolution", boxed, rp), ("audio", joiner, ap)]):
+        assert join_lines(pair) == pair
+    # A line too long for the poster is made smaller to fit the room its offset leaves; a short one keeps its size.
+    bare = {**rp, "back_enabled": False}
+    long = join_lines([("resolution", res.resolve_variant("4kdvhdrplus", ropts), bare), ("audio", audio.resolve_variant("truehd_atmos", together), ap)])[0][1]
+    x, _y, w, h = measure_badge(long, bare)
+    assert (x, w) == (35, 1000 - 2 * 35) and 30 <= h < 40
+    assert measure_badge(long, rp)[2] == 930                       # the box counts: its padding comes out of the line
+    assert measure_badge(line, bare)[3] == 40 and measure_badge(line, bare)[2] < 930
+    assert measure_badge(res.resolve_variant("4kdvhdrplus", {**ropts, "badge_height": 60}), bare)[2] > 930  # a badge that is not joined is left as it is
+    # The engine composes the line: the same picture as that one layer, not the two badges apart.
+    poster = tmp_path / "poster.jpg"
+    Image.new("RGB", (1000, 1500), (30, 60, 90)).save(poster)
+    compose = ServerOverlayEngine._compose_bytes
+    as_line = compose(str(poster), [(res, host, rp), (audio, joiner, ap)])[1]
+    assert as_line == compose(str(poster), [(res, line, rp)])[1] and as_line != compose(str(poster), [(res, host, rp), (audio, plain, ap)])[1]
+    # The preview: a joined Audio badge has no rectangle of its own. Resolution's covers the line, whichever of the two is edited.
+    r_layer = {"type": "resolution", "variant": "4kdv", "placement": {}, "options": ropts}
+    a_layer = {"type": "audio", "variant": "dtsx", "placement": {}, "options": together}
+    as_audio = client.post("/api/overlays/preview", json={**a_layer, "others": [r_layer]})
+    as_res = client.post("/api/overlays/preview", json={**r_layer, "others": [a_layer]})
+    alone = client.post("/api/overlays/preview", json=r_layer)
+    assert as_audio.status_code == 200 and as_audio.headers["x-overlay-rect"] == "0,0,0,0" and as_audio.headers["x-overlay-text"]
+    drawn = json.loads(as_audio.headers["x-overlay-layers"])
+    assert [layer["type"] for layer in drawn] == ["resolution"] and drawn[0]["rect"][2] > int(alone.headers["x-overlay-rect"].split(",")[2])
+    assert [int(v) for v in as_res.headers["x-overlay-rect"].split(",")] == drawn[0]["rect"] and json.loads(as_res.headers["x-overlay-layers"]) == []
+    apart = client.post("/api/overlays/preview", json={**a_layer, "options": aopts, "others": [r_layer]})
+    assert apart.headers["x-overlay-rect"] != "0,0,0,0" and json.loads(apart.headers["x-overlay-layers"])[0]["rect"] == [int(v) for v in alone.headers["x-overlay-rect"].split(",")]
+
+
 def test_bundled_resolution_and_audio_images_are_kometas_on_its_backdrop_box():
     from services.overlays.types import audio, resolution
 

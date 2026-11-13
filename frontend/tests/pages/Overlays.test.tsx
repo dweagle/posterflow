@@ -620,6 +620,44 @@ describe('Overlays', () => {
     await waitFor(() => expect(screen.queryByLabelText('TMDB only')).toBeNull())
   })
 
+  it('greys out the position and backdrop cards while the type says another overlay places the badge', async () => {
+    const user = userEvent.setup()
+    const note = 'Same line as Resolution is on. The Resolution overlay sets the position and backdrop of this badge.'
+    const audioType = {
+      key: 'audio', label: 'Audio', description: 'The audio codec', order: 60, targets: ['movie', 'show', 'season'], needs: [], hidden_placement: ['text'],
+      placement_lock: { when: { badge_style: ['lettering'], same_line: true }, note },
+      schema: [
+        { kind: 'select', key: 'badge_style', label: 'Style', section: 'Badge', options: [{ value: 'compact', label: 'Compact' }, { value: 'lettering', label: 'Lettering' }] },
+        { kind: 'toggle', key: 'same_line', label: 'Same line as Resolution', section: 'Badge', show_when: { badge_style: ['lettering'] } },
+      ],
+      variants: [{ key: 'dtsx', label: 'DTS:X' }],
+      default_placement: placement,
+      default_options: { badge_style: 'compact', same_line: false },
+    }
+    const config = baseConfig()
+    mockGetOverlayTypes.mockResolvedValue({ types: [statusType, audioType] })
+    mockGetOverlaysConfig.mockResolvedValue({
+      config: { ...config, types: { ...config.types, audio: { enabled: true, overlays: [{ name: 'Audio', enabled: true, all_libraries: true, libraries: [], placement: { ...placement }, options: { badge_style: 'lettering', same_line: false } }] } } },
+      has_tmdb_key: true, library_configs: [], badged_count: 0,
+    })
+    renderPage()
+    await screen.findByRole('heading', { level: 2, name: 'Airing Status' })
+    await user.click(screen.getByRole('tab', { name: /Audio/ }))
+    await screen.findByRole('heading', { level: 2, name: 'Audio' })
+    const offset = () => screen.getByLabelText('Horizontal offset') as HTMLInputElement
+    const backdrop = () => screen.getByLabelText(/^Backdrop o(n|ff)$/) as HTMLInputElement
+    expect(offset().disabled).toBe(false)
+    expect(screen.queryByText(note)).toBeNull()
+    await user.click(screen.getByLabelText('Same line as Resolution'))
+    await waitFor(() => expect(offset().disabled).toBe(true))
+    expect(backdrop().disabled).toBe(true)
+    expect(screen.getByText(note)).toBeTruthy()
+    await user.click(screen.getByLabelText('Same line as Resolution'))  // off again: the cards come back
+    await waitFor(() => expect(offset().disabled).toBe(false))
+    expect(backdrop().disabled).toBe(false)
+    expect(screen.queryByText(note)).toBeNull()
+  })
+
   it('offers an overlay only the libraries of the kind its type badges', async () => {
     const user = userEvent.setup()
     const libraryConfigs = [{ instance_name: 'srv', libraries: [

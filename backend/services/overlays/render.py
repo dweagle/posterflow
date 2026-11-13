@@ -11,6 +11,7 @@ import math
 import os
 import re
 import unicodedata
+from dataclasses import replace
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -382,6 +383,10 @@ def _image_geometry(badge: OverlayBadge, placement: Dict[str, Any], scale: float
     has_box = _has_box(placement)
     pad = placement["back_padding"] * scale * ss if has_box else 0
     max_w = placement.get("back_max_width", 0) * scale * ss if has_box else 0  # the backdrop's cap: only with its box
+    if badge.fit:  # a joined line stays on the poster: no wider than what its offset leaves on both sides
+        room = (REF_WIDTH - 2 * abs(placement.get("horizontal_offset", 0))) * scale * ss
+        if room > 0:
+            max_w = min(max_w, room) if max_w else room
     if max_w and logo_w + 2 * pad > max_w and max_w - 2 * pad > 0:
         logo_w = max(1, int(round(max_w - 2 * pad)))  # too wide for the cap: this logo shrinks
     logo_h = max(1, int(round(native.height * (logo_w / native.width))))
@@ -430,6 +435,29 @@ def _merged_placement(badge: OverlayBadge, placement: Dict[str, Any]) -> Dict[st
 
 def _wants_band(merged: Dict[str, Any]) -> bool:
     return bool(merged.get("back_enabled", True)) and merged.get("back_style") == "band"
+
+
+def join_lines(layers: List[Tuple[str, OverlayBadge, Dict[str, Any]]]) -> List[Tuple[str, OverlayBadge, Dict[str, Any]]]:
+    """`layers` is (type key, badge, placement) per badge of one poster. A badge that joins
+    another type's line (`joins`) is drawn at the end of that type's badge, after its dot, at
+    its height, and gives up its own layer: the line keeps the host's placement. Without a
+    line of that type on the poster the badge stays where it is."""
+    out = list(layers)
+    for key, badge, _placement in layers:
+        at = next((i for i, (k, host, _p) in enumerate(out) if k == badge.joins and k != key and host.line and host.image), None)
+        if at is None or not badge.image or badge.image_tail:
+            continue
+        host_key, host, host_placement = out[at]
+        line = host.line
+        dot = (tuple(line["dot"]),) if line.get("dot") else ()
+        joined = replace(
+            host, text=f"{host.text} · {badge.text}", fit=True, image_gap=int(line["gap"]),
+            image_tail=(*host.image_tail, *dot, (badge.image, int(line["height"]))),
+            image_stamp=f"{host.image_stamp}+{badge.image_stamp}",
+        )
+        out[at] = (host_key, joined, host_placement)
+        out = [entry for entry in out if entry[1] is not badge]
+    return out
 
 
 def render_badges(image: Image.Image, layers: List[Tuple[OverlayBadge, Dict[str, Any]]]) -> Tuple[Image.Image, List[Rect]]:

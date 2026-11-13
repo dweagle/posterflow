@@ -158,6 +158,12 @@ class OverlayBadge:
     # at its own height, centered on the line, `image_gap` reference px apart.
     image_tail: tuple = ()
     image_gap: int = 0
+    # Sharing a line (see render.join_lines): `line` on a badge lets another type's badge be
+    # drawn at its end, {height, gap, dot: (path, height) or None}; `joins` names the type whose
+    # line this badge joins when that type draws one on the same poster.
+    line: Optional[Dict[str, Any]] = None
+    joins: str = ""
+    fit: bool = False  # scaled down, for this poster only, when wider than the room its offset leaves
     # Outline drawn around the image's shape before it is placed: {width (image px), color
     # '#RRGGBB', opacity 0-100, soft (edge blur, image px)}; None = the image as it is.
     image_effect: Optional[Dict[str, Any]] = None
@@ -181,6 +187,8 @@ class OverlayBadge:
                 sig += f"|g={self.image_gap}"
             if self.image_effect:
                 sig += "|" + ",".join(f"{k}={self.image_effect[k]}" for k in sorted(self.image_effect))
+        if self.joins:
+            sig += f"|join={self.joins}"
         return sig
 
 
@@ -202,6 +210,9 @@ class OverlayType:
     # (e.g. a status overlay colors every badge itself, so a shared back_color is noise).
     # "text" / "backdrop" hide those whole panels (an image badge has no text to style).
     hidden_placement: tuple = ()
+    # {when: {option: value or values}, note}: while the options hold those values another overlay
+    # places the badge, so the page greys out the Position and Backdrop cards and shows the note.
+    placement_lock: Dict[str, Any] = {}
     # Types that draw PNG badges: their files (an images.ImageLibrary) and, from image_items(),
     # the keys a user may replace with an upload, each with its label.
     images: Any = None
@@ -268,6 +279,7 @@ class OverlayType:
             "targets": list(self.targets),
             "needs": list(self.needs),
             "hidden_placement": list(self.hidden_placement),
+            "placement_lock": self.placement_lock or None,
             "schema": self.schema(),
             "variants": self.variants(opts),
             "default_placement": self.default_placement(),

@@ -8,6 +8,8 @@ under backend/assets/overlays/audio/<set>/, every file cropped to its art: Komet
 and standard images, sized in percent of their own size (an offset reaches the art and the
 backdrop box hugs it; 26 px of padding and a 305 px minimum width give Kometa's box back),
 and lettering, white lettering with no box (80 px tall, sized by height). A file with the same path under config/overlays/audio replaces the bundled one.
+The lettering can share the Resolution overlay's line (`same_line`): it is then drawn at the
+end of that badge, after its dot, and the line keeps Resolution's position, height and backdrop.
 """
 
 from __future__ import annotations
@@ -41,6 +43,8 @@ class AudioOverlay(OverlayType):
     targets = (TARGET_MOVIE, TARGET_SHOW, TARGET_SEASON)
     needs = ("media",)
     hidden_placement = ("text",)  # the badge is an image; the backdrop is its box
+    placement_lock = {"when": {"badge_style": list(_LETTERING), "same_line": True},
+                      "note": "Same line as Resolution is on. The Resolution overlay sets the position and backdrop of this badge."}
     images = IMAGES
 
     def image_items(self) -> List[tuple]:
@@ -70,6 +74,7 @@ class AudioOverlay(OverlayType):
             "badge_style": "compact",
             "badge_scale": 100,
             "badge_height": 40,
+            "same_line": False,
             "episode_percent": DEFAULT_PERCENT,
             "source": "both",
             "apply_to_seasons": False,
@@ -84,6 +89,10 @@ class AudioOverlay(OverlayType):
              "help": "100 is the badges' own size. The badges keep their sizes relative to each other."},
             {"kind": "number", "key": "badge_height", "label": "Badge height", "section": "Badge", "min": 20, "max": 300, "show_when": {"badge_style": list(_LETTERING)},
              "help": "Height of the lettering in px of a 1000x1500 poster; the width follows."},
+            {"kind": "toggle", "key": "same_line", "label": "Same line as Resolution", "section": "Badge", "show_when": {"badge_style": list(_LETTERING)},
+             "help": "Draws the audio at the end of the Resolution badge, after a dot, as one line. Both overlays must use Lettering. "
+                     "The line takes the Resolution overlay's position, height, dot and backdrop. A line too long for the poster is made smaller to fit. "
+                     "An item with no Resolution badge gets the audio on its own."},
             {"kind": "number", "key": "episode_percent", "label": "Episode share (%)", "section": "Badge", "min": 1, "max": 100,
              "help": "A show or season gets a codec when at least this share of its episodes has it."},
             {"kind": "select", "key": "source", "label": "Read from", "section": "Badge", "options": [{"value": v, "label": l} for v, l in SOURCES],
@@ -120,8 +129,9 @@ class AudioOverlay(OverlayType):
                 out[key] = max(lo, min(hi, int(raw.get(key, defaults[key]))))
             except (TypeError, ValueError):
                 out[key] = defaults[key]
-        seasons = raw.get("apply_to_seasons", defaults["apply_to_seasons"])
-        out["apply_to_seasons"] = seasons if isinstance(seasons, bool) else str(seasons).lower() == "true"
+        for key in ("apply_to_seasons", "same_line"):
+            val = raw.get(key, defaults[key])
+            out[key] = val if isinstance(val, bool) else str(val).lower() == "true"
         source = str(raw.get("source") or defaults["source"])
         out["source"] = source if source in SOURCE_KEYS else defaults["source"]
         rows: Dict[str, Any] = {}
@@ -169,4 +179,5 @@ class AudioOverlay(OverlayType):
             return None
         height = (IMAGES.drawn_height(key, style, int(options.get("badge_height") or 0)) if style in _LETTERING
                   else IMAGES.drawn_height(key, style, int(options.get("badge_scale") or 0), reference=100))  # Kometa's art, in percent of its own size
-        return OverlayBadge(key=key, text=AUDIO_LABELS.get(key, key), image=str(path), image_stamp=IMAGES.stamp(path), image_height=height)
+        return OverlayBadge(key=key, text=AUDIO_LABELS.get(key, key), image=str(path), image_stamp=IMAGES.stamp(path), image_height=height,
+                            joins="resolution" if style in _LETTERING and options.get("same_line") else "")

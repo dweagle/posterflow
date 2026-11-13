@@ -24,6 +24,7 @@ import {
   type OverlaysConfig,
 } from '../api/overlays'
 import { getTools, runTool } from '../api/tools'
+import { optionsMatch } from '../utils/optionsMatch'
 import { useToast } from '../components/Toast'
 import './Overlays.css'
 import SaveActions from '../components/SaveActions'
@@ -99,6 +100,8 @@ function Overlays() {
   const typeCfg = current && config ? config.types[current.key] : null
   const overlayIndex = current && typeCfg && typeCfg.overlays.length ? Math.min(overlayByType[current.key] ?? 0, typeCfg.overlays.length - 1) : -1
   const currentCfg = typeCfg && overlayIndex >= 0 ? typeCfg.overlays[overlayIndex] : null
+  // Another overlay places this badge (Audio on the Resolution line): its own Position and Backdrop are not in use.
+  const placementLock = current?.placement_lock && currentCfg && optionsMatch(current.placement_lock.when, currentCfg.options) ? current.placement_lock.note : undefined
   const enabledCount = config ? Object.values(config.types).filter((t) => t.enabled).length : 0
   const tmdbNeeded = Boolean(config) && types.some((t) => t.needs.includes('tmdb') && config?.types[t.key]?.enabled)
 
@@ -620,13 +623,13 @@ function Overlays() {
                         </button>
                       </div>
                     </div>
-                    <PlacementControls part="position" placement={currentCfg.placement} fonts={fonts} hidden={current.hidden_placement} onChange={(patch) => updatePlacement(current.key, patch)} />
+                    <PlacementControls part="position" placement={currentCfg.placement} fonts={fonts} hidden={current.hidden_placement} lockedNote={placementLock} onChange={(patch) => updatePlacement(current.key, patch)} />
                   </div>
                   {/* Then Text, the type's sections that fit the first row, Backdrop, and the rest as the second row's fixed-height cards. */}
                   <PlacementControls part="text" placement={currentCfg.placement} fonts={fonts} hidden={current.hidden_placement} onChange={(patch) => updatePlacement(current.key, patch)} />
                   {/* Keyed by type: a type's cards never start from another type's field state (a picked badge, a half-typed number). */}
                   <OptionFields key={`own-${current.key}`} render="fields" part="own" cardsFirst={freeFirstRowSlots(current)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
-                  <PlacementControls part="backdrop" placement={currentCfg.placement} fonts={fonts} hidden={current.hidden_placement} onChange={(patch) => updatePlacement(current.key, patch)} />
+                  <PlacementControls part="backdrop" placement={currentCfg.placement} fonts={fonts} hidden={current.hidden_placement} lockedNote={placementLock} onChange={(patch) => updatePlacement(current.key, patch)} />
                   <OptionFields key={`merged-${current.key}`} render="fields" part="merged" cardsFirst={freeFirstRowSlots(current)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
                 </div>
               </div>

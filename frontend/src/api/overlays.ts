@@ -89,6 +89,9 @@ export interface OverlayTypeInfo {
   // Shared placement fields this type sets per state, so the page hides them; 'text' and
   // 'backdrop' hide those whole panels (an image badge has no text to style).
   hidden_placement: string[]
+  // While the options hold these values another overlay places the badge: the Position and
+  // Backdrop cards are greyed out and show the note.
+  placement_lock?: { when: Record<string, unknown>; note: string } | null
   schema: OverlayField[]
   // A variant may take its label from an option's current value (`labels[value]`); a value
   // with no label hides the variant (e.g. the fallback logo when "On no service" is Nothing).

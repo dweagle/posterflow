@@ -219,16 +219,20 @@ class ResolutionOverlay(OverlayType):
             return OverlayBadge(key=key, text=text, image=str(path), image_stamp=IMAGES.stamp(path),
                                 image_height=IMAGES.drawn_height(key, style, int(options.get("badge_scale") or 0), reference=100))
         setting = int(options.get("badge_height") or 0)
+        gap = round(setting * int(options.get("dot_gap") or 0) / 100)
+        dot = IMAGES.file("_dot", style) if options.get("show_dot", True) else None
+        # What a badge of another type needs to be drawn at the end of this one (the Audio lettering).
+        line = {"height": setting, "gap": gap, "dot": (str(dot), IMAGES.drawn_height("_dot", style, setting)) if dot else None}
         own = IMAGES.file(key, style)
         if own is not None:  # a whole badge of the user's own: as tall as the joined one would be
-            return OverlayBadge(key=key, text=text, image=str(own), image_height=IMAGES.drawn_height(_lead(key), style, setting), image_stamp=IMAGES.stamp(own))
+            return OverlayBadge(key=key, text=text, image=str(own), image_height=IMAGES.drawn_height(_lead(key), style, setting), image_stamp=IMAGES.stamp(own), line=line)
         parts = _parts(key, style, setting, bool(options.get("show_dot", True)))
         if not parts:
             return None
         return OverlayBadge(
             key=key, text=text, image=parts[0][0], image_height=parts[0][1], image_tail=tuple(parts[1:]),
-            image_gap=round(setting * int(options.get("dot_gap") or 0) / 100) if len(parts) > 1 else 0,
-            image_stamp="+".join(IMAGES.stamp(Path(path)) for path, _h in parts),
+            image_gap=gap if len(parts) > 1 else 0,
+            image_stamp="+".join(IMAGES.stamp(Path(path)) for path, _h in parts), line=line,
         )
 
 
