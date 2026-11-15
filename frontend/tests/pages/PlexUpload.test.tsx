@@ -143,17 +143,21 @@ describe('PlexUpload', () => {
     })
   })
 
-  it('shows the webhook tab by default and switches to the uploads tab', async () => {
+  it('shows the settings tab by default and switches to the manual uploads tab', async () => {
     const user = userEvent.setup()
     render(<PlexUpload />)
 
     expect(screen.getByText('Webhook Settings')).toBeTruthy()
-    expect(screen.queryByText('Upload Options')).toBeNull()
+    expect(screen.getByText('Upload Settings')).toBeTruthy()
+    expect(screen.getByText('Library Targeting')).toBeTruthy()
+    expect(screen.queryByText('Manual Run Options')).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: 'Uploads / Options' }))
+    await user.click(screen.getByRole('button', { name: 'Manual Uploads' }))
 
-    expect(screen.getByText('Upload Options')).toBeTruthy()
-    expect(screen.getByText('Uploads & Options')).toBeTruthy()
+    expect(screen.getByText('Manual Run Options')).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: 'Manual Uploads' })).toBeTruthy()
+    expect(screen.queryByText('Upload Settings')).toBeNull()
+    expect(screen.queryByText('Webhook Settings')).toBeNull()
   })
 
   // The switch row and toolbar match the Asset Manager's Unmatched / Drive Priority tabs.
@@ -163,15 +167,15 @@ describe('PlexUpload', () => {
 
     expect(screen.getByRole('heading', { level: 2, name: 'Asset Upload' })).toBeTruthy()
 
-    const webhook = screen.getByRole('button', { name: 'Webhook' })
-    const manual = screen.getByRole('button', { name: 'Uploads / Options' })
+    const webhook = screen.getByRole('button', { name: 'Webhook / Upload Settings' })
+    const manual = screen.getByRole('button', { name: 'Manual Uploads' })
     expect(screen.getByRole('button', { name: 'Activity / Cache' })).toBeTruthy()
     expect(webhook.className).toContain('active')
     expect(manual.className).not.toContain('active')
 
     await user.click(manual)
-    expect(screen.getByRole('button', { name: 'Uploads / Options' }).className).toContain('active')
-    expect(screen.getByRole('button', { name: 'Webhook' }).className).not.toContain('active')
+    expect(screen.getByRole('button', { name: 'Manual Uploads' }).className).toContain('active')
+    expect(screen.getByRole('button', { name: 'Webhook / Upload Settings' }).className).not.toContain('active')
   })
 
   // Standalone page again (own sidebar entry + route), so it provides its own page container
@@ -191,7 +195,7 @@ describe('PlexUpload', () => {
     const user = userEvent.setup()
     render(<PlexUpload />)
 
-    await user.click(screen.getByRole('button', { name: 'Webhook' }))
+    await user.click(screen.getByRole('button', { name: 'Webhook / Upload Settings' }))
 
     const toggle = screen.getByRole('button', { name: /Setup Walkthrough/i })
     expect(toggle.closest('.toolbar-title')).toBeTruthy()
@@ -210,46 +214,56 @@ describe('PlexUpload', () => {
   // The grouping is a claim about the backend: flow.py reads plex_upload_manual_remove_overlay_label
   // and the upload job reads the manual delay + plex_upload_artwork, while the workflow hardcodes
   // dry_run/reapply off and runs its own sync/rename/border steps.
-  it('separates settings the workflow honours from manual-run-only ones', async () => {
+  it('keeps the settings every run honours on the settings tab and the manual-run-only ones beside the run buttons', async () => {
     const user = userEvent.setup()
     render(<PlexUpload />)
 
-    await user.click(screen.getByRole('button', { name: 'Uploads / Options' }))
-    await waitFor(() => expect(screen.getByText('Upload Options')).toBeTruthy())
+    const everyRun = await waitFor(() => {
+      const card = document.querySelector('.upload-settings-card') as HTMLElement
+      expect(card.textContent).toMatch(/Remove Overlay label/i)
+      return card
+    })
+    expect(everyRun.textContent).toMatch(/scheduled runs.*Workflow/i)
+    expect(everyRun.textContent).toMatch(/Upload artwork/i)
+    expect(everyRun.textContent).toMatch(/Upload delay/i)
+    expect(everyRun.textContent).not.toMatch(/Dry run|Reapply|Sync drives|Replace borders/i)
 
-    const card = document.querySelector('.plex-manual-options-card') as HTMLElement
-    // Each group is its own element so they can sit in two columns on wide screens.
-    expect(card.querySelectorAll('.upload-options-groups > .upload-options-group')).toHaveLength(2)
-    const headings = [...card.querySelectorAll('.config-subgroup-heading')].map((h) => h.textContent ?? '')
-    expect(headings[0]).toMatch(/Upload Behaviour/i)
-    expect(headings[0]).toMatch(/Workflow.*scheduled/i)
-    expect(headings[1]).toMatch(/Manual Runs Only/i)
+    await user.click(screen.getByRole('button', { name: 'Manual Uploads' }))
 
-    // Everything before the second heading reaches the workflow; everything after doesn't.
-    const divider = card.querySelector('.config-subgroup-divider') as HTMLElement
-    const isBeforeDivider = (label: RegExp) => {
-      const el = [...card.querySelectorAll('span')].find((n) => label.test(n.textContent ?? ''))!
-      return Boolean(divider.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING)
+    const manualOnly = document.querySelector('.plex-manual-options-card') as HTMLElement
+    for (const label of [/Dry run/i, /Reapply/i, /Sync drives before upload/i, /Rename posters before upload/i, /Replace borders before upload/i]) {
+      expect(manualOnly.textContent).toMatch(label)
     }
+    expect(manualOnly.textContent).not.toMatch(/Remove Overlay label|Upload artwork|Upload delay/i)
+    // The options sit in the same row as the run they shape.
+    expect(manualOnly.parentElement?.querySelector('.plex-upload-stack')?.textContent).toMatch(/Run All Posters Upload/)
+  })
 
-    expect(isBeforeDivider(/Remove Overlay label/i)).toBe(true)
-    expect(isBeforeDivider(/Upload artwork/i)).toBe(true)
-    expect(isBeforeDivider(/Upload delay/i)).toBe(true)
+  it('saves the Upload Settings card with the settings tab Save', async () => {
+    const user = userEvent.setup()
+    render(<PlexUpload />)
 
-    expect(isBeforeDivider(/Dry run/i)).toBe(false)
-    expect(isBeforeDivider(/Reapply/i)).toBe(false)
-    expect(isBeforeDivider(/Sync drives before upload/i)).toBe(false)
-    expect(isBeforeDivider(/Rename posters before upload/i)).toBe(false)
-    expect(isBeforeDivider(/Replace borders before upload/i)).toBe(false)
+    await waitFor(() => expect(document.querySelector('.upload-settings-card input')).toBeTruthy())
+    const card = document.querySelector('.upload-settings-card') as HTMLElement
+    await user.click(within(card).getByLabelText(/Upload artwork/i))
+    await user.click(screen.getByRole('button', { name: /^Saved?$/ }))
 
-    // Each column holds its own group's settings, so the two-column layout can't split a group.
-    const [behaviour, manualOnly] = [...card.querySelectorAll('.upload-options-group')]
-    expect(behaviour.textContent).toMatch(/Remove Overlay label/i)
-    expect(behaviour.textContent).toMatch(/Upload delay/i)
-    expect(behaviour.textContent).not.toMatch(/Dry run/i)
-    expect(manualOnly.textContent).toMatch(/Dry run/i)
-    expect(manualOnly.textContent).toMatch(/Replace borders/i)
-    expect(manualOnly.textContent).not.toMatch(/Remove Overlay label/i)
+    await waitFor(() => {
+      expect(mockSavePlexManualSettings).toHaveBeenCalledWith(expect.objectContaining({ upload_artwork: true }))
+    })
+    expect(mockSavePlexWebhookSettings).not.toHaveBeenCalled()
+  })
+
+  it('asks before leaving the settings tab with an unsaved upload setting', async () => {
+    const user = userEvent.setup()
+    render(<PlexUpload />)
+
+    await waitFor(() => expect(document.querySelector('.upload-settings-card input')).toBeTruthy())
+    const card = document.querySelector('.upload-settings-card') as HTMLElement
+    await user.click(within(card).getByLabelText(/Upload artwork/i))
+    await user.click(screen.getByRole('button', { name: 'Manual Uploads' }))
+
+    expect(screen.getByRole('button', { name: 'Webhook / Upload Settings' }).className).toContain('active')
   })
 
   // Save sits in the toolbar like every other tab, and targets the active sub-tab.
@@ -311,7 +325,7 @@ describe('PlexUpload', () => {
 
     expect(screen.getByRole('button', { name: /Setup Walkthrough/i })).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'Uploads / Options' }))
+    await user.click(screen.getByRole('button', { name: 'Manual Uploads' }))
     expect(screen.queryByRole('button', { name: /Setup Walkthrough/i })).toBeNull()
   })
 
@@ -441,5 +455,38 @@ describe('PlexUpload', () => {
     // …while the checkbox grid is not rendered until the modal is opened.
     expect(screen.queryByTestId('instance-routing-Radarr-4K')).toBeNull()
     expect(screen.getByRole('button', { name: /Configure libraries/i })).toBeTruthy()
+  })
+
+  it('leaves routing to a media server that is not configured out of the summary', async () => {
+    mockGetSettings.mockResolvedValue({
+      radarr_instances: JSON.stringify([
+        { name: 'Radarr', url: 'http://radarr:7878', api_key: 'x' },
+        { name: 'Radarr-4K', url: 'http://radarr4k:7878', api_key: 'x' },
+      ]),
+    })
+    mockGetPlexUploadInstanceMap.mockResolvedValue({
+      map: {
+        Radarr: [{ plex_instance: 'Gone', library_key: 'k_old' }],
+        'Radarr-4K': [
+          { plex_instance: 'Main', library_key: 'k_movies4k' },
+          { plex_instance: 'Gone', library_key: 'k_old4k' },
+        ],
+      },
+    })
+    mockGetPlexUploadLibraryOverrideSettings.mockResolvedValue({
+      enabled: false,
+      configs: [],
+      global_configs: [
+        { instance_name: 'Main', libraries: [{ key: 'k_movies4k', title: 'Movies 4K', type: 'movie', enabled: true }] },
+      ],
+    })
+
+    render(<PlexUpload />)
+
+    await waitFor(() => {
+      expect(screen.getByText('→ Movies 4K')).toBeTruthy()
+    })
+    expect(screen.getByText(/→ all selected libraries/i)).toBeTruthy()
+    expect(screen.queryByText(/k_old/)).toBeNull()
   })
 })

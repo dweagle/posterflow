@@ -86,6 +86,10 @@ class _FakeJellyfinClient(MediaServerClient):
         return item.thumb_path
 
 
+J_MOVIES = {"J": [{"key": "lib1", "title": "Movies", "enabled": True}]}
+P_MOVIES = {"P": [{"key": "fake_key_Movies", "title": "Movies", "enabled": True}]}
+
+
 def _patch_jellyfin(monkeypatch):
     import util.media_server.jellyfin as jf_mod
 
@@ -118,7 +122,7 @@ def test_build_index_over_jellyfin_instance(test_db, monkeypatch):
     service = PlexUploadService(test_db)
     index, totals = service._build_plex_index(
         [{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}],
-        {},
+        J_MOVIES,
     )
     assert [m.item_id for m in index["movies"]["heat"]] == ["m1"]
     assert [m.item_id for m in index["movies"]["id:tmdb:949"]] == ["m1"]
@@ -140,7 +144,7 @@ def test_build_index_warns_about_a_library_whose_items_carry_no_ids(test_db, mon
     client.movie.provider_ids = {}
     monkeypatch.setattr(service, "_connect_media_server_client", lambda instance: client)
 
-    _, totals = service._build_plex_index([{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}], {})
+    _, totals = service._build_plex_index([{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}], J_MOVIES)
 
     assert totals[0]["no_ids"] == 1
     header = next(i for i, m in enumerate(captured) if "J / Movies: 1 of 1 movies carry no TMDB/TVDB/IMDb id" in m)
@@ -176,7 +180,7 @@ def test_targeted_index_over_jellyfin_instance(test_db, monkeypatch):
     service = PlexUploadService(test_db)
     index, totals = service._build_plex_index_targeted(
         [{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}],
-        {},
+        J_MOVIES,
         tmdb_id=949,
         title="Heat",
         year=1995,
@@ -308,7 +312,7 @@ def test_jellyfin_collections_indexed_once_across_libraries(test_db, monkeypatch
     service = PlexUploadService(test_db)
     index, totals = service._build_plex_index(
         [{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}],
-        {},
+        {"J": [{"key": "lib1", "title": "Movies", "enabled": True}, {"key": "lib2", "title": "TV Shows", "enabled": True}]},
     )
     assert sum(t["collections"] for t in totals) == 1
     assert len(index["collections"]["fastsaga"]) == 1
@@ -366,6 +370,20 @@ class _FakeEmptyJellyfinClient(_FakeJellyfinClient):
 
     def find_by_title(self, title, media_type=None, library_keys=None):
         return []
+
+
+def test_index_skips_a_server_with_no_library_selected(test_db, monkeypatch):
+    _patch_jellyfin(monkeypatch)
+    service = PlexUploadService(test_db)
+    connected = []
+    connect = service._connect_media_server_client
+    monkeypatch.setattr(service, "_connect_media_server_client", lambda instance: connected.append(instance["name"]) or connect(instance))
+    instances = [{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}]
+
+    assert service._build_plex_index(instances, {})[1] == []
+    assert service._build_plex_index_targeted(instances, {}, tmdb_id=949, title="Heat", year=1995, media_type="movie") == ({}, [])
+    assert connected == []
+    assert service._build_plex_index(instances, J_MOVIES)[1] and connected == ["J"]
 
 
 def test_targeted_index_reports_scoped_server_without_the_item(test_db, monkeypatch):
@@ -458,7 +476,7 @@ def _loading_plex_movie(key: str):
 
 def test_targeted_index_leaves_an_item_plex_is_still_loading_alone(test_db, monkeypatch):
     """Fetching or changing a new Plex item before its details are loaded damages them, so it is
-    no target yet and its server counts as pending, scoped or not."""
+    no target yet and its server counts as pending."""
     import plexapi.server as plexapi_server
     from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted
 
@@ -468,12 +486,12 @@ def test_targeted_index_leaves_an_item_plex_is_still_loading_alone(test_db, monk
     service = PlexUploadService(test_db)
     instances = [{"name": "P", "url": "http://p", "api_key": "t", "type": "plex"}]
 
-    assert _targeted_movie_index(service, instances, {}) == ({}, [])
+    assert _targeted_movie_index(service, instances, P_MOVIES) == ({}, [])
     assert service.webhook_pending_servers() == service.webhook_loading_servers() == ["Plex 'P' / Movies"]
     assert service.webhook_pending_instances() == ["P"]
 
     movie._data.set("updatedAt", "1794461217")
-    index, totals = _targeted_movie_index(service, instances, {})
+    index, totals = _targeted_movie_index(service, instances, P_MOVIES)
     assert index["movies"] and [t["instance"] for t in totals] == ["P"]
     assert service.webhook_pending_servers() == service.webhook_loading_servers() == []
 
@@ -492,7 +510,8 @@ def test_targeted_index_waits_for_a_loading_copy_beside_a_ready_one(test_db, mon
     service = PlexUploadService(test_db)
     instances = [{"name": "P", "url": "http://p", "api_key": "t", "type": "plex"}]
 
-    index, totals = _targeted_movie_index(service, instances, {})
+    selected = {"P": [{"title": "Movies", "enabled": True}, {"title": "4K Movies", "enabled": True}]}
+    index, totals = _targeted_movie_index(service, instances, selected)
 
     assert [t["library"] for t in totals] == ["Movies"]
     assert service.webhook_pending_servers() == service.webhook_loading_servers() == ["Plex 'P' / 4K Movies"]
@@ -519,22 +538,22 @@ def test_targeted_search_lines_are_not_repeated_while_a_job_waits(test_db, monke
 
     service.quiet_targeted_logging = True
     for _ in range(3):
-        _targeted_movie_index(service, instances, {})
+        _targeted_movie_index(service, instances, P_MOVIES)
     assert lines == [("DEBUG", "Targeted search: P / Movies: 1 match still loading on the server")]
 
     # The job's own search says why it holds off, once however often it finds the same
     service.quiet_targeted_logging = False
-    _targeted_movie_index(service, instances, {})
-    _targeted_movie_index(service, instances, {})
+    _targeted_movie_index(service, instances, P_MOVIES)
+    _targeted_movie_index(service, instances, P_MOVIES)
     assert lines[1:] == [("INFO", loading)]
 
     movie._data.set("updatedAt", "1794461217")
     service.quiet_targeted_logging = True
-    _targeted_movie_index(service, instances, {})
+    _targeted_movie_index(service, instances, P_MOVIES)
     assert lines[2:] == [("DEBUG", "Targeted search: P / Movies: 1 match by id")]
 
     service.quiet_targeted_logging = False
-    _targeted_movie_index(service, instances, {})
+    _targeted_movie_index(service, instances, P_MOVIES)
     assert lines[3:] == [("INFO", "Found Heat (1995) on Plex 'P' / Movies")]
 
 

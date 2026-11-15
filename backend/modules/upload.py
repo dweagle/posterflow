@@ -4073,6 +4073,7 @@ def run_plex_single_manual_background_job(
             reapply=reapply,
             remove_overlay_label=remove_overlay_label,
             progress_callback=progress_callback,
+            include_artwork=_get_upload_artwork_enabled(db),
         )
 
         if not result.get("success", False):
@@ -4084,6 +4085,9 @@ def run_plex_single_manual_background_job(
         matched_count = int(stats.get("matched", 0))
         scanned_count = int(stats.get("scanned", 0))
         match_detail = _format_match_detail(stats, dry_run=dry_run)
+        artwork_stats = stats.get("artwork", {}) if isinstance(stats.get("artwork"), dict) else {}
+        if int(artwork_stats.get("scanned", 0)):
+            match_detail += f" | artwork {_format_match_detail(artwork_stats, dry_run=dry_run)}"
         preupload_rename = preupload_summary.get("rename", {}) if isinstance(preupload_summary.get("rename", {}), dict) else {}
         preupload_border = preupload_summary.get("border", {}) if isinstance(preupload_summary.get("border", {}), dict) else {}
 

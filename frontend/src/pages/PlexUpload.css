@@ -50,35 +50,16 @@
   font-size: var(--text-base);
 }
 
-.plex-manual-options-card {
-  margin-bottom: var(--sp-4);
+/* One grid cell holding two cards; the lower one fills the cell so the row's bottom edges line up. */
+.plex-upload-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  min-width: 0;
 }
 
-/* The two upload-option groups: side by side when there's room, stacked when not. */
-.upload-options-groups {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--sp-12);
-}
-
-@media (min-width: 1200px) {
-  .upload-options-groups {
-    grid-template-columns: 1fr 1fr;
-    gap: var(--sp-24);
-  }
-
-  /* Side by side, the groups are separated by a rule between the columns rather than
-     the stacked layout's rule above the second group. */
-  .upload-options-groups > .upload-options-group + .upload-options-group {
-    padding-left: var(--sp-24);
-    border-left: 1px solid var(--hairline-faint);
-  }
-
-  .upload-options-groups .config-subgroup-divider {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: none;
-  }
+.plex-upload-stack > .plex-upload-card:last-child {
+  flex: 1;
 }
 
 .walkthrough-content ol {

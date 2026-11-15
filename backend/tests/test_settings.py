@@ -598,6 +598,24 @@ def test_plex_rename_round_trip_restores_original_state(client, test_db):
         assert _get_setting_json(test_db, key) == expected, f"{key} did not round-trip"
 
 
+def test_removed_media_server_keeps_its_routing_for_a_re_add(client, test_db):
+    """Removing a media server leaves its Asset Upload routing alone, so adding it back
+    under the same name routes as before."""
+    plex = {"name": "Plex", "url": "http://plex:32400", "api_key": "plex-token"}
+    jelly = {"name": "Jelly", "url": "http://jelly:8096", "api_key": "jelly-key", "type": "jellyfin"}
+    routing = {"Radarr": [{"plex_instance": "Plex", "library_key": "1"}, {"plex_instance": "Jelly", "library_key": "abc"}]}
+    test_db.add_all([
+        Setting(key="plex_instances", value=json.dumps([plex, jelly])),
+        Setting(key="plex_upload_instance_library_map", value=json.dumps(routing)),
+    ])
+    test_db.commit()
+
+    for instances in ([plex], [plex, jelly]):
+        response = client.post("/api/settings/bulk", json={"plex_instances": json.dumps(instances)})
+        assert response.status_code == 200
+        assert _get_setting_json(test_db, "plex_upload_instance_library_map") == routing
+
+
 def test_startup_cleanup_prunes_orphans_without_a_save(test_db):
     """Installs already carrying orphaned rename leftovers are healed at startup,
     with no Media Servers save required."""
@@ -626,9 +644,9 @@ def test_startup_cleanup_prunes_orphans_without_a_save(test_db):
 
     configs = _get_setting_json(test_db, "plex_library_config")
     assert [c["instance_name"] for c in configs] == ["New Plex"]
-    # Routing entries pointing at the vanished name are dropped too
+    # Routing entries stay: Asset Upload ignores the ones naming a server that is not configured
     saved_map = _get_setting_json(test_db, "plex_upload_instance_library_map")
-    assert saved_map == {}
+    assert saved_map == {"Radarr": [{"plex_instance": "Old Plex", "library_key": "1"}]}
 
 
 def test_startup_cleanup_noop_without_configured_instances(test_db):

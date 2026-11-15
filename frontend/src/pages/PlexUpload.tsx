@@ -560,7 +560,7 @@ function PlexUpload() {
     }
   }
 
-  const saveManualSettings = async () => {
+  const saveManualSettings = async (savedText: string = 'Manual run settings saved') => {
     setManualSettingsSaving(true)
     try {
       const response = await savePlexManualSettings({
@@ -595,7 +595,7 @@ function PlexUpload() {
       setUploadArtwork(nextSnapshot.upload_artwork)
       manualBaselineRef.current = nextSnapshot
       setHasUnsavedManualSettings(false)
-      showToast('Manual run settings saved', 'success')
+      showToast(savedText, 'success')
     } catch (error) {
       console.error('Failed to save manual Asset Upload settings:', error)
       showToast(getApiErrorMessage(error, 'Failed to save manual settings'), 'error')
@@ -931,8 +931,11 @@ function PlexUpload() {
   }
 
   // One-line summary of where an instance routes, for the collapsed page card.
+  // Entries naming a media server that is not configured do not count.
   const instanceRoutingSummary = (instanceName: string): string => {
-    const entries = instanceMap[instanceName] || []
+    const entries = (instanceMap[instanceName] || []).filter((entry) =>
+      globalLibraryConfigs.some((config) => config.instance_name === entry.plex_instance),
+    )
     if (entries.length === 0) {
       return 'all selected libraries (default)'
     }
@@ -1221,12 +1224,13 @@ function PlexUpload() {
     overrideConfigs,
   ])
 
+  // Upload Settings (first tab) and the manual run options save as one group; a tab cannot be left with unsaved edits, so it is only dirty on the tab showing the edit.
+  const activeTabHasUnsavedChanges = (activeTab === 'manual' && hasUnsavedManualSettings)
+    || (activeTab === 'webhook' && (hasUnsavedAutomationSettings || hasUnsavedManualSettings))
+
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      const hasUnsavedChanges = (activeTab === 'manual' && hasUnsavedManualSettings)
-        || (activeTab === 'webhook' && hasUnsavedAutomationSettings)
-
-      if (hasUnsavedChanges) {
+      if (activeTabHasUnsavedChanges) {
         event.preventDefault()
         event.returnValue = ''
       }
@@ -1236,17 +1240,14 @@ function PlexUpload() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
     }
-  }, [activeTab, hasUnsavedManualSettings, hasUnsavedAutomationSettings])
+  }, [activeTabHasUnsavedChanges])
 
   const handleTabChange = (nextTab: PlexUploadTab) => {
     if (nextTab === activeTab) {
       return
     }
 
-    const hasUnsavedOnActiveTab = (activeTab === 'manual' && hasUnsavedManualSettings)
-      || (activeTab === 'webhook' && hasUnsavedAutomationSettings)
-
-    if (hasUnsavedOnActiveTab) {
+    if (activeTabHasUnsavedChanges) {
       setPendingTabChange(nextTab)
       setShowUnsavedModal(true)
       return
@@ -1284,11 +1285,27 @@ function PlexUpload() {
     setHasUnsavedAutomationSettings(false)
   }
 
+  const revertSettingsTab = () => {
+    revertAutomationSettings()
+    revertManualSettings()
+  }
+
+  const uploadSettingsLocked = loading || singleUploadLoading || isJobActive
+
+  const saveSettingsTab = async () => {
+    if (hasUnsavedAutomationSettings) {
+      await saveWebhookSettings()
+    }
+    if (hasUnsavedManualSettings && !uploadSettingsLocked) {
+      await saveManualSettings('Upload settings saved')
+    }
+  }
+
   const handleDiscardChanges = () => {
     if (activeTab === 'manual') {
       revertManualSettings()
     } else if (activeTab === 'webhook') {
-      revertAutomationSettings()
+      revertSettingsTab()
     }
 
     if (pendingTabChange) {
@@ -1393,10 +1410,10 @@ function PlexUpload() {
         {/* One Save per sub-tab, in the toolbar like every other tab. Activity is
             monitoring, so it has nothing to save. */}
         {activeTab === 'webhook' && (
-          <SaveActions dirty={hasUnsavedAutomationSettings} saving={webhookSaving} disabled={!toggleSettingsReady || webhookLoading || webhookSaving || !hasUnsavedAutomationSettings} onSave={saveWebhookSettings} onCancel={revertAutomationSettings} />
+          <SaveActions dirty={hasUnsavedAutomationSettings || hasUnsavedManualSettings} saving={webhookSaving || manualSettingsSaving} disabled={!toggleSettingsReady || webhookLoading || webhookSaving || manualSettingsLoading || manualSettingsSaving || !(hasUnsavedAutomationSettings || (hasUnsavedManualSettings && !uploadSettingsLocked))} onSave={saveSettingsTab} onCancel={revertSettingsTab} />
         )}
         {activeTab === 'manual' && (
-          <SaveActions dirty={hasUnsavedManualSettings} saving={manualSettingsSaving} disabled={!manualSettingsReady || manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive || !hasUnsavedManualSettings} onSave={saveManualSettings} onCancel={revertManualSettings} />
+          <SaveActions dirty={hasUnsavedManualSettings} saving={manualSettingsSaving} disabled={!manualSettingsReady || manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive || !hasUnsavedManualSettings} onSave={() => saveManualSettings()} onCancel={revertManualSettings} />
         )}
       </Toolbar>
 
@@ -1564,7 +1581,7 @@ function PlexUpload() {
                 </p>
                 {/* First-run advice — lived in a permanent red banner, which read as an error. */}
                 <p className="card-description walkthrough-note">
-                  <strong>On first use:</strong> run a full manual upload from <strong>Uploads / Options</strong>.
+                  <strong>On first use:</strong> run a full manual upload from <strong>Manual Uploads</strong>.
                   That caches every current poster, so later automated runs don't re-upload them.
                 </p>
           </div>
@@ -1578,14 +1595,14 @@ function PlexUpload() {
           className={activeTab === 'webhook' ? 'active' : ''}
           onClick={() => handleTabChange('webhook')}
         >
-          Webhook
+          Webhook / Upload Settings
         </button>
         <button
           type="button"
           className={activeTab === 'manual' ? 'active' : ''}
           onClick={() => handleTabChange('manual')}
         >
-          Uploads / Options
+          Manual Uploads
         </button>
         <button
           type="button"
@@ -1617,186 +1634,131 @@ function PlexUpload() {
       {activeTab === 'manual' && (
         <section className="plex-upload-section">
           <div className="plex-upload-section-header">
-            <h2>Uploads & Options</h2>
-            <p>Options that shape every upload — including the Workflow's — plus manual runs for all posters or a single item.</p>
+            <h2>Manual Uploads</h2>
+            <p>Run an upload for all posters or a single item. The options here only affect these manual runs.</p>
           </div>
 
-          <section className="plex-upload-card plex-manual-options-card">
-            <h2>Upload Options</h2>
-            <p className="card-description">Pre-upload preparation follows your configured <strong>Asset Renamer</strong> and <strong>Border Replacer</strong> settings.</p>
-
-            {!manualSettingsReady ? (
-              <p className="card-description">Loading saved options…</p>
-            ) : (
-              <div className="upload-options-groups">
-                {/* These describe how PosterFlow uploads, so every run honours them — the
-                    Workflow's Asset Upload step reads them straight from these settings. */}
-                <div className="upload-options-group">
-                <div className="config-subgroup-heading">
-                  Upload Behaviour
-                  <span className="config-subgroup-hint">Also used by the Workflow's Asset Upload step and scheduled runs</span>
-                </div>
-
-                <label className="plex-checkbox-row">
-                  <span className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={removeOverlayLabel}
-                      onChange={(event) => setRemoveOverlayLabel(event.target.checked)}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                    <span className="toggle-slider" />
-                  </span>
-                  <span>Remove Overlay label after upload (Kometa-compatible)</span>
-                </label>
-
-                <label className="plex-checkbox-row">
-                  <span className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={uploadArtwork}
-                      onChange={(event) => setUploadArtwork(event.target.checked)}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                    <span className="toggle-slider" />
-                  </span>
-                  <span>Upload artwork (logos, backgrounds, square art) alongside posters</span>
-                </label>
-
-                <div className="webhook-retry-row">
-                  <label className="plex-input-row">
-                    <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each upload. Lower is faster; increase if the server returns errors. 0 = no delay. The webhook has its own delay — it uploads one item per event, so it can afford to be gentler.</span></span></span>
-                    <input
-                      type="number"
-                      className="no-spinner"
-                      min={0}
-                      max={2000}
-                      value={manualUploadDelayMs}
-                      onChange={(event) => setManualUploadDelayMs(Math.max(0, Number(event.target.value)))}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                  </label>
-                </div>
-
-                </div>
-
-                {/* The Workflow decides these for itself (it has its own sync/rename/border
-                    steps and never dry-runs), so they only shape the runs on this page. */}
-                <div className="upload-options-group">
-                <div className="config-subgroup-heading config-subgroup-divider">
-                  Manual Runs Only
-                  <span className="config-subgroup-hint">Only affect <strong>All Posters</strong> and <strong>Single Poster</strong> below</span>
-                </div>
-
-                <label className="plex-checkbox-row">
-                  <span className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={dryRun}
-                      onChange={(event) => setDryRun(event.target.checked)}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                    <span className="toggle-slider" />
-                  </span>
-                  <span>Dry run (no posters are uploaded)</span>
-                </label>
-
-                <label className="plex-checkbox-row">
-                  <span className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={reapply}
-                      onChange={(event) => setReapply(event.target.checked)}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                    <span className="toggle-slider" />
-                  </span>
-                  <span>Reapply (clear upload cache before run; ignored during dry run)</span>
-                </label>
-
-                <label className="plex-checkbox-row">
-                  <span className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={syncBeforeUpload}
-                      onChange={(event) => setSyncBeforeUpload(event.target.checked)}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                    <span className="toggle-slider" />
-                  </span>
-                  <span>Sync drives before upload (Full upload only)</span>
-                </label>
-
-                <label className="plex-checkbox-row">
-                  <span className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={renameBeforeUpload}
-                      onChange={(event) => setRenameBeforeUpload(event.target.checked)}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                    <span className="toggle-slider" />
-                  </span>
-                  <span>Rename posters before upload</span>
-                </label>
-
-                <label className="plex-checkbox-row">
-                  <span className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={borderBeforeUpload}
-                      onChange={(event) => setBorderBeforeUpload(event.target.checked)}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                    <span className="toggle-slider" />
-                  </span>
-                  <span>Replace borders before upload</span>
-                </label>
-                </div>
-              </div>
-            )}
-          </section>
-
           <div className="plex-upload-grid">
-            <section className="plex-upload-card upload-cache-card">
-              <h2>Manual Upload (All Posters)</h2>
-              <p className="card-description">Queue a background upload job for all posters from the current poster destination.</p>
+            <section className="plex-upload-card plex-manual-options-card">
+              <h2>Manual Run Options</h2>
+              <p className="card-description">
+                Only affect the <strong>All Posters</strong> and <strong>Single Poster</strong> runs on this tab. Pre-upload
+                preparation follows your configured <strong>Asset Renamer</strong> and <strong>Border Replacer</strong> settings.
+              </p>
 
-              {!manualSettingsReady && <p className="card-description">Loading run options…</p>}
-
-              <button type="button" className="btn-primary plex-run-btn" onClick={runUpload} disabled={!manualSettingsReady || loading || isJobActive}>
-                <UploadCloud size={18} />
-                {loading ? 'Starting…' : isJobActive ? 'Job Running…' : 'Run All Posters Upload'}
-              </button>
-            </section>
-
-            <section className="plex-upload-card">
-              <div className="plex-card-header-row">
-                <h2>Latest Job</h2>
-                <button type="button" className="btn-secondary" onClick={() => fetchLatestPlexJob()} disabled={refreshing}>
-                  <RefreshCw size={16} className={refreshing ? 'spinning' : ''} />
-                  Refresh
-                </button>
-              </div>
-
-              {!lastJob ? (
-                <p className="card-description">No upload job has run yet.</p>
+              {!manualSettingsReady ? (
+                <p className="card-description">Loading saved options…</p>
               ) : (
-                <div className="plex-job-details">
-                  <div><span>Job ID:</span> <strong>{lastJob.id}</strong></div>
-                  <div><span>Status:</span> <strong className={`job-status ${lastJob.status}`}>{lastJob.status}</strong></div>
-                  <div><span>Progress:</span> <strong>{lastJob.progress}%</strong></div>
-                  <div><span>Message:</span> <strong>{lastJob.message || '—'}</strong></div>
-                  {lastJob.error && <div><span>Error:</span> <strong className="job-error">{lastJob.error}</strong></div>}
-                </div>
+                <>
+                  <label className="plex-checkbox-row">
+                    <span className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={dryRun}
+                        onChange={(event) => setDryRun(event.target.checked)}
+                        disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                      />
+                      <span className="toggle-slider" />
+                    </span>
+                    <span>Dry run (no posters are uploaded)</span>
+                  </label>
+
+                  <label className="plex-checkbox-row">
+                    <span className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={reapply}
+                        onChange={(event) => setReapply(event.target.checked)}
+                        disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                      />
+                      <span className="toggle-slider" />
+                    </span>
+                    <span>Reapply (clear upload cache before run; ignored during dry run)</span>
+                  </label>
+
+                  <label className="plex-checkbox-row">
+                    <span className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={syncBeforeUpload}
+                        onChange={(event) => setSyncBeforeUpload(event.target.checked)}
+                        disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                      />
+                      <span className="toggle-slider" />
+                    </span>
+                    <span>Sync drives before upload (Full upload only)</span>
+                  </label>
+
+                  <label className="plex-checkbox-row">
+                    <span className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={renameBeforeUpload}
+                        onChange={(event) => setRenameBeforeUpload(event.target.checked)}
+                        disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                      />
+                      <span className="toggle-slider" />
+                    </span>
+                    <span>Rename posters before upload</span>
+                  </label>
+
+                  <label className="plex-checkbox-row">
+                    <span className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={borderBeforeUpload}
+                        onChange={(event) => setBorderBeforeUpload(event.target.checked)}
+                        disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                      />
+                      <span className="toggle-slider" />
+                    </span>
+                    <span>Replace borders before upload</span>
+                  </label>
+                </>
               )}
             </section>
+
+            <div className="plex-upload-stack">
+              <section className="plex-upload-card upload-cache-card">
+                <h2>Manual Upload (All Posters)</h2>
+                <p className="card-description">Queue a background upload job for all posters from the current poster destination.</p>
+
+                {!manualSettingsReady && <p className="card-description">Loading run options…</p>}
+
+                <button type="button" className="btn-primary plex-run-btn" onClick={runUpload} disabled={!manualSettingsReady || loading || isJobActive}>
+                  <UploadCloud size={18} />
+                  {loading ? 'Starting…' : isJobActive ? 'Job Running…' : 'Run All Posters Upload'}
+                </button>
+              </section>
+
+              <section className="plex-upload-card">
+                <div className="plex-card-header-row">
+                  <h2>Latest Job</h2>
+                  <button type="button" className="btn-secondary" onClick={() => fetchLatestPlexJob()} disabled={refreshing}>
+                    <RefreshCw size={16} className={refreshing ? 'spinning' : ''} />
+                    Refresh
+                  </button>
+                </div>
+
+                {!lastJob ? (
+                  <p className="card-description">No upload job has run yet.</p>
+                ) : (
+                  <div className="plex-job-details">
+                    <div><span>Job ID:</span> <strong>{lastJob.id}</strong></div>
+                    <div><span>Status:</span> <strong className={`job-status ${lastJob.status}`}>{lastJob.status}</strong></div>
+                    <div><span>Progress:</span> <strong>{lastJob.progress}%</strong></div>
+                    <div><span>Message:</span> <strong>{lastJob.message || '—'}</strong></div>
+                    {lastJob.error && <div><span>Error:</span> <strong className="job-error">{lastJob.error}</strong></div>}
+                  </div>
+                )}
+              </section>
+            </div>
           </div>
 
           <section className="plex-upload-card plex-single-upload-card">
             <h2>Single Poster Upload</h2>
             <p className="card-description">
-              Search your Plex library, select a movie, show, or collection, and queue a single Plex upload. Uses the shared options above, and runs the same pre-upload rename and border replace workflow used by webhook uploads.
+              Search your Plex library, select a movie, show, or collection, and queue a single Plex upload. Uses the options above and the Upload Settings on the first tab, and runs the same pre-upload rename and border replace workflow used by webhook uploads.
             </p>
 
             <div className="plex-single-search-row">
@@ -1891,8 +1853,8 @@ function PlexUpload() {
     <>
           <section className="plex-upload-section">
             <div className="plex-upload-section-header">
-              <h2>Webhook Automation</h2>
-              <p>Uploads triggered by Radarr/Sonarr or media-server webhook events. Stats and cache live under Activity.</p>
+              <h2>Webhook & Upload Settings</h2>
+              <p>Settings for webhook uploads and for every other upload run. Stats and cache live under Activity.</p>
             </div>
 
             <div className="plex-upload-grid webhook-automation-grid">
@@ -2034,53 +1996,112 @@ function PlexUpload() {
                   </>
                 )}
               </section>
-              <section className="plex-upload-card library-targeting-card">
-                <div className="plex-card-header-row">
-                  <h2>Library Targeting</h2>
-                  <button
-                    type="button"
-                    className={`btn-secondary ${hasUnsavedAutomationSettings ? 'btn-unsaved' : ''}`}
-                    onClick={openLibraryModal}
-                    disabled={!toggleSettingsReady}
-                  >
-                    Configure libraries…
-                  </button>
-                </div>
-                <p className="card-description">
-                  Choose which media server libraries Asset Upload targets — globally (override) and per Radarr/Sonarr
-                  instance. Opens a focused editor so the selection boxes don't crowd this page.
-                </p>
+              <div className="plex-upload-stack">
+                <section className="plex-upload-card upload-settings-card">
+                  <h2>Upload Settings</h2>
+                  <p className="card-description">
+                    Used by manual runs, scheduled runs and the Workflow's Asset Upload step. Webhook uploads use
+                    Webhook Settings instead.
+                  </p>
 
-                {!toggleSettingsReady ? (
-                  <p className="card-description">Loading library settings…</p>
-                ) : (
-                  <div className="library-targeting-summary">
-                    <div className="library-targeting-summary-row">
-                      <span className="library-targeting-summary-label">Override</span>
-                      <span>
-                        {overrideEnabled ? (
-                          <><strong>On</strong> — {getEnabledOverrideCount()} {getEnabledOverrideCount() === 1 ? 'library' : 'libraries'}</>
-                        ) : (
-                          <>Off — using Media-tab library selection</>
-                        )}
-                      </span>
+                  {!manualSettingsReady ? (
+                    <p className="card-description">Loading saved options…</p>
+                  ) : (
+                    <div className="webhook-settings-grid">
+                      <label className="plex-checkbox-row">
+                        <span className="toggle-switch">
+                          <input
+                            type="checkbox"
+                            checked={removeOverlayLabel}
+                            onChange={(event) => setRemoveOverlayLabel(event.target.checked)}
+                            disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                          />
+                          <span className="toggle-slider" />
+                        </span>
+                        <span>Remove Overlay label after upload (Kometa-compatible)</span>
+                      </label>
+
+                      <label className="plex-checkbox-row">
+                        <span className="toggle-switch">
+                          <input
+                            type="checkbox"
+                            checked={uploadArtwork}
+                            onChange={(event) => setUploadArtwork(event.target.checked)}
+                            disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                          />
+                          <span className="toggle-slider" />
+                        </span>
+                        <span>Upload artwork (logos, backgrounds, square art) alongside posters</span>
+                      </label>
+
+                      <div className="webhook-retry-row">
+                        <label className="plex-input-row">
+                          <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each upload. Lower is faster; increase if the server returns errors. 0 = no delay. The webhook has its own delay — it uploads one item per event, so it can afford to be gentler.</span></span></span>
+                          <input
+                            type="number"
+                            className="no-spinner"
+                            min={0}
+                            max={2000}
+                            value={manualUploadDelayMs}
+                            onChange={(event) => setManualUploadDelayMs(Math.max(0, Number(event.target.value)))}
+                            disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                          />
+                        </label>
+                      </div>
                     </div>
-                    {arrInstanceNames.length === 0 ? (
-                      <p className="card-description library-targeting-summary-empty">
-                        No Radarr/Sonarr instances configured — per-instance routing only applies to arr webhooks.
-                      </p>
-                    ) : (
-                      arrInstanceNames.map((instanceName) => (
-                        <div key={instanceName} className="library-targeting-summary-row">
-                          <span className="library-targeting-summary-label">{instanceName}</span>
-                          <span>→ {instanceRoutingSummary(instanceName)}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
+                  )}
+                </section>
 
-              </section>
+                <section className="plex-upload-card library-targeting-card">
+                  <div className="plex-card-header-row">
+                    <h2>Library Targeting</h2>
+                    <button
+                      type="button"
+                      className={`btn-secondary ${hasUnsavedAutomationSettings ? 'btn-unsaved' : ''}`}
+                      onClick={openLibraryModal}
+                      disabled={!toggleSettingsReady}
+                    >
+                      Configure libraries…
+                    </button>
+                  </div>
+                  <p className="card-description">
+                    Choose which media server libraries Asset Upload targets, globally (override) and per Radarr/Sonarr
+                    instance. Per-instance routing applies to every run, not only webhooks. If a media server is not
+                    getting posters, check that its libraries are switched on under each instance. Opens a focused editor
+                    so the selection boxes don't crowd this page.
+                  </p>
+
+                  {!toggleSettingsReady ? (
+                    <p className="card-description">Loading library settings…</p>
+                  ) : (
+                    <div className="library-targeting-summary">
+                      <div className="library-targeting-summary-row">
+                        <span className="library-targeting-summary-label">Override</span>
+                        <span>
+                          {overrideEnabled ? (
+                            <><strong>On</strong> — {getEnabledOverrideCount()} {getEnabledOverrideCount() === 1 ? 'library' : 'libraries'}</>
+                          ) : (
+                            <>Off — using Media-tab library selection</>
+                          )}
+                        </span>
+                      </div>
+                      {arrInstanceNames.length === 0 ? (
+                        <p className="card-description library-targeting-summary-empty">
+                          No Radarr/Sonarr instances configured. Routing only applies to Radarr/Sonarr titles.
+                        </p>
+                      ) : (
+                        arrInstanceNames.map((instanceName) => (
+                          <div key={instanceName} className="library-targeting-summary-row">
+                            <span className="library-targeting-summary-label">{instanceName}</span>
+                            <span>→ {instanceRoutingSummary(instanceName)}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                </section>
+              </div>
             </div>
 
           </section>
@@ -2393,16 +2414,22 @@ function PlexUpload() {
                 <h3>Instance → Library Routing</h3>
               </div>
               <p className="card-description">
-                If you use Radarr/Sonarr: send each arr instance's imports to specific media server libraries. Instances left unmapped
-                upload to <strong>all</strong> selected libraries. Paste each instance's dedicated webhook URL
-                (below) into its connector so events are attributed even when the payload's instance name
-                doesn't match.
+                If you use Radarr/Sonarr: send each instance's titles to specific media server libraries. This applies to
+                every Asset Upload run, not only webhooks. An instance with nothing switched on uploads
+                to <strong>all</strong> selected libraries. Paste each instance's dedicated webhook URL (below) into its
+                connector so events are attributed even when the payload's instance name doesn't match.
+              </p>
+              <p className="card-description">
+                Once any library is switched on, the instance uploads only to the libraries switched on. A media server
+                with none switched on gets nothing from that instance, and its titles still count as already current
+                because another server has them. After adding a media server, switch its libraries on under each
+                instance that should reach it.
               </p>
 
               {instanceMapLoading ? (
                 <p className="card-description">Loading instance routing…</p>
               ) : arrInstanceNames.length === 0 ? (
-                <p className="card-description">No Radarr/Sonarr instances configured — per-instance routing only applies to arr webhooks. Plex and Jellyfin webhook uploads use the Media-tab library selection.</p>
+                <p className="card-description">No Radarr/Sonarr instances configured. Routing only applies to Radarr/Sonarr titles. Plex and Jellyfin webhook uploads use the Media-tab library selection.</p>
               ) : globalLibraryConfigs.length === 0 ? (
                 <p className="card-description">No global media server library configuration found. Configure libraries in Settings → Media first.</p>
               ) : (

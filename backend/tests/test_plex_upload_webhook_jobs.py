@@ -132,6 +132,45 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
     assert captured["targeted_context"]["allow_full_fallback"] is True
 
 
+def test_manual_single_background_job_follows_the_upload_artwork_setting(test_db, monkeypatch):
+    import modules.upload as upload_module
+    from models.setting import upsert_setting
+
+    asked = []
+
+    class _FakePlexUploadService:
+        def __init__(self, _db, **_kwargs):
+            pass
+
+        def prepare_webhook_context(self, **_kwargs):
+            return None
+
+        def run_single_upload(self, **kwargs):
+            asked.append(kwargs["include_artwork"])
+            artwork = {"scanned": 2, "uploaded_files": 2} if kwargs["include_artwork"] else {"scanned": 0}
+            return {"success": True, "stats": {"scanned": 1, "matched": 1, "uploaded": 1, "uploaded_files": 1, "artwork": artwork}}
+
+    monkeypatch.setattr("modules.upload.SessionLocal", lambda: test_db)
+    monkeypatch.setattr("modules.upload.add_job_log_handler", lambda *args, **kwargs: 1)
+    monkeypatch.setattr("modules.upload.remove_job_log_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr("modules.upload._run_webhook_preupload_rename_pass", lambda *args, **kwargs: {})
+    monkeypatch.setattr("modules.upload.PlexUploadService", _FakePlexUploadService)
+
+    messages = []
+    for setting in ("false", "true"):
+        upsert_setting(test_db, "plex_upload_artwork", setting)
+        job = Job(job_type="Plex Upload Single", status="pending", progress=0, message="Queued")
+        test_db.add(job)
+        test_db.commit()
+        job_id = job.id
+        upload_module.run_plex_single_manual_background_job(job_id, {"media_type": "movie", "title": "The Matrix", "year": 1999, "tmdb_id": 603})
+        messages.append(test_db.query(Job).filter(Job.id == job_id).first().message)
+
+    assert asked == [False, True]
+    assert "artwork" not in messages[0]
+    assert messages[1].endswith("The Matrix — 1 file(s): 1 uploaded | artwork 2 file(s): 2 uploaded")
+
+
 def test_webhook_background_job_completes_with_warning_when_no_local_assets(test_db, monkeypatch):
     """Webhook background job should complete with warning when no local assets exist for the target."""
     import modules.upload as upload_module

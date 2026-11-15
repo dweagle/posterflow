@@ -219,6 +219,11 @@ class PlexUploadService:
         self._instance_allowance_cache: Dict[str, Optional[Dict[str, Set[str]]]] = {}
         self._instance_scope_warned: Set[str] = set()
         self._instance_scoped_paths: Set[str] = set()
+        # Where routing let matched items upload and where it kept them off: servers, and "server / library" places
+        self._routed_to_servers: Set[str] = set()
+        self._routed_off_servers: Set[str] = set()
+        self._routed_to_places: Set[str] = set()
+        self._routed_off_places: Set[str] = set()
         self._expected_edition: Optional[str] = None
         self._expected_movie_file: Optional[str] = None
         # Server(s) still missing the expected edition this run; the webhook waits on them
@@ -263,8 +268,9 @@ class PlexUploadService:
         return self._arr_availability_incomplete
 
     def webhook_found_servers(self) -> List[str]:
-        """Where the last targeted search found the item, as "Plex 'name' / Movies"."""
-        return list(self._targeted_found_in)
+        """Where the last targeted search found the item and routing lets it upload, as "Plex 'name' / Movies"."""
+        kept_off = self._routed_off_places - self._routed_to_places
+        return [place for place in self._targeted_found_in if place not in kept_off]
 
     def webhook_pending_instances(self) -> List[str]:
         """Instance names of the scoped servers that had no item at the last targeted search."""
@@ -789,11 +795,7 @@ class PlexUploadService:
                 at_once=True,
             )
             # Full runs log artwork from the job layer; run_single_upload has no summary.
-        if self._instance_scoped_paths:
-            log_info(
-                LogTags.UPLOADER,
-                f"Instance map kept {len(self._instance_scoped_paths):,} asset(s) to their own Arr instance's libraries",
-            )
+        self._log_routing_summary()
         stats["year_discrepancies"] = list(self._year_discrepancies)
 
         self._persist_upload_cache()
@@ -1515,8 +1517,8 @@ class PlexUploadService:
 
         if not filtered:
             return {}, (
-                f"Asset Upload instance '{arr_instance}' is mapped to libraries that are not "
-                "enabled/selected. Update the instance→library map on the Asset Upload page."
+                f"Asset Upload instance '{arr_instance}' is routed to libraries that are not "
+                "enabled/selected. Update Library Targeting on the Asset Upload page."
             )
 
         mapped = ", ".join(
@@ -1542,7 +1544,7 @@ class PlexUploadService:
         return True
 
     def _instance_library_allowance(self, arr_instance: str) -> Optional[Dict[str, Set[str]]]:
-        """Mapped {plex instance: {library key}} for an Arr instance; None when it has no mapping."""
+        """Mapped {plex instance: {library key}} for an Arr instance, configured servers only; None when that leaves no mapping."""
         name = arr_instance.strip()
         if name in self._instance_allowance_cache:
             return self._instance_allowance_cache[name]
@@ -1552,18 +1554,18 @@ class PlexUploadService:
             invalid_json_log_level="warning",
         )
         mapping = instance_map.get(name) if isinstance(instance_map, dict) else None
-        allowed: Optional[Dict[str, Set[str]]] = None
+        allowed: Dict[str, Set[str]] = {}
         if isinstance(mapping, list) and mapping:
-            allowed = {}
+            configured = {instance["name"] for instance in self._get_plex_instances()}
             for entry in mapping:
                 if not isinstance(entry, dict):
                     continue
                 plex_instance = str(entry.get("plex_instance", "")).strip()
                 library_key = str(entry.get("library_key", "")).strip()
-                if plex_instance and library_key:
+                if plex_instance in configured and library_key:
                     allowed.setdefault(plex_instance, set()).add(library_key)
-        self._instance_allowance_cache[name] = allowed
-        return allowed
+        self._instance_allowance_cache[name] = allowed or None
+        return allowed or None
 
     def _record_arr_folder(self, arr_instance: str, folder: Any) -> None:
         name = Path(str(folder or "")).name.strip().lower()
@@ -1614,14 +1616,35 @@ class PlexUploadService:
                 self._instance_scope_warned.add(label)
                 log_warning(
                     LogTags.UPLOADER,
-                    f"Instance map for '{label}' names no library holding a match for {self._asset_label(asset)}; "
+                    f"Library Targeting for '{label}' names no library holding a match for {self._asset_label(asset)}; "
                     "using every matched library",
                     arr_instance=label,
                 )
             return tuple(lists)
         if sum(len(items) for items in scoped) < sum(len(items) for items in lists):
             self._instance_scoped_paths.add(str(asset.get("path") or ""))
+        for items, kept in zip(lists, scoped):
+            kept_ids = {id(item) for item in kept}
+            for item in items:
+                on = id(item) in kept_ids
+                (self._routed_to_servers if on else self._routed_off_servers).add(self._item_server_label(item))
+                (self._routed_to_places if on else self._routed_off_places).add(self._item_target_label(item))
         return scoped
+
+    def _log_routing_summary(self) -> None:
+        if not self._instance_scoped_paths:
+            return
+        log_info(
+            LogTags.UPLOADER,
+            f"Library Targeting kept {len(self._instance_scoped_paths):,} asset(s) to their own Arr instance's libraries",
+        )
+        kept_off = sorted(self._routed_off_servers - self._routed_to_servers)
+        if kept_off:
+            log_info(
+                LogTags.UPLOADER,
+                f"None of them upload to {', '.join(kept_off)}: the libraries holding them there are switched off "
+                "for their Radarr/Sonarr instance in Library Targeting (Asset Upload page)",
+            )
 
     def _scope_candidates_to_asset(self, asset: Dict[str, Any], items: List[Any]) -> List[Any]:
         return self._scope_candidate_lists(asset, items)[0]
@@ -1908,16 +1931,19 @@ class PlexUploadService:
 
         for instance in plex_instances:
             instance_name = instance["name"]
+            allowed = selected_libraries.get(instance_name)
+            if not allowed:
+                log_info(LogTags.UPLOADER, f"{server_label(instance_type(instance), instance_name)} has no library selected for this upload; skipped")
+                continue
             client = self._connect_media_server_client(instance)
             if client is None:
                 continue
 
-            allowed = selected_libraries.get(instance_name)
             # Jellyfin box sets are server-global — index them once per instance
             per_library_collections = client.supports(CAP_PER_LIBRARY_COLLECTIONS)
             instance_collections_indexed = False
             for library in client.get_libraries():
-                if allowed and not self._is_section_allowed(library, allowed):
+                if not self._is_section_allowed(library, allowed):
                     continue
                 if library.type not in ("movie", "show"):
                     continue
@@ -2023,7 +2049,7 @@ class PlexUploadService:
         library_totals: List[Dict[str, Any]] = []
         found_any = False
         found_in: List[str] = []
-        # Only explicitly scoped servers count as expected to hold the item
+        # Server → libraries searched; a server searched without a hit is still expected to hold the item
         searched: Dict[str, List[str]] = {}
         hit_instances: Set[str] = set()
         # Server → libraries that hold the item while the server still loads its details
@@ -2031,18 +2057,25 @@ class PlexUploadService:
 
         for instance in plex_instances:
             instance_name = instance["name"]
+            allowed = selected_libraries.get(instance_name)
+            if not allowed:
+                if self._is_news(("search", instance_name), "not selected"):
+                    log_debug(
+                        LogTags.UPLOADER,
+                        f"Targeted search: {server_label(instance_type(instance), instance_name)} has no library selected for this upload; skipped",
+                        instance=instance_name,
+                    )
+                continue
             client = self._connect_media_server_client(instance)
             if client is None:
                 continue
 
-            allowed = selected_libraries.get(instance_name)
             for library in client.get_libraries():
-                if allowed and not self._is_section_allowed(library, allowed):
+                if not self._is_section_allowed(library, allowed):
                     continue
                 if library.type not in section_types:
                     continue
-                if allowed:
-                    searched.setdefault(instance_name, []).append(str(library.title))
+                searched.setdefault(instance_name, []).append(str(library.title))
 
                 started = time.monotonic()
                 # --- Provider-id search; per library, first matching id wins. Title/year
@@ -2186,7 +2219,7 @@ class PlexUploadService:
                         "collections": 0,
                     })
 
-            if allowed and instance_name not in searched:
+            if instance_name not in searched:
                 if self._is_news(("search", instance_name), "no library"):
                     log_debug(
                         LogTags.UPLOADER,

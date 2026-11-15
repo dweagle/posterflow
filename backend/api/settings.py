@@ -399,7 +399,7 @@ def _load_json_setting_value(db: Session, key: str) -> Any:
 
 def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None:
     """Called when plex_instances is being saved (before the upsert). Migrates renamed
-    instances across every name-keyed setting and prunes entries for removed instances."""
+    instances across every name-keyed setting and prunes the library configs of removed ones."""
     try:
         new_instances = json.loads(new_instances_json)
     except (json.JSONDecodeError, TypeError):
@@ -440,9 +440,9 @@ def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None
                 json.dumps({**override, "configs": rekeyed}),
             )
 
-    # plex_upload_instance_library_map: {"<arr>": [{plex_instance, library_key}]}
+    # plex_upload_instance_library_map: {"<arr>": [{plex_instance, library_key}]}. Rename only: a removed server's entries are ignored until it is re-added.
     routing = _load_json_setting_value(db, "plex_upload_instance_library_map")
-    if isinstance(routing, dict):
+    if renames and isinstance(routing, dict):
         new_routing: Dict[str, List[Dict[str, Any]]] = {}
         for arr_name, entries in routing.items():
             if not isinstance(entries, list):
@@ -452,9 +452,7 @@ def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None
                 if not isinstance(entry, dict):
                     continue
                 plex_name = str(entry.get("plex_instance", "")).strip()
-                plex_name = renames.get(plex_name, plex_name)
-                if plex_name in valid_names:
-                    kept.append({**entry, "plex_instance": plex_name})
+                kept.append({**entry, "plex_instance": renames.get(plex_name, plex_name)})
             if kept:
                 new_routing[arr_name] = kept
         if new_routing != routing:
@@ -467,8 +465,7 @@ def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None
                          if renames.get(name, name) in valid_names and (name not in renames or renames[name] not in metadata_paths)}
         if rekeyed_paths != metadata_paths:
             upsert_setting(db, "plex_metadata_paths", json.dumps(rekeyed_paths))
-    # "<name>:<library key>" selections: rename only — entries for removed servers are
-    # inert and revive if the server is re-added, so they are deliberately not pruned.
+    # "<name>:<library key>" selections: rename only, like the routing map above.
     if renames:
         overlays = _load_json_setting_value(db, "overlays_config")
         if isinstance(overlays, dict):

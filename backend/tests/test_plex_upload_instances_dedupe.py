@@ -403,9 +403,10 @@ def _filter_service(test_db, instance_map=None):
     import json as _json
     from models.setting import upsert_setting as _upsert_setting
 
+    _upsert_setting(test_db, "plex_instances", _json.dumps([{"name": "Main", "url": "http://plex", "api_key": "k"}]))
     if instance_map is not None:
         _upsert_setting(test_db, "plex_upload_instance_library_map", _json.dumps(instance_map))
-        test_db.commit()
+    test_db.commit()
     return PlexUploadService(test_db)
 
 
@@ -458,7 +459,7 @@ def test_filter_libraries_names_the_mapping_once_per_job(test_db, monkeypatch):
     for _ in range(3):
         service._filter_libraries_for_instance(_sample_selected(), "Radarr-4K")
 
-    assert [line for line in lines if "uploads to" in line] == ["'Radarr-4K' uploads to Main / Movies 4K"]
+    assert [line for line in lines if "uploads to" in line] == ["'Radarr-4K' uploads to Plex 'Main' / Movies 4K"]
 
 
 def test_filter_libraries_error_when_mapping_matches_no_enabled_library(test_db):

@@ -18,10 +18,11 @@ INSTANCE_MAP = {
 }
 
 
-def _service(test_db, instance_map=INSTANCE_MAP, folder_map=FOLDER_MAP):
+def _service(test_db, instance_map=INSTANCE_MAP, folder_map=FOLDER_MAP, servers=("Plex",)):
+    upsert_setting(test_db, "plex_instances", json.dumps([{"name": name, "url": f"http://{name}", "api_key": "k"} for name in servers]))
     if instance_map is not None:
         upsert_setting(test_db, PlexUploadService.SETTING_INSTANCE_LIBRARY_MAP, json.dumps(instance_map))
-        test_db.commit()
+    test_db.commit()
     service = PlexUploadService(test_db)
     service._arr_folder_instances = {k: set(v) for k, v in folder_map.items()}
     return service
@@ -104,6 +105,52 @@ def test_scope_falls_back_with_one_warning_when_map_holds_no_match(test_db, monk
     assert service._scope_candidates_to_asset(_asset(HD_FOLDER), [hd]) == [hd]
     assert len(warnings) == 1 and "Sonarr" in warnings[0] and "using every matched library" in warnings[0]
     assert service._instance_scoped_paths == set()
+
+
+def test_routing_to_a_server_that_is_not_configured_does_not_count(test_db):
+    """An instance whose only entries name a removed server is unmapped."""
+    service = _service(test_db, instance_map={
+        "Sonarr": [{"plex_instance": "Gone", "library_key": "2"}],
+        "Sonarr 4k": [{"plex_instance": "Plex", "library_key": "21"}, {"plex_instance": "Gone", "library_key": "9"}],
+    })
+    assert service._instance_library_allowance("Sonarr") is None
+    assert service._instance_library_allowance("Sonarr 4k") == {"Plex": {"21"}}
+
+
+def _jelly_card():
+    client = SimpleNamespace(instance_name="Jelly", server_id="jf1", server_type="jellyfin")
+    return MediaServerItem(item_id="j1", item_type="show", title="Ahsoka", year=2023, library_key="jf1:abc", library_name="Series", client=client)
+
+
+def test_a_server_routing_kept_every_asset_off_is_named(test_db, monkeypatch):
+    lines = []
+    monkeypatch.setattr(plex_upload_module, "log_info", lambda tag, msg, **kw: lines.append(msg))
+    service = _service(test_db, instance_map={"Sonarr": [{"plex_instance": "Plex", "library_key": "2"}]}, servers=("Plex", "Jelly"))
+    hd, jelly = _card("h1", 2, "TV Shows"), _jelly_card()
+    assert service._scope_candidates_to_asset(_asset(HD_FOLDER), [hd, jelly]) == [hd]
+
+    service._targeted_found_in = ["Plex / TV Shows", "Jellyfin 'Jelly' / Series"]
+    assert service.webhook_found_servers() == ["Plex / TV Shows"]
+    service._log_routing_summary()
+    assert lines == [
+        "Library Targeting kept 1 asset(s) to their own Arr instance's libraries",
+        "None of them upload to Jellyfin 'Jelly': the libraries holding them there are switched off "
+        "for their Radarr/Sonarr instance in Library Targeting (Asset Upload page)",
+    ]
+
+
+def test_a_server_that_gets_some_routed_assets_is_not_named(test_db, monkeypatch):
+    lines = []
+    monkeypatch.setattr(plex_upload_module, "log_info", lambda tag, msg, **kw: lines.append(msg))
+    service = _service(test_db)
+    hd, uhd = _card("h1", 2, "TV Shows"), _card("u1", 21, "4k TV Shows")
+    service._scope_candidates_to_asset(_asset(HD_FOLDER), [hd, uhd])
+    service._scope_candidates_to_asset(_asset(UHD_FOLDER), [hd, uhd])
+
+    service._targeted_found_in = ["Plex / TV Shows", "Plex / 4k TV Shows"]
+    assert service.webhook_found_servers() == ["Plex / TV Shows", "Plex / 4k TV Shows"]
+    service._log_routing_summary()
+    assert lines == ["Library Targeting kept 2 asset(s) to their own Arr instance's libraries"]
 
 
 def test_availability_build_records_arr_folders_per_instance(test_db, monkeypatch):
