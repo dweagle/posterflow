@@ -799,11 +799,11 @@ def _write(folder, *names: str) -> None:
 
 
 class TestPlacedFolder:
-    def _report(self, tmp_path, monkeypatch, item):
+    def _report(self, tmp_path, monkeypatch, item, folder_names=()):
         monkeypatch.setattr(match_report, "get_poster_destination", lambda db_: str(tmp_path))
         media = match_report._synth_media(item)
         ids = {k: item.get(k) for k in ("tmdb_id", "tvdb_id", "imdb_id")}
-        return match_report._placed_folder_report(None, item, media, ids, [])
+        return match_report._placed_folder_report(None, item, media, ids, list(folder_names))
 
     def test_yearless_folder_is_read_as_a_collection(self, tmp_path, monkeypatch):
         _write(tmp_path / "Wonder Man {tvdb-428629}", "poster.jpg", "Season01.jpg")
@@ -865,6 +865,29 @@ class TestPlacedFolder:
         assert placed["name"] == "From the World of John Wick Ballerina (2025) {imdb-tt7181546}"
         # The tagless twin could be a duplicate; the 2016 film's ids disagree, so it is left out.
         assert placed["siblings"] == ["Ballerina (2025)"]
+
+    def _men_at_work(self) -> Dict[str, Any]:
+        return _placed_item(media_type="movies", title="Men at Work", year=2016, tmdb_id=429405,
+                            tvdb_id=None, imdb_id="tt5953674")
+
+    def test_same_named_other_release_is_not_this_items_folder(self, tmp_path, monkeypatch):
+        # The 1990 film's folder shares only the title: different id AND year, so no rename advice.
+        _write(tmp_path / "Men at Work (1990) {tmdb-10169}", "poster.jpg")
+        assert self._report(tmp_path, monkeypatch, self._men_at_work()) is None
+
+    def test_other_release_does_not_hide_the_items_own_folder(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Men at Work (1990) {tmdb-10169}", "poster.jpg")
+        _write(tmp_path / "Men at Work (2016)", "poster.jpg")
+        placed = self._report(tmp_path, monkeypatch, self._men_at_work())
+        assert placed["name"] == "Men at Work (2016)" and placed["matched"] is True
+        assert placed["siblings"] == []
+
+    def test_records_own_folder_is_kept_when_every_tag_is_stale(self, tmp_path, monkeypatch):
+        name = "Men at Work (2016) {tmdb-10169} {imdb-tt0100135}"
+        _write(tmp_path / name, "poster.jpg")
+        assert self._report(tmp_path, monkeypatch, self._men_at_work()) is None
+        placed = self._report(tmp_path, monkeypatch, self._men_at_work(), folder_names=[name])
+        assert placed["name"] == name and placed["id_conflicts"] == ["tmdb_id", "imdb_id"]
 
     def test_flat_destination_layout(self, tmp_path, monkeypatch):
         _write(tmp_path, "Wonder Man (2026) {tvdb-428629}.jpg", "Wonder Man (2026) {tvdb-428629} - Season 1.jpg",
@@ -930,6 +953,11 @@ class TestPlacedVerdicts:
         verdicts = _build_verdicts(report)
         assert verdicts[0]["code"] == "placed_tag_conflict"
         assert "{tvdb-111}" in verdicts[0]["message"] and "{tvdb-372727}" in verdicts[0]["message"]
+
+    def test_matched_folder_with_one_stale_tag_is_not_a_tag_conflict(self):
+        placed = self._placed(retrievable=True, retrieved_by="tvdb id", imdb_id="tt1", id_conflicts=["imdb_id"])
+        codes = [v["code"] for v in _build_verdicts(self._report_with(placed))]
+        assert "placed_tag_conflict" not in codes and "placed_matches" in codes
 
     def test_matching_placed_folder_calls_the_row_stale(self):
         verdicts = _build_verdicts(self._report_with(self._placed(retrievable=True, retrieved_by="tvdb id")))

@@ -862,6 +862,19 @@ def _placed_folder_report(
         except OSError:
             return []
 
+    def id_conflicts(parsed: Dict[str, Any]) -> List[str]:
+        return [
+            key for key in ("tmdb_id", "tvdb_id", "imdb_id")
+            if parsed.get(key) and effective_ids.get(key) and str(parsed[key]) != str(effective_ids[key])
+        ]
+
+    def other_release(name: str, parsed: Dict[str, Any]) -> bool:
+        # Same name, different title: ids disagree and the matcher sees no stale tag (year differs too).
+        if is_collection or name in folder_names or not id_conflicts(parsed):
+            return False
+        matched, reason = is_match(dict(parsed), media)
+        return not matched and reason != ID_CONFLICT
+
     try:
         entries = sorted(os.scandir(destination), key=lambda e: e.name.lower())
     except OSError:
@@ -907,6 +920,7 @@ def _placed_folder_report(
             if is_collection and parsed.get("type") != "collections":
                 continue
             found.append((2 if by_id else 1, base, parsed))
+    found = [row for row in found if row[0] == 2 or not other_release(row[1], row[2])]
     if not found:
         return None
     found.sort(key=lambda row: (-row[0], row[1].lower()))
@@ -946,18 +960,9 @@ def _placed_folder_report(
         "retrievable": retrieved_by is not None,
         "retrieved_by": retrieved_by,
         # Collection posters match on title only, so a tag on their folder is never a conflict.
-        "id_conflicts": [] if is_collection else [
-            key for key in ("tmdb_id", "tvdb_id", "imdb_id")
-            if placed_ids.get(key) and effective_ids.get(key) and str(placed_ids[key]) != str(effective_ids[key])
-        ],
+        "id_conflicts": [] if is_collection else id_conflicts(parsed),
         # Possible duplicates only: a twin whose ids disagree is another title sharing the name.
-        "siblings": [
-            row[1] for row in found[1:]
-            if not any(
-                row[2].get(key) and effective_ids.get(key) and str(row[2][key]) != str(effective_ids[key])
-                for key in ("tmdb_id", "tvdb_id", "imdb_id")
-            )
-        ],
+        "siblings": [row[1] for row in found[1:] if not id_conflicts(row[2])],
     }
 
 
@@ -1284,7 +1289,7 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
                 "unmatched detection reads it as a collection and will keep listing this item. "
                 f"Rename the folder in {source_name} to include the year, e.g. '{suggested}', "
                 "then run the Asset Renamer.")
-        elif placed.get("id_conflicts"):
+        elif placed.get("id_conflicts") and not placed.get("matched"):
             add("problem", "placed_tag_conflict",
                 f"The placed folder '{placed['name']}' is tagged {_id_tags(placed)}, but {source_name} says "
                 f"{_id_tags(record_ids)}, so unmatched detection treats them as different items. "
@@ -1634,7 +1639,7 @@ def render_match_report_text(report: Dict[str, Any]) -> str:
         lines.append("PLACED FOLDER")
         placed = report.get("placed")
         if not placed:
-            lines.append("  none found in the destination for this title")
+            lines.append("  none found in the destination for this item")
         else:
             lines.append(f"  {placed.get('name')}   ({placed.get('layout')} layout)")
             lines.append(f"    files    {', '.join(placed.get('files') or []) or 'none'}")

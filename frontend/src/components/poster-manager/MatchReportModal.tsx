@@ -266,7 +266,7 @@ function MatchReportModal({ item, onClose, pollIntervalMs = 1500 }: MatchReportM
               <div className="match-report-section">
                 <h4>Placed folder</h4>
                 {!placed ? (
-                  <div className="match-report-muted">No placed poster found in the destination for this title</div>
+                  <div className="match-report-muted">No placed poster found in the destination for this item</div>
                 ) : (
                   <table className="match-report-table">
                     <tbody>
