@@ -169,7 +169,7 @@ const NOTIFICATION_FEATURE_EVENTS: Record<string, { type: 'success' | 'error' | 
     { type: 'success', label: 'Success - Full upload completed — movies / shows / seasons / collections uploaded, plus artwork uploaded by type' },
     { type: 'success', label: 'Success - Webhook upload — item uploaded (media type, title, count)' },
     { type: 'error', label: 'Error - Upload failed — error message' },
-    { type: 'info', label: 'Info - Webhook: no local assets found for target item (no ping)' },
+    { type: 'info', label: 'Info - Webhook skipped: no poster to upload for the item, with the reason (no ping)' },
   ],
   idarr: [
     { type: 'success', label: 'Success - IDarr completed — files renamed, unresolved count' },

@@ -257,6 +257,7 @@ def _run_webhook_preupload_rename_pass(
             LogTags.UPLOADER,
             f"Webhook rename-then-upload source discovery failed; skipping rename prep: {source_dirs_error}",
         )
+        summary["source_error"] = source_dirs_error
         return summary
     source_dirs = [entry["path"] for entry in _source_dir_ctx]
     allowed_gdrive_ids = [entry["gdrive_id"] for entry in _source_dir_ctx if entry.get("gdrive_id")]
@@ -679,6 +680,7 @@ def _run_webhook_preupload_rename_pass(
         title=parsed_payload.get("title"),
         error=rename_error,
     )
+    summary["rename"]["error"] = rename_error
     return summary
 
 
@@ -2561,12 +2563,22 @@ def _accumulate_artwork_stats(aggregated: Dict[str, Any], target_stats: Dict[str
         aggregated["by_type"][atype] = int(aggregated["by_type"].get(atype, 0)) + int(count or 0)
 
 
-def _build_no_local_assets_warning_message(media_type: str | None, title: str | None) -> str:
-    return (
-        "No local assets found for webhook target after pre-upload steps. "
-        "Add the source drive in Asset Manager \u2192 Drive Priority or place the poster/artwork in destination. "
-        f"Target: {media_type}: {title}"
-    )
+def _no_poster_reason(item: str, rename_summary: Any = None, *, drives_searched: bool = True) -> str:
+    """Why a webhook had no poster to upload, from what the pre-upload steps actually found."""
+    summary = rename_summary if isinstance(rename_summary, dict) else {}
+    rename = summary.get("rename") if isinstance(summary.get("rename"), dict) else {}
+    if not drives_searched:
+        return (
+            f"No poster for {item} is placed yet. Your drives were not searched because "
+            "'Rename posters before upload' is off for webhooks."
+        )
+    if summary.get("source_error"):
+        return f"Your drives could not be searched for {item}. {summary['source_error']}"
+    if rename.get("error"):
+        return f"The rename step failed for {item}, so no poster was placed. {rename['error']}"
+    if int(rename.get("matched", 0) or 0) > 0:
+        return f"A poster for {item} was found in your drives but was not placed. The Asset Upload log has the details."
+    return f"Your drives have no poster for {item} yet. A later run uploads it once one is added."
 
 
 def _complete_no_local_assets_warning(
@@ -2576,9 +2588,8 @@ def _complete_no_local_assets_warning(
     media_type: str | None,
     title: str | None,
     season_number: int | None,
+    reason: str,
 ) -> None:
-    warning_message = _build_no_local_assets_warning_message(media_type, title)
-
     _increment_webhook_stat(db, "skipped_no_asset")
 
     update_job_state(
@@ -2586,30 +2597,26 @@ def _complete_no_local_assets_warning(
         job,
         status=JOB_STATUS_COMPLETED,
         progress=100,
-        message=format_complete_message(
-            "Webhook skipped (no local assets)",
-            f"{title}: no local source poster found in drive priority",
-        ),
+        message=format_complete_message("Webhook skipped (no local assets)", reason),
         completed_at=datetime.now(timezone.utc),
     )
 
     log_warning(
         LogTags.UPLOADER,
-        f"Webhook completed with warning: no local assets found for {str(media_type or 'item').upper()} - {title}",
+        f"Nothing uploaded: {reason}",
         media_type=media_type,
         title=title,
         season_number=season_number,
-        warning=warning_message,
     )
 
     send_notification(
         db,
         feature_key="plex_upload",
         event_type="info",
-        title="Asset Upload Warning",
-        description=warning_message,
+        title="Asset Upload Skipped",
+        description=reason,
         fields=[
-            {"name": "Media", "value": str(media_type or "unknown"), "inline": True},
+            {"name": "Media", "value": str(media_type or "unknown").title(), "inline": True},
             {"name": "Title", "value": str(title or "unknown"), "inline": True},
             {"name": "Job ID", "value": str(job_id), "inline": True},
         ],
@@ -3009,6 +3016,8 @@ def run_plex_webhook_background_job(
         season_number = parsed_payload.get("season_number")
         year_label = f" ({int(parsed_payload.get('year'))})" if isinstance(parsed_payload.get("year"), int) else ""
         season_label = f" S{int(season_number):02d}" if isinstance(season_number, int) else ""
+        season_text = f" Season {int(season_number):02d}" if isinstance(season_number, int) else ""
+        item_label = f"{title}{year_label}{season_text}"
 
         update_job_state(
             db,
@@ -3301,7 +3310,9 @@ def run_plex_webhook_background_job(
                     rename_attempted=bool(rename_info.get("attempted", False)) if isinstance(rename_info, dict) else False,
                     rename_matched=rename_matched,
                 )
-                _complete_no_local_assets_warning(db, job, job_id, media_type, title, season_number)
+                _complete_no_local_assets_warning(
+                    db, job, job_id, media_type, title, season_number, _no_poster_reason(item_label, rename_summary)
+                )
                 success = True
                 return
 
@@ -3320,7 +3331,9 @@ def run_plex_webhook_background_job(
                     rename_attempted=bool(rename_summary.get("rename", {}).get("attempted", False)),
                     rename_matched=int(rename_summary.get("rename", {}).get("matched", 0)),
                 )
-                _complete_no_local_assets_warning(db, job, job_id, media_type, title, season_number)
+                _complete_no_local_assets_warning(
+                    db, job, job_id, media_type, title, season_number, _no_poster_reason(item_label, rename_summary)
+                )
                 success = True
                 return
 
@@ -3343,7 +3356,9 @@ def run_plex_webhook_background_job(
                 title=title,
                 season_number=season_number,
             )
-            _complete_no_local_assets_warning(db, job, job_id, media_type, title, season_number)
+            _complete_no_local_assets_warning(
+                db, job, job_id, media_type, title, season_number, _no_poster_reason(item_label, drives_searched=False)
+            )
             success = True
             return
 
@@ -3618,7 +3633,6 @@ def run_plex_webhook_background_job(
             uploaded_count = int(stats.get("uploaded", 0))
 
             if scanned_count == 0:
-                no_local_assets_warning = _build_no_local_assets_warning_message(media_type, title)
                 log_warning(
                     LogTags.UPLOADER,
                     "Webhook skipped: no local assets found for target after pre-upload steps",
@@ -3627,9 +3641,11 @@ def run_plex_webhook_background_job(
                     title=title,
                     media_type=media_type,
                     season_number=season_number,
-                    warning=no_local_assets_warning,
                 )
-                _complete_no_local_assets_warning(db, job, job_id, media_type, title, season_number)
+                _complete_no_local_assets_warning(
+                    db, job, job_id, media_type, title, season_number,
+                    f"No placed poster for {item_label} was found, so nothing was uploaded.",
+                )
                 success = True
                 return
 
@@ -3858,7 +3874,6 @@ def run_plex_webhook_background_job(
             errors=int(stats.get("errors", 0)),
         )
 
-        season_text = f" Season {int(season_number):02d}" if isinstance(season_number, int) else ""
         media_label = str(media_type or "item").strip().lower()
         pretty_media = "Movie" if media_label == "movie" else "Show" if media_label == "show" else "Season" if media_label == "season" else media_label.title()
 

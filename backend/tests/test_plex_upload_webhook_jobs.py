@@ -1056,6 +1056,42 @@ def test_webhook_names_the_missing_season_poster_when_no_drive_has_it(test_db, m
     assert "performed no upload" not in (refreshed.message or "")
 
 
+def test_webhook_no_poster_message_says_what_was_actually_found():
+    """The skipped message names the real cause instead of guessing at a missing drive."""
+    from modules.upload import _no_poster_reason
+
+    item = "The Beast (2024)"
+    no_match = _no_poster_reason(item, {"rename": {"attempted": True, "matched": 0}})
+    assert no_match == "Your drives have no poster for The Beast (2024) yet. A later run uploads it once one is added."
+    assert "Drive Priority" not in no_match and "destination" not in no_match
+
+    source_error = "Drive priority list is empty. Add source drives in Asset Manager → Drive Priority tab."
+    assert _no_poster_reason(item, {"source_error": source_error, "rename": {"matched": 0}}).endswith(source_error)
+    assert "boom" in _no_poster_reason(item, {"rename": {"matched": 0, "error": "boom"}})
+    assert "was not placed" in _no_poster_reason(item, {"rename": {"matched": 1}})
+    assert "'Rename posters before upload' is off" in _no_poster_reason(item, drives_searched=False)
+
+
+def test_webhook_with_no_poster_in_any_drive_sends_the_plain_skipped_message(test_db, monkeypatch):
+    """No drive has the poster: the notification says so, with the year, and gives no setup advice."""
+    sent = []
+    monkeypatch.setattr("modules.upload.send_notification", lambda _db, **kwargs: sent.append(kwargs))
+    state = {"season_placed": False, "rename_calls": 0}
+    service_cls = _season_gate_service(state, lambda _season: {"scanned": 0, "matched": 0, "uploaded": 0})
+    service_cls._select_local_assets_for_target = lambda self, assets, **_kwargs: []
+
+    refreshed = _run_season_gate_job(test_db, monkeypatch, service_cls, {"state": state}, places_season=False)
+
+    assert refreshed.status == "completed"
+    assert service_cls.run_calls == []
+    assert len(sent) == 1
+    assert sent[0]["title"] == "Asset Upload Skipped"
+    assert sent[0]["description"] == (
+        "Your drives have no poster for The Diplomat (US) (2023) Season 04 yet. A later run uploads it once one is added."
+    )
+    assert sent[0]["description"] in (refreshed.message or "")
+
+
 # ---------------------------------------------------------------------------
 # Webhook retries: a second media server that has not scanned the item yet
 # ---------------------------------------------------------------------------
