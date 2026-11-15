@@ -1772,6 +1772,75 @@ def test_downgrade_v8_linked_layers_saves_self_consistent_v7_entries():
     assert _downgrade_v8_linked_layers(reread) == 0
 
 
+@_psd_tools_missing
+def test_downgrade_v8_linked_layers_preserves_descriptor_bearing_entries():
+    """Version-8 linked-layer entries that carry a contentID descriptor are valid and
+    must be preserved (not downgraded); only descriptor-less v8 entries are downgraded.
+    Older version-7 entries and their data must pass through untouched."""
+    from io import BytesIO
+    from PIL import Image as PILImage
+    from psd_tools import PSDImage
+    from psd_tools.api.layers import PixelLayer
+    from psd_tools.constants import LinkedLayerType, Tag
+    from psd_tools.psd.descriptor import DescriptorBlock, String
+    from psd_tools.psd.linked_layer import LinkedLayer
+    from psd_tools.psd.tagged_blocks import TaggedBlocks
+    from api.maker_tools import _downgrade_v8_linked_layers
+
+    legacy_entry = LinkedLayer(
+        kind=LinkedLayerType.DATA, version=7, uuid="fedcba9876543210fedcba9876543210",
+        filename="Legacy.png\x00", filetype=b"png ", data=b"legacy-bytes",
+        child_id="\x00", mod_time=0.0, lock_state=0,
+    )
+    if not hasattr(legacy_entry, "content_descriptor"):
+        pytest.skip("psd-tools lacks linked-layer content_descriptor support")
+
+    content_id = "content-id-123"
+    descriptor = DescriptorBlock()
+    descriptor["contentID"] = String(content_id)
+
+    descriptor_entry = LinkedLayer(
+        kind=LinkedLayerType.DATA, version=8, uuid="0123456789abcdef0123456789abcdef",
+        filename="Logo.png\x00", filetype=b"png ", data=b"fake-embedded-bytes",
+        child_id="\x00", mod_time=0.0, lock_state=0,
+        content_descriptor=descriptor,
+    )
+
+    psd = PSDImage.new("RGB", (4, 4))
+    psd._layers.insert(0, PixelLayer.frompil(PILImage.new("RGB", (4, 4)), psd, name="L", top=0, left=0))
+    blocks = TaggedBlocks()
+    blocks.set_data(Tag.LINKED_LAYER2, [descriptor_entry, legacy_entry])
+    psd._record.layer_and_mask_information.tagged_blocks = blocks
+
+    assert _downgrade_v8_linked_layers(psd) == 0
+    assert descriptor_entry.version == 8
+    assert legacy_entry.version == 7
+
+    buf = BytesIO()
+    psd.save(buf)
+    buf.seek(0)
+    reread = PSDImage.open(buf)
+    entries = reread._record.layer_and_mask_information.tagged_blocks.get_data(Tag.LINKED_LAYER2)
+    assert [e.version for e in entries] == [8, 7]
+    assert entries[0].data == b"fake-embedded-bytes"
+    assert entries[1].data == b"legacy-bytes"
+    assert entries[0].content_descriptor is not None
+    assert entries[0].content_descriptor["contentID"].value == content_id
+    assert _downgrade_v8_linked_layers(reread) == 0
+
+    # Stable repeated round-trip.
+    first_save = buf.getvalue()
+    buf2 = BytesIO()
+    reread.save(buf2)
+    second_save = buf2.getvalue()
+    assert first_save == second_save
+    buf2.seek(0)
+    reread2 = PSDImage.open(buf2)
+    entries2 = reread2._record.layer_and_mask_information.tagged_blocks.get_data(Tag.LINKED_LAYER2)
+    assert [e.version for e in entries2] == [8, 7]
+    assert entries2[0].content_descriptor["contentID"].value == content_id
+
+
 # ---------------------------------------------------------------------------
 # Shared placement formula: compute_logo_geometry / compute_poster_fit_geometry /
 # _measure_logo_density. These back both the PSD export and the plugin's
