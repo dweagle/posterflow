@@ -69,6 +69,42 @@ def test_parse_arr_webhook_payload_uses_relative_path_fallback():
     assert result["movie_file_path"] == "Aliens (1986) {edition-Extended}/Aliens.mkv"
 
 
+def test_parse_arr_webhook_payload_reads_sonarr_episode_files():
+    """Sonarr names the file of a file import, every file of a finished download, and the files
+    an upgrade replaced. They stay out of the dedupe identity, which keeps one job per season."""
+    from modules.upload import _parse_arr_webhook_payload, _webhook_dedupe_identity, _webhook_dedupe_record
+
+    series = {"eventType": "Download", "series": {"title": "The Institute", "year": 2025, "tvdbId": 451177}}
+    one = _parse_arr_webhook_payload({
+        **series,
+        "isUpgrade": True,
+        "episodes": [{"seasonNumber": 2, "episodeNumber": 3}],
+        "episodeFile": {"relativePath": "Season 02/S02E03.mkv", "path": "/tv/The Institute (2025)/Season 02/S02E03.mkv"},
+        "deletedFiles": [{"relativePath": "Season 02/old.mkv", "path": "/tv/The Institute (2025)/Season 02/old.mkv"}],
+    })
+    assert one["is_upgrade"] is True
+    assert one["episode_files"] == ["/tv/The Institute (2025)/Season 02/S02E03.mkv"]
+    assert one["replaced_episode_files"] == ["/tv/The Institute (2025)/Season 02/old.mkv"]
+
+    pack = _parse_arr_webhook_payload({
+        **series,
+        "episodes": [{"seasonNumber": 2, "episodeNumber": 1}, {"seasonNumber": 2, "episodeNumber": 2}],
+        "episodeFiles": [{"relativePath": "Season 02/S02E01.mkv"}, {"relativePath": "Season 02/S02E02.mkv"}],
+    })
+    assert pack["episode_files"] == ["Season 02/S02E01.mkv", "Season 02/S02E02.mkv"] and pack["is_upgrade"] is False
+
+    bare = _parse_arr_webhook_payload({**series, "episodes": [{"seasonNumber": 2}]})
+    assert bare["episode_files"] == [] and bare["replaced_episode_files"] == []
+    assert _webhook_dedupe_identity(_webhook_dedupe_record(one)) == _webhook_dedupe_identity(_webhook_dedupe_record(pack))
+
+
+def test_quoted_file_names_keeps_a_long_list_short():
+    from modules.upload import _quoted_file_names
+
+    assert _quoted_file_names(["/tv/Show/Season 02/S02E01.mkv"]) == "'S02E01.mkv'"
+    assert _quoted_file_names([f"Season 02\\S02E0{n}.mkv" for n in range(1, 6)]) == "'S02E01.mkv', 'S02E02.mkv', 'S02E03.mkv' and 2 more"
+
+
 def test_handle_radarr_upgrade_clears_cache_when_new_edition_detected(test_db, tmp_path):
     """Cache should be cleared when Radarr upgrade contains an edition not yet in the upload records."""
     (tmp_path / "Aliens (1986)").mkdir()
@@ -1174,6 +1210,58 @@ def test_seasons_are_listed_once_per_library(test_db, monkeypatch):
     assert listed == ["srv:/library/sections/2"] and per_show == []
     assert service._seasons_for_show(shows[2]) == [] and per_show == ["3"]  # not in the listing: its own request, once
     assert service._seasons_for_show(shows[2]) == [] and per_show == ["3"]
+
+
+def test_a_single_title_asks_for_its_own_seasons_only(test_db, monkeypatch):
+    """A webhook or single upload covers one show: its seasons and their poster locks are
+    fetched for that show alone, never for the whole library."""
+    from plex_upload_fakes import _WRAP_CLIENT
+
+    show = _SimplePlex("show", "Show", key="1")
+    show.library_key = "srv:/library/sections/2"
+    def own_seasons(_show):
+        out = []
+        for index in (1, 2):
+            season = _SimplePlex("season", f"Season {index}", key=f"1-{index}")
+            season.parent_id, season.index = "1", index
+            out.append(season)
+        return out
+    listed, fetches = [], []
+    def fill(items):
+        fetches.append(sorted(i.item_id for i in items))
+        for i in items:
+            i.thumb_locked = True
+    monkeypatch.setattr(_WRAP_CLIENT, "get_library_seasons", lambda key: listed.append(key) or [])
+    monkeypatch.setattr(_WRAP_CLIENT, "get_seasons", own_seasons)
+    monkeypatch.setattr(_WRAP_CLIENT, "fill_thumb_locks", fill)
+    service = PlexUploadService(test_db)
+    service._single_target = True
+
+    seasons = service._seasons_for_show(show)
+    assert [s.index for s in seasons] == [1, 2] and listed == []
+    assert service._plex_poster_lost(seasons[0]) is False
+    assert fetches == [["1-1", "1-2"]]
+    # A later pass of the job lists the seasons again; their locks follow the fresh list.
+    service._season_list_cache.clear()
+    assert service._plex_poster_lost(service._seasons_for_show(show)[1]) is False
+    assert fetches == [["1-1", "1-2"], ["1-1", "1-2"]] and listed == []
+
+
+def test_a_changed_badge_is_reported_once_per_job(test_db, monkeypatch):
+    """A job asks about a poster's badge at each of its checks; the reason is logged the first time."""
+    class _Hook:
+        def badge_stale(self, *_args, **_kwargs):
+            return True
+
+    service = PlexUploadService(test_db)
+    service._overlay_hook = _Hook()
+    show = _SimplePlex("show", "The Institute", key="5")
+    said = []
+    monkeypatch.setattr("services.plex_upload.log_debug", lambda _tag, message, **_context: said.append(message))
+
+    assert service._badge_stale(show, "/assets/The Institute (2025)/poster.jpg")
+    assert service._badge_stale(show, "/assets/The Institute (2025)/poster.jpg")
+    assert said == ["Overlay badge changed for The Institute: re-uploading"]
 
 
 def test_cached_jellyfin_poster_follows_the_image_tag(test_db, tmp_path, monkeypatch):

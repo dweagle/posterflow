@@ -1317,6 +1317,20 @@ _ARR_IGNORED_EVENTS = {
 }
 
 
+def _arr_file_paths(files: Any) -> list[str]:
+    """Paths of the file entries an Arr webhook lists (episodeFile, episodeFiles, deletedFiles)."""
+    entries = files if isinstance(files, list) else [files]
+    paths = [str(entry.get("path") or entry.get("relativePath") or "").strip() for entry in entries if isinstance(entry, dict)]
+    return [path for path in paths if path]
+
+
+def _quoted_file_names(paths: list) -> str:
+    """'a.mkv', 'b.mkv' and 3 more: the names of a few files, without their folders."""
+    names = [re.split(r"[\\/]", str(path))[-1] for path in paths if path]
+    shown = ", ".join(repr(name) for name in names[:3])
+    return f"{shown} and {len(names) - 3} more" if len(names) > 3 else shown
+
+
 def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     raw_event = str(payload.get("eventType") or payload.get("event") or "unknown").strip()
     event_type = raw_event.lower()
@@ -1399,6 +1413,10 @@ def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "tmdb_id": None,
             "imdb_id": str(series.get("imdbId") or payload.get("imdbId") or "").strip() or None,
             "tvdb_id": _to_int(series.get("tvdbId") or payload.get("tvdbId")),
+            "is_upgrade": bool(payload.get("isUpgrade", False)),
+            # One file per import event, or every file of a finished download
+            "episode_files": _arr_file_paths(payload.get("episodeFile") or payload.get("episodeFiles")),
+            "replaced_episode_files": _arr_file_paths(payload.get("deletedFiles")),
             "instance_name": instance_name,
             "application_url": application_url,
         }
@@ -2629,8 +2647,7 @@ def _missing_target_labels(checks: list[Dict[str, Any]]) -> list[str]:
     for check in checks:
         if check.get("exists"):
             continue
-        label = str(check.get("label") or "target")
-        labels.append("show poster" if label == "series-bootstrap" else label)
+        labels.append(str(check.get("label") or "target"))
     return labels
 
 
@@ -3021,13 +3038,16 @@ def run_plex_webhook_background_job(
             source=parsed_payload.get("source"),
         )
 
-        imported_file = re.split(r"[\\/]", str(parsed_payload.get("movie_file_path") or "").strip())[-1].strip()
-        replaced_names = [re.split(r"[\\/]", str(path))[-1] for path in parsed_payload.get("replaced_movie_files") or []]
+        imported = [path for path in [str(parsed_payload.get("movie_file_path") or "").strip(), *(parsed_payload.get("episode_files") or [])] if path]
+        replaced = [*(parsed_payload.get("replaced_movie_files") or []), *(parsed_payload.get("replaced_episode_files") or [])]
+        if len(imported) > 1:
+            imported_text = f", imported {len(imported)} files: {_quoted_file_names(imported)}"
+        else:
+            imported_text = f", imported file {_quoted_file_names(imported)}" if imported else ", no imported file named"
         log_debug(
             LogTags.UPLOADER,
-            f"Event '{parsed_payload.get('event_type') or 'unknown'}'"
-            + (f", imported file '{imported_file}'" if imported_file else ", no imported file named")
-            + (f", replaced {', '.join(repr(name) for name in replaced_names)}" if replaced_names else ""),
+            f"Event '{parsed_payload.get('event_type') or 'unknown'}'{imported_text}"
+            + (f", replaced {_quoted_file_names(replaced)}" if replaced else ""),
         )
 
         service = PlexUploadService(db, upload_delay_ms=_get_webhook_upload_delay_ms(db))
@@ -3134,7 +3154,7 @@ def run_plex_webhook_background_job(
             else:
                 webhook_targets = [
                     {"season_number": season_number, "label": f"Season {int(season_number):02d}"},
-                    {"season_number": None, "label": "series-bootstrap", "bootstrap": True},
+                    {"season_number": None, "label": "show poster", "bootstrap": True},
                 ]
                 show_poster_status = getattr(service, "_series_show_poster_status", None)
                 strategy_detail = {
@@ -3365,6 +3385,8 @@ def run_plex_webhook_background_job(
                 or "failed to connect to jellyfin instance" in normalized
             )
 
+        # The show pass takes every season poster and the artwork with it, so it runs alone
+        upload_targets = [target for target in webhook_targets if target.get("bootstrap")] or webhook_targets
         retry_only: list[str] = []  # servers still waiting; a retry searches only those
         carried: Optional[Dict[str, Any]] = None  # stats of the servers an earlier attempt settled
         for attempt in range(1, attempts + 1):
@@ -3473,14 +3495,10 @@ def run_plex_webhook_background_job(
             aggregated_unmatched: Dict[str, int] = empty_unmatched_reasons()
             year_discrepancies = []
 
-            for target in webhook_targets:
+            for target in upload_targets:
                 target_season_number = target.get("season_number")
-                target_label = str(target.get("label") or "target")
-                pass_label = (
-                    f"{title}{year_label} — {target_label}"
-                    if target.get("bootstrap")
-                    else f"{title}{year_label} ({target_label})"
-                )
+                target_label = "show poster and seasons" if target.get("bootstrap") else str(target.get("label") or "target")
+                pass_label = f"{title}{year_label} ({target_label})"
 
                 target_result = service.run_single_upload(
                     media_type=media_type,

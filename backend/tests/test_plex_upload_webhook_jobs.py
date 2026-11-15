@@ -423,7 +423,7 @@ def test_webhook_background_job_short_circuits_when_target_is_fully_cached(test_
 
 
 def test_webhook_background_job_series_season_runs_season_and_show_posters(test_db, monkeypatch):
-    """Series season webhook should run upload for season asset and series main poster."""
+    """A season webhook whose show poster is not current runs one pass: the show pass, which takes the season with it."""
     import modules.upload as upload_module
 
     job = Job(job_type="Plex Upload Webhook", status="pending", progress=0, message="Queued")
@@ -512,7 +512,7 @@ def test_webhook_background_job_series_season_runs_season_and_show_posters(test_
     refreshed = test_db.query(Job).filter(Job.id == job_id).first()
     assert refreshed is not None
     assert refreshed.status == "completed"
-    assert _FakePlexUploadService.run_calls == [1, None]
+    assert _FakePlexUploadService.run_calls == [None]
 
 
 def test_webhook_background_job_series_season_cache_gate_requires_both_targets(test_db, monkeypatch):
@@ -986,16 +986,15 @@ def test_webhook_runs_rename_pass_when_only_the_new_season_poster_is_missing(tes
     """A show poster already on disk must not skip the rename pass that places the new season's poster."""
     state = {"season_placed": False, "rename_calls": 0}
 
-    def _stats(season):
-        uploaded = 1 if season == 4 else 0
-        return {"scanned": 1, "matched": 1, "uploaded": uploaded}
+    def _stats(_season):
+        return {"scanned": 2, "matched": 2, "uploaded": 1}
 
     service_cls = _season_gate_service(state, _stats)
     refreshed = _run_season_gate_job(test_db, monkeypatch, service_cls, {"state": state}, places_season=True)
 
     assert refreshed.status == "completed"
     assert state["rename_calls"] == 1
-    assert service_cls.run_calls == [4, None]
+    assert service_cls.run_calls == [None]
     assert "Webhook upload complete" in (refreshed.message or "")
     assert "no local poster" not in (refreshed.message or "")
 
@@ -1004,9 +1003,7 @@ def test_webhook_names_the_missing_season_poster_when_no_drive_has_it(test_db, m
     """When the rename pass finds no source for the season, the outcome says which poster is missing."""
     state = {"season_placed": False, "rename_calls": 0}
 
-    def _stats(season):
-        if season == 4:
-            return {"scanned": 0, "matched": 0, "uploaded": 0}
+    def _stats(_season):
         return {"scanned": 2, "matched": 2, "uploaded": 0}
 
     service_cls = _season_gate_service(state, _stats)
@@ -1014,7 +1011,7 @@ def test_webhook_names_the_missing_season_poster_when_no_drive_has_it(test_db, m
 
     assert refreshed.status == "completed"
     assert state["rename_calls"] == 1
-    assert service_cls.run_calls == [4, None]
+    assert service_cls.run_calls == [None]
     assert "Webhook skipped (no local poster)" in (refreshed.message or "")
     assert "Season 04" in (refreshed.message or "")
     assert "performed no upload" not in (refreshed.message or "")

@@ -230,6 +230,8 @@ class PlexUploadService:
         self._quiet_unmatched_logging: bool = False
         self._said_unmatched: Set[str] = set()  # single target: no-match lines already logged in this job
         self._said_artwork_summary: List[str] = []  # single target: the last artwork outcome block logged
+        self._said_reupload: Set[str] = set()  # "reason|item|file" re-upload reasons already logged in this job
+        self._single_target = False  # one title (webhook, single upload): its lookups stay per item, never per library
         # Targeted (webhook) index: scoped servers that had no item yet, so the webhook keeps
         # retrying while the slower server (Jellyfin behind Plex, or the reverse) scans it in
         self._targeted_pending_servers: List[str] = []
@@ -740,6 +742,7 @@ class PlexUploadService:
         remove_overlay_label: bool = False,
         progress_callback: Optional[PlexUploadProgressCallback] = None,
     ) -> Dict[str, Any]:
+        self._single_target = False
         self._season_list_cache.clear()
         if reapply and not dry_run:
             self._clear_upload_cache()
@@ -819,6 +822,7 @@ class PlexUploadService:
         include_artwork: bool = False,
         progress_callback: Optional[PlexUploadProgressCallback] = None,
     ) -> Dict[str, Any]:
+        self._single_target = True
         self._season_list_cache.clear()
         if reapply and not dry_run:
             removed_entries = self.clear_upload_cache_for_target(
@@ -938,6 +942,7 @@ class PlexUploadService:
         be cached — so a re-fired webhook whose poster is cached still runs to push new artwork.
         """
         self._single_target_reason = None
+        self._single_target = True
         preflight_error, destination_dir, index, _library_totals = self._prepare_upload_context()
         if preflight_error:
             return False
@@ -986,12 +991,7 @@ class PlexUploadService:
                 imdb_id=imdb_id,
             )
             for asset in target_artwork:
-                if not self._is_asset_fully_cached_for_targets(
-                    asset,
-                    index=index,
-                    media_type_filter=media_type_normalized,
-                    arr_availability=arr_availability,
-                ):
+                if not self._is_artwork_cached_for_targets(asset, index=index, arr_availability=arr_availability):
                     return False
 
         return True
@@ -1007,6 +1007,7 @@ class PlexUploadService:
     ) -> bool:
         """True when the show poster is current. Read-only; also records why-not in _series_show_poster_status (current/re_added/not_uploaded/needs_apply) for webhook logging."""
         self._series_show_poster_status = "not_uploaded"
+        self._single_target = True
         preflight_error, destination_dir, index, _library_totals = self._prepare_upload_context()
         if preflight_error or destination_dir is None or index is None:
             self._series_show_poster_status = "needs_apply"
@@ -2330,14 +2331,18 @@ class PlexUploadService:
                 return True
         return False
 
-    def _register_for_locks(self, client: Any, library_key: Any, kind: str, items: List[MediaServerItem]) -> None:
+    def _register_for_locks(self, client: Any, library_key: Any, kind: str, items: List[MediaServerItem], *, replace: bool = False) -> None:
         """Plex items the run may check: their poster locks are fetched per library, in
-        batches, the first time one of them is checked."""
+        batches, the first time one of them is checked. `replace` starts the group over."""
         if getattr(client, "server_type", "") != "plex" or not items:
             return
         server_id = str(getattr(client, "server_id", "") or "")
         group = f"{server_id}:{library_key}:{kind}"
-        self._lock_groups.setdefault(group, []).extend(items)
+        if replace:
+            self._lock_groups[group] = list(items)
+            self._lock_groups_fetched.discard(group)
+        else:
+            self._lock_groups.setdefault(group, []).extend(items)
         for item in items:
             self._lock_group_of[f"{server_id}:{item.item_id}"] = group
 
@@ -2663,23 +2668,15 @@ class PlexUploadService:
                     file=file_path,
                     asset=asset_label,
                 )
-            if uploaded == 0:
-                season_number = asset.get("season_number")
-                if cached_skips > 0:
-                    log_debug(
-                        LogTags.UPLOADER,
-                        f"Season asset already uploaded and cached for matched libraries: {asset_label}",
-                        file=file_path,
-                    )
-                elif season_number is not None:
-                    library_labels = self._library_labels_for_items(shows)
-                    libraries_text = ", ".join(library_labels) if library_labels else "the server"
-                    log_debug(
-                        LogTags.UPLOADER,
-                        f"No Season {int(season_number):02} found in {libraries_text} for {asset.get('display_name', media_key)}",
-                        file=file_path,
-                    )
-                    return AssetOutcome(uploaded, True, len(shows), media_counts, seasons_missing=1)
+            if uploaded == 0 and cached_skips == 0 and asset.get("season_number") is not None:
+                library_labels = self._library_labels_for_items(shows)
+                libraries_text = ", ".join(library_labels) if library_labels else "the server"
+                log_debug(
+                    LogTags.UPLOADER,
+                    f"No Season {int(asset['season_number']):02} found in {libraries_text} for {asset.get('display_name', media_key)}",
+                    file=file_path,
+                )
+                return AssetOutcome(uploaded, True, len(shows), media_counts, seasons_missing=1)
             if uploaded > 0:
                 self._note_year_discrepancy(asset, shows, asset_id_keys, file_path)
             return AssetOutcome(uploaded, True, len(shows), media_counts)
@@ -2969,6 +2966,70 @@ class PlexUploadService:
                 return "year_mismatch"
         return "no_plex_match"
 
+    def _artwork_items(
+        self,
+        asset: Dict[str, Any],
+        index: Dict[str, Dict[str, List[Any]]],
+        arr_availability: Optional[Dict[str, Any]],
+    ) -> Tuple[List[Any], Optional[str], Optional[str]]:
+        """(server items an artwork file belongs to, its resolved media type, why none resolved)."""
+        media_key = asset["media_key"]
+        asset_id_keys = self._extract_asset_id_keys(asset)
+        folder_year = asset.get("folder_year")
+        folder_name = asset.get("folder_name")
+        movies_raw, shows_raw, collections_raw = self._scope_candidate_lists(
+            asset,
+            self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name),
+            self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name),
+            self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year),
+        )
+        inferred_filter, resolution_reason = self._resolve_target_media_type(
+            asset,
+            media_type_filter=None,
+            # Same index posters use; without it movie-vs-show ties are unresolvable.
+            arr_availability=arr_availability,
+            movies_raw=movies_raw,
+            shows_raw=shows_raw,
+            collections_raw=collections_raw,
+        )
+        if not inferred_filter:
+            return [], None, resolution_reason
+        for candidates in self._candidate_groups_for_filter(inferred_filter, movies_raw, shows_raw, collections_raw):
+            deduped = self._dedupe_plex_items(candidates)
+            if deduped:
+                return deduped, inferred_filter, None
+        return [], inferred_filter, None
+
+    def _is_artwork_cached_for_targets(
+        self,
+        asset: Dict[str, Any],
+        *,
+        index: Dict[str, Dict[str, List[Any]]],
+        arr_availability: Optional[Dict[str, Any]],
+    ) -> bool:
+        """The skip rule of `_upload_artwork_asset`, asked ahead of a job: the record and the item's id decide."""
+        kind = str(asset.get("artwork_type") or "")
+        items, _inferred_filter, _reason = self._artwork_items(asset, index, arr_availability)
+        if not items:
+            return False
+        record = self._get_uploaded_record(str(asset.get("path") or ""))
+        uploaded_to_libraries = set(record.get("uploaded_to_libraries", []))
+        uploaded_to_library_keys = set(record.get("uploaded_to_library_keys", []))
+        uploaded_rating_keys = set(record.get("uploaded_to_rating_keys", []))
+        for item in items:
+            if not self._item_supports_image_kind(item, kind):
+                continue
+            if not self._is_item_cached_for_library(
+                library_name=self._item_library_name(item),
+                library_key=self._item_library_key(item),
+                uploaded_to_libraries=uploaded_to_libraries,
+                uploaded_to_library_keys=uploaded_to_library_keys,
+            ):
+                return False
+            if self._rating_key_indicates_change(self._item_rating_key(item), uploaded_rating_keys) or self._server_lost(item):
+                return False
+        return True
+
     def _upload_artwork_asset(
         self,
         asset: Dict[str, Any],
@@ -2990,24 +3051,7 @@ class PlexUploadService:
         asset_label = self._asset_label(asset)
         asset_id_keys = self._extract_asset_id_keys(asset)
         folder_year = asset.get("folder_year")
-        folder_name = asset.get("folder_name")
-
-        movies_raw, shows_raw, collections_raw = self._scope_candidate_lists(
-            asset,
-            self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name),
-            self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name),
-            self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year),
-        )
-
-        inferred_filter, resolution_reason = self._resolve_target_media_type(
-            asset,
-            media_type_filter=None,
-            # Same index posters use; without it movie-vs-show ties are unresolvable.
-            arr_availability=arr_availability,
-            movies_raw=movies_raw,
-            shows_raw=shows_raw,
-            collections_raw=collections_raw,
-        )
+        matched_items, inferred_filter, resolution_reason = self._artwork_items(asset, index, arr_availability)
 
         def _no_match_outcome() -> AssetOutcome:
             """Explain a miss. *arr is asked only here, never before matching — it
@@ -3037,12 +3081,6 @@ class PlexUploadService:
             )
             return AssetOutcome(0, False, 0, {}, skip_reason="type_unresolved")
 
-        matched_items: List[Any] = []
-        for candidates in self._candidate_groups_for_filter(inferred_filter, movies_raw, shows_raw, collections_raw):
-            deduped = self._dedupe_plex_items(candidates)
-            if deduped:
-                matched_items = deduped
-                break
         if not matched_items:
             return _no_match_outcome()
         if inferred_filter == "movie":
@@ -3229,9 +3267,9 @@ class PlexUploadService:
             return
 
     def _seasons_for_show(self, show: MediaServerItem) -> List[MediaServerItem]:
-        """Season list for a show, cached per run. The first show of a library lists every
-        season of that library in one request and fills the cache for all its shows; a show
-        the listing did not cover falls back to its own request."""
+        """Season list for a show, cached per run. In a full run the first show of a library
+        lists every season of that library in one request and fills the cache for all its
+        shows; a single title, or a show the listing did not cover, asks for its own seasons."""
         server_id = str(getattr(show.client, "server_id", "") or "")
         key = f"{server_id}:{show.item_id}"
         cached = self._season_list_cache.get(key)
@@ -3239,7 +3277,7 @@ class PlexUploadService:
             return cached
         library_key = str(show.library_key or "")
         lib_token = f"{server_id}:{library_key}"
-        if library_key and lib_token not in self._season_libraries_loaded:
+        if library_key and not self._single_target and lib_token not in self._season_libraries_loaded:
             self._season_libraries_loaded.add(lib_token)
             try:
                 by_show: Dict[str, List[MediaServerItem]] = {}
@@ -3257,6 +3295,7 @@ class PlexUploadService:
                 return cached
         cached = show.client.get_seasons(show)
         self._season_list_cache[key] = cached
+        self._register_for_locks(show.client, f"{library_key}/{show.item_id}", "season", cached, replace=True)
         return cached
 
     def _tally_target(self, item: MediaServerItem, kind: str, outcome: str) -> None:
@@ -3363,9 +3402,17 @@ class PlexUploadService:
         except Exception as e:
             log_debug(LogTags.UPLOADER, f"Overlay check failed: {e}", file=file_path)
             return False
-        if stale:
+        if stale and self._first_time_said("badge", item, file_path):
             log_debug(LogTags.UPLOADER, f"Overlay badge changed for {item.title}: re-uploading", file=file_path)
         return stale
+
+    def _first_time_said(self, reason: str, item: MediaServerItem, file_path: str) -> bool:
+        """True the first time a job gives this reason for an item's file; its later checks ask again."""
+        key = f"{reason}|{self._server_item_key(item)}|{file_path}"
+        if key in self._said_reupload:
+            return False
+        self._said_reupload.add(key)
+        return True
 
     # ── is our poster still the one on the server? ─────────────────────────
     def _poster_needs_reupload(self, item: MediaServerItem, file_path: str, parent: Optional[MediaServerItem] = None, *, persist: bool = True) -> bool:
@@ -3472,7 +3519,8 @@ class PlexUploadService:
         if changed:
             if isinstance(getattr(item, "native", None), dict):
                 self._server_lost_items.add(self._server_item_key(item))
-            log_info(LogTags.UPLOADER, f"{label}: the poster on {self._item_server_label(item)} is no longer ours — uploading again", file=file_path)
+            if self._first_time_said("lost", item, file_path):
+                log_info(LogTags.UPLOADER, f"{label}: the poster on {self._item_server_label(item)} is no longer ours — uploading again", file=file_path)
             return True
         if persist and hint is not None:
             self._save_server_poster(self._server_item_key(item), hint=hint, sha1=sha1, file_path=file_path)

@@ -189,7 +189,8 @@ def test_cache_gate_not_cached_when_artwork_pending(test_db, tmp_path, monkeypat
     svc = _svc(test_db)
     _stub_cache_gate(svc, tmp_path, monkeypatch)
     # Poster cached, artwork not.
-    monkeypatch.setattr(svc, "_is_asset_fully_cached_for_targets", lambda asset, **k: "artwork_type" not in asset)
+    monkeypatch.setattr(svc, "_is_asset_fully_cached_for_targets", lambda asset, **k: True)
+    monkeypatch.setattr(svc, "_is_artwork_cached_for_targets", lambda asset, **k: False)
 
     assert svc.is_single_target_fully_cached(media_type="movie", title="Inception", year=2010, include_artwork=False) is True
     assert svc.is_single_target_fully_cached(media_type="movie", title="Inception", year=2010, include_artwork=True) is False
@@ -200,8 +201,30 @@ def test_cache_gate_cached_when_artwork_present(test_db, tmp_path, monkeypatch):
     _stub_cache_gate(svc, tmp_path, monkeypatch)
     # Everything cached.
     monkeypatch.setattr(svc, "_is_asset_fully_cached_for_targets", lambda asset, **k: True)
+    monkeypatch.setattr(svc, "_is_artwork_cached_for_targets", lambda asset, **k: True)
 
     assert svc.is_single_target_fully_cached(media_type="movie", title="Inception", year=2010, include_artwork=True) is True
+
+
+def test_cache_gate_checks_artwork_by_its_own_record(test_db, tmp_path, monkeypatch):
+    """Artwork is current once its own record covers the item; the poster's badge and lock are never asked."""
+    svc = _svc(test_db)
+    reset_wrap_calls()
+    wrapped = wrap_item(_FakeArtItem())
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+    _prep_matching(svc, idx, wrapped, monkeypatch)
+    asked = []
+    monkeypatch.setattr(svc, "_poster_needs_reupload", lambda *a, **k: asked.append(a) or True)
+
+    d = _item_folder(tmp_path, logo=True)
+    asset = {
+        "path": str(d / "logo.png"), "media_key": "inception", "display_name": "Inception",
+        "asset_type": "main", "season_number": None, "folder_year": 2010, "artwork_type": "logo",
+    }
+    assert svc._is_artwork_cached_for_targets(asset, index=idx, arr_availability=None) is False
+    assert svc._upload_artwork_asset(asset, idx, dry_run=False).uploaded == 1
+    assert svc._is_artwork_cached_for_targets(asset, index=idx, arr_availability=None) is True
+    assert asked == []
 
 
 def test_upload_artwork_dry_run_does_not_call_plex(test_db, tmp_path, monkeypatch):
