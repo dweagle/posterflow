@@ -42,6 +42,8 @@
   .btn.sqcancel:hover { background: #b83a3a; }
   .btn.crop { background: #2e7d46; }   /* green while armed: the press that exports */
   .btn.crop:hover { background: #3a9a58; }
+  .btn[data-act="batch-run"] { background: #2e7d46; }   /* Run exports too: the same green */
+  .btn[data-act="batch-run"]:hover { background: #3a9a58; }
   .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; padding: 8px 4px; border-bottom: 1px solid #3a3a42; }
   .singles.hidden, .sequels.hidden { display: none; }
   .rowlabel { color: #9aa; margin-right: 2px; }
@@ -83,9 +85,13 @@
   .sqpresets.hidden { display: none; }
   .sqpresets .btn { padding: 4px 3px; font-size: 11px; }
   /* Message strip — fixed height (fits a couple of notes; extras scroll), never grows or moves. */
-  .notes { height: 96px; flex: none; box-sizing: border-box; overflow-y: auto; padding: 5px 8px; background: #1b1b20;
+  .notes { height: 144px; flex: none; box-sizing: border-box; overflow-y: auto; padding: 5px 8px; background: #1b1b20;
     border-top: 1px solid #3a3a42; font-size: 11px; scrollbar-width: thin; scrollbar-color: #3a3a42 transparent; }
   .notes .msg { padding: 2px 0; }
+  /* Failures: red notes that stay until dismissed (fail()). Same red as the Square Art cancel. */
+  .alert { display: flex; align-items: flex-start; gap: 4px; margin: 2px 0; padding: 2px 2px 2px 6px; background: rgba(155, 44, 44, 0.3); border: 1px solid #9b2c2c; border-radius: 4px; }
+  .alert .alerttext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .alert .btn { padding: 0 5px; font-size: 11px; }
   .batchbar { padding: 8px; background: #23232a; border-bottom: 1px solid #3a3a42; }
   .batchbar.hidden { display: none; }
   .batchmsg { color: #cfcfcf; font-size: 11px; margin-bottom: 6px; }
@@ -129,7 +135,7 @@
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
     <div class="batchrow hidden">
-      <input class="batchinput" type="text" placeholder="e.g. 8, 0-5, or blank = all" />
+      <input class="batchinput" type="text" placeholder="e.g. 8, 3-6, 0-5" />
       <button class="btn" data-act="batch-run">Run</button>
       <button class="btn" data-act="batch-help" title="Show what you can type here">?</button>
       <button class="btn" data-act="batch-cancel" title="Cancel">✕</button>
@@ -208,6 +214,9 @@
 
   // ---- talk to Photopea ----------------------------------------------------
   const send = (script) => PP.postMessage(script, '*');
+  // What tells a document from another tab (Photopea gives documents no id).
+  // A named function: Photopea drops a script that calls a function expression on the spot.
+  const PRINT_FN = 'function pfPrint(D){return JSON.stringify([""+D.name,""+(D.source||""),D.width*1,D.height*1]);}';
 
   const FETCH = `try{
     if(app.documents.length===0){app.echoToOE('SZ:'+JSON.stringify({singles:[],seasons:[],nodoc:true}));}
@@ -453,11 +462,11 @@
   const onRenamed = (json) => {
     renameBusy = false;
     let o = null; try { o = JSON.parse(json); } catch (_) {}
-    if (!o) { note('Rename failed.'); return; }
+    if (!o) { fail('Rename failed.'); return; }
     if (o.err === 'nodoc') note('No document open.');
     else if (o.err === 'same') note('That layer is already named "' + o.from + '".');
     else if (o.err === 'changed') note('The logo layer changed before it could be renamed — try again.');
-    else if (o.err) note('Rename failed.');
+    else if (o.err) fail('Rename failed.');
     else note('Renamed "' + o.from + '" \u2192 "' + o.to + '"' + (o.vis > 1 ? '  (' + o.vis + ' visible \u2014 only the topmost was renamed)' : '') + '.');
   };
 
@@ -501,8 +510,9 @@
       if (SI.lab === 'C') return;   // rendered above, in the finish row
       const c = chip(SINGLE_TEXT[SI.lab] || SI.lab, SI.v, false);
       const tag = SINGLE_TAG[SI.lab] || null;
-      c.title = tag ? tagTitle(SI.n, tag) : SI.n;
+      c.title = (tag ? tagTitle(SI.n, tag) : SI.n) + (SI.lab === 'CLS' ? '  ·  ' + finishTip('cls') : '');
       c.addEventListener('click', (ev) => { if (tag && ev.altKey) renameSelectedTo(tag); else clickSingle(SI); });
+      if (SI.lab === 'CLS') c.addEventListener('contextmenu', (ev) => { ev.preventDefault(); onFinishCls(); });
       togRow.appendChild(c);
     });
     singles.appendChild(finRow);
@@ -610,6 +620,21 @@
     notesEl.insertBefore(d, notesEl.firstChild);
     setTimeout(() => { if (d.parentNode) d.parentNode.removeChild(d); }, NOTE_TTL);
   };
+  // A failure: a red note that stays until its ✕ is pressed. Newest first; past MAX_ALERTS the oldest go.
+  const MAX_ALERTS = 5;
+  const fail = (t) => {
+    const d = document.createElement('div');
+    d.className = 'alert';
+    const text = document.createElement('div');
+    text.className = 'alerttext'; text.textContent = t;
+    const x = document.createElement('button');
+    x.className = 'btn'; x.title = 'Dismiss'; x.textContent = '✕';
+    x.addEventListener('click', () => d.remove());
+    d.append(text, x);
+    notesEl.insertBefore(d, notesEl.firstChild);
+    Array.from(notesEl.querySelectorAll('.alert')).slice(MAX_ALERTS).forEach((a) => a.remove());
+    return d;
+  };
 
   // --- the formula ---
   // rnd = round-half-to-even (matches Python's round()) so results are pixel-stable.
@@ -657,11 +682,11 @@
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
   };
 
-  // Coerce a Photopea bound/dimension to a PRIMITIVE px number. The trailing *1 matters:
-  // Photopea bounds are UnitValue objects, and `number - UnitValue` arithmetic inside a script
-  // sign-flips (ExtendScript trap) — so we never do bounds math in-script; nv() only echoes clean
-  // numbers, and all deltas are computed in JS.
-  const NV = "function nv(x){if(x==null)return 0;if(typeof x=='number')return x;var v=x;if(x.as){try{v=x.as('px');}catch(e){v=(x.value!==undefined?x.value:x);}}else if(x.value!==undefined){v=x.value;}return v*1;}";
+  // Coerce a Photopea bound/dimension to a PRIMITIVE px number. Photopea's script engine reports
+  // `typeof` of a UnitValue as 'number', so that branch multiplies by 1 too: a raw UnitValue
+  // sign-flips `number - it`, turns Math.round/floor/max into NaN and JSON-serializes as an object
+  // (all measured in the real Photopea). Scripts may do math on what nv() returns.
+  const NV = "function nv(x){if(x==null)return 0;if(typeof x=='number')return x*1;var v=x;if(x.as){try{v=x.as('px');}catch(e){v=(x.value!==undefined?x.value:x);}}else if(x.value!==undefined){v=x.value;}return v*1;}";
 
   // Photopea follows Adobe's DOM, where bounds / translate use the document's RULER unit — if the
   // PSD's ruler is points/inches, our pixel numbers are misread (the layer flies off-canvas). So
@@ -792,7 +817,7 @@
     let o = null; try { o = JSON.parse(json); } catch (_) {}
     if (!o || o.err) {
       renameBusy = false;
-      note(!o ? 'Rename failed.' : o.err === 'nodoc' ? 'No document open.' : o.err === 'nologo' ? 'No LOGO group in this document.'
+      (o ? note : fail)(!o ? 'Rename failed.' : o.err === 'nodoc' ? 'No document open.' : o.err === 'nologo' ? 'No LOGO group in this document.'
         : o.err === 'empty' ? 'The LOGO group is empty.' : 'No visible layer in the LOGO group.');
       return;
     }
@@ -856,7 +881,7 @@
       download(blob, filename);
       note('Downloaded "' + filename + '".');
       flashLogoExp('✓');
-    } catch (e) { flashLogoExp('✗'); note('Logo export failed: ' + (e && e.message ? e.message : e)); }
+    } catch (e) { flashLogoExp('✗'); fail('Logo export failed: ' + (e && e.message ? e.message : e)); }
   };
 
   // ---- Poster export -------------------------------------------------------
@@ -958,7 +983,7 @@
       await sleep(DL_GAP);   // space rapid downloads out so the browser doesn't drop them
       pexOk++; pexIdx++;
       pexNext();
-    } catch (e) { pexQueue = []; flashPex('✗'); note('Poster export failed: ' + (e && e.message ? e.message : e)); }
+    } catch (e) { pexQueue = []; flashPex('✗'); fail('Poster export failed: ' + (e && e.message ? e.message : e)); }
   };
 
   // ---- Square Art crop -----------------------------------------------------
@@ -1063,7 +1088,7 @@
   let sqArmTimer = null;
   const sqArmWatch = () => {
     if (sqArmTimer) clearTimeout(sqArmTimer);
-    sqArmTimer = setTimeout(() => { sqArmTimer = null; if (squareArtBusy && !sqArmed) { flashSquare('\u2717'); note('Square Art: no reply from Photopea. If a "' + SQ_TEMP + '" tab is open, close it and try again.'); } }, 20000);
+    sqArmTimer = setTimeout(() => { sqArmTimer = null; if (squareArtBusy && !sqArmed) { flashSquare('\u2717'); fail('Square Art: no reply from Photopea. If a "' + SQ_TEMP + '" tab is open, close it and try again.'); } }, 20000);
   };
   // Square Art's start, the Photoshop way (probed Sep 2026): a fresh transparent document the size of
   // the canvas, then layer.duplicate(newDoc) WITH THE PSD ACTIVE copies the visible POSTER variant into
@@ -1148,7 +1173,7 @@
         '}catch(e){app.echoToOE("SZERR:"+e);}'), 600);
     } catch (e) {
       if (sqPath === 'dup') { sqFallback('the copied layer had no pixels'); return; }
-      flashSquare('\u2717'); note('Square Art failed: ' + (e && e.message ? e.message : e));
+      flashSquare('\u2717'); fail('Square Art failed: ' + (e && e.message ? e.message : e));
     }
   };
   // Duplicate path failed before arming: close its document and take the in-place route instead.
@@ -1165,7 +1190,7 @@
     if (docName !== sqTempName) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('That isn\'t the crop tab — switch to "' + SQ_TEMP + '", or press ✕ to cancel.'); return; }
     const n = raw.slice(0, bar).split(',').map(parseFloat);
     const [l, t, r, b, cw, ch] = n;
-    if (n.length !== 6 || n.some((v) => !isFinite(v))) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('Could not read the selection.'); return; }
+    if (n.length !== 6 || n.some((v) => !isFinite(v))) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; fail('Could not read the selection.'); return; }
     const { side, x, y, why } = sqPlan(l, t, r, b, cw, ch, sqSide);
     if (side < SQ_MIN) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('Selection is ' + side + 'px — square art must be at least ' + SQ_MIN + '×' + SQ_MIN + '.'); return; }
     // Anything that isn't a square sitting on the canvas is re-selected visibly first (why = edge /
@@ -1181,7 +1206,7 @@
       download(blob, filename);
       note('Downloaded "' + filename + '" (' + sizeTxt + ').');
       flashSquare('✓');
-    } catch (e) { flashSquare('✗'); note('Square Art failed: ' + (e && e.message ? e.message : e)); }
+    } catch (e) { flashSquare('✗'); fail('Square Art failed: ' + (e && e.message ? e.message : e)); }
   };
   // Crop the square out of the trimmed art canvas and encode a JPG on white; upscale to the wanted
   // preset size ONLY when the selection was maxed out by the art.
@@ -1204,7 +1229,7 @@
   // frontend/tests/lib/photopeaBatch.test.ts) — keep the two in sync when changing behavior.
   // One JPG per poster variant, downloaded INDIVIDUALLY — no ZIP. Two modes: (1) layers named
   // s0/s1…/main/show → export each; (2) a single poster with a SEASONS group → ask how many seasons
-  // (a count "8"=1–8, a range "3-6", or blank=all) plus any singles. One export at a time.
+  // (a count "8"=1–8, or a range "3-6") plus any singles. One export at a time.
   const batchBtn = document.querySelector('[data-act="batch"]');            // amber ⚡ — name-tag batch
   const seasonsBtn = document.querySelector('[data-act="batch-seasons"]');  // blue ⚡ — seasons from one poster
   const batchBar = document.querySelector('.batchbar');
@@ -1396,18 +1421,24 @@
     return items;
   };
 
+  // A batch belongs to the document its bar was opened on: on any other tab its scripts change nothing.
+  let batchPrint = null;
+  const SWITCHED = 'app.echoToOE("SZSWITCHED:");';
+  const onBatchDoc = (doc, work, other) => batchPrint == null ? work : PRINT_FN + 'if(pfPrint(' + doc + ')!==' + JSON.stringify(batchPrint) + '){' + (other || '') + '}else{' + work + '}';
   const batchItemScript = (changes) =>
-    'try{var dd=app.activeDocument;var ch=' + JSON.stringify(changes) + ';' +
+    'try{var dd=app.activeDocument;' + onBatchDoc('dd', 'var ch=' + JSON.stringify(changes) + ';' +
     'for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}' +
-    'dd.saveToOE("jpg:0.90");}catch(e){app.echoToOE("SZERR:"+e);}';
+    'dd.saveToOE("jpg:0.90");', SWITCHED) + '}catch(e){app.echoToOE("SZERR:"+e);}';
 
   const batchNext = () => {
     if (batchIdx >= batchItems.length) { batchFinish(); return; }
     batchNote('Exporting ' + (batchIdx + 1) + '/' + batchItems.length + '…');
     const item = batchItems[batchIdx];
     send(item.collection ? batchCollectionScript(item.changes) : batchItemScript(item.changes));
+    batchWatchStart();
   };
   const onBatchBytes = async (buf) => {
+    batchWatchStop();
     const item = batchItems[batchIdx];
     download(buf, batchBase + item.suffix + '.jpg');
     if (item.collection && batchColMove) { send(collectionCleanupScript(batchColMove)); batchColMove = null; }   // undo the logo move before the next item (messages are processed in order)
@@ -1416,13 +1447,40 @@
     batchNext();
   };
   const batchFinish = () => {
+    batchWatchStop();
     batchBusy = false; resetBolts();
     batchNote('Done — downloaded ' + batchOk + ' JPG' + (batchOk === 1 ? '' : 's') + '.');
     fetchLayers();
     setTimeout(closeBatch, 2600);
     settle('batch', true, { count: batchOk });
   };
-  const batchAbort = (msg) => { batchBusy = false; resetBolts(); batchNote('Stopped: ' + msg); settle('batch', false, { reason: msg }); };
+  // A stopped batch puts a moved collection logo back before it reports.
+  const batchAbort = (msg) => {
+    batchWatchStop();
+    const item = batchItems[batchIdx], moved = batchColMove;
+    batchColMove = null;
+    if (moved) send(collectionCleanupScript(moved));
+    else if (batchLate) send('try{app.echoToOE("SZCLEAN:late");}catch(e){}');   // marks the point after which no late bytes can arrive
+    const tail = moved ? '. The collection logo was moved back.' : (batchLate && item && item.collection ? '. Check the LOGO group in the PSD: the collection logo may be out of place.' : '');
+    batchBusy = false; resetBolts(); batchNote('Stopped: ' + msg + tail); settle('batch', false, { reason: msg + tail });
+  };
+  // Photopea drops a script that fails without a word, so an item that gets no reply stops the batch
+  // instead of hanging it. Only counted while the page is visible: a hidden tab pauses Photopea.
+  const BATCH_ITEM_MS = 60000;
+  let batchWatch = null, batchLate = false;   // batchLate: a reply that still turns up belongs to the stopped item
+  const batchWatchStop = () => { if (batchWatch) { clearTimeout(batchWatch); batchWatch = null; } };
+  const batchLateDone = () => { if (batchLate) { batchLate = false; discardBytes = Math.max(0, discardBytes - 1); } };
+  const batchWatchStart = () => {
+    batchWatchStop();
+    batchWatch = setTimeout(() => {
+      batchWatch = null;
+      if (!batchBusy) return;
+      if (document.hidden) { batchWatchStart(); return; }
+      batchLate = true; discardBytes++;
+      setTimeout(batchLateDone, 15000);   // never hold the next export's bytes for long if Photopea stays silent
+      batchAbort('no reply from Photopea while exporting ' + (batchIdx + 1) + '/' + batchItems.length);
+    }, BATCH_ITEM_MS);
+  };
 
   // Tags live in the root-level POSTER group when one exists (the template's poster container — the
   // jsx's rule): only its DIRECT children are candidates there, where "poster"/PSD-name aliases are
@@ -1441,19 +1499,19 @@
     'var sm=nm.match(/^season\\s*0*(\\d+)$/);' +
     'if(sm){stx.push({n:parseInt(sm[1],10),p:here});}else if(nm=="special"||nm=="specials"){spx.push({p:here});}else if(/^complete limited/.test(nm)){clx.push({p:here});}else if(nm=="collection"){cox.push({p:here});}' +
     'if(L.typename=="LayerSet"){sc(L.layers,here);}}}sc(d.layers,[]);' +
-    'app.echoToOE("SZBINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,clsText:clx,collectionText:cox,poster:pst,name:d.name}));}catch(e){app.echoToOE("SZERR:"+e);}';
+    PRINT_FN + 'app.echoToOE("SZBINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,clsText:clx,collectionText:cox,poster:pst,name:d.name,print:pfPrint(d)}));}catch(e){app.echoToOE("SZERR:"+e);}';
 
   // Batch prep: (1) gradient safety net — force every root-level GRADIENT group (whole subtree)
   // visible and LEAVE it on (a nudged-off gradient otherwise ruins a whole batch; echoes whether
   // anything changed); (2) jsx parity — manual collection logos (LOGO children named c/c1/c2…)
   // are hidden so they only appear during the Collection placement, never on normal exports.
-  const GRAD_SCRIPT = 'try{var d=app.activeDocument,ch=0;function fv(g){if(!g.visible){g.visible=true;ch=1;}if(g.typename=="LayerSet"){for(var j=0;j<g.layers.length;j++)fv(g.layers[j]);}}' +
+  const gradScript = () => 'try{var d=app.activeDocument,ch=0;' + onBatchDoc('d', 'function fv(g){if(!g.visible){g.visible=true;ch=1;}if(g.typename=="LayerSet"){for(var j=0;j<g.layers.length;j++)fv(g.layers[j]);}}' +
     'for(var i=0;i<d.layers.length;i++){var L=d.layers[i];if(L.typename=="LayerSet"&&/^\\s*gradients?\\s*$/i.test(L.name))fv(L);}' +
     'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
     'var lg=fg(d.layers);' +
     'if(lg){for(var i=0;i<lg.layers.length;i++){var nm=(""+lg.layers[i].name).replace(/^\\s+|\\s+$/g,"").toLowerCase();' +
     'if(/^c\\d*$/.test(nm)&&lg.layers[i].visible){lg.layers[i].visible=false;}}}' +
-    'app.echoToOE("SZGRAD:"+ch);}catch(e){app.echoToOE("SZGRAD:0");}';
+    'app.echoToOE("SZGRAD:"+ch);') + '}catch(e){app.echoToOE("SZGRAD:0");}';
 
   // Collection export: apply the item's visibility, then move the logo so its bottom sits on the
   // collection ruler (181/1500 of canvas height from the bottom) by translating EVERY ART LAYER
@@ -1463,15 +1521,13 @@
   // copies here — and no auto-shrink (a too-tall logo is placed at original size with a warning;
   // scaling real layers isn't losslessly reversible). Direct LOGO children named c/c1/c2… are a
   // manual collection-only logo: only they show for this export (visibility restored by cleanup).
-  // Echoes SZCOLMV:{dy,cv} so the panel builds the exact undo; any failure restores what moved,
-  // warns, and the export STILL runs, so the batch can never hang on placement.
-  // STEP 1 — read: apply the item's visibility, filter the manual-c layers, and echo the logo's
-  // bounds (union of individual layers' bounds — group-level calls misbehave in Photopea) as PLAIN
-  // NUMBERS. The panel computes dy in JS and sends the move as a literal (STEP 2): bounds arithmetic
-  // INSIDE a Photopea script sign-flips (the documented UnitValue trap — same reason Place Logo
-  // works this way). Fail paths export directly (bare) so the batch always advances.
+  // One script reads the logo's bounds (the union of its visible art layers: group-level calls
+  // misbehave in Photopea), works out dy, moves every art layer, echoes SZCOLMV:dy,tall|cv so the
+  // panel can build the exact undo, then exports. The echo comes after the move and before the
+  // export, so the panel never holds an undo for a move that did not happen. Any failure restores
+  // the visibility it changed, warns, and the export STILL runs, so the batch can never hang here.
   const batchCollectionScript = (changes) => px(
-    'var dd=app.activeDocument;var ch=' + JSON.stringify(changes) + ';' +
+    'var dd=app.activeDocument;' + onBatchDoc('dd', 'var ch=' + JSON.stringify(changes) + ';' +
     'for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}' +
     'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
     'var lg=fg(dd.layers),cv=[];' +
@@ -1484,7 +1540,12 @@
     'if(L.typename=="LayerSet"){lv(L,ev);}else if(ev){var bb=L.bounds;var x1=nv(bb[0]),y1=nv(bb[1]),x2=nv(bb[2]),y2=nv(bb[3]);' +
     'if(x2-x1>0&&y2-y1>0){if(x1<ul)ul=x1;if(y1<ut)ut=y1;if(x2>ur)ur=x2;if(y2>ub)ub=y2;}}}}' +
     'lv(lg,true);' +
-    'if(ur>ul&&ub>ut){app.echoToOE("SZCOLGEO:"+ul+","+ut+","+ur+","+ub+","+nv(dd.height)+"|"+JSON.stringify(cv));}' +
+    'if(ur>ul&&ub>ut){' +
+    'var H=nv(dd.height),dy=Math.round(H-(181/1500)*H-ub),tall=(ub-ut>((400-181)/1500)*H)?1:0;' +
+    'if(dy!==0){var lvs=[];function la(g){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];if(L.typename=="LayerSet"){la(L);}else{lvs.push(L);}}}la(lg);' +
+    'for(var i=0;i<lvs.length;i++){try{lvs[i].translate(0,dy);}catch(_e){}}}' +
+    'app.echoToOE("SZCOLMV:"+dy+","+tall+"|"+JSON.stringify(cv));' +
+    'dd.saveToOE("jpg:0.90");}' +
     'else{if(cv.length){for(var i=0;i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}}' +
     'app.echoToOE("SZBWARN:The LOGO group has no visible content — Collection exported without a logo.");dd.saveToOE("jpg:0.90");}' +
     '}else if(lg){app.echoToOE("SZBWARN:The LOGO group is hidden — Collection exported without a logo.");dd.saveToOE("jpg:0.90");}' +
@@ -1492,22 +1553,12 @@
     '}catch(pe){' +
     'try{if(lg&&cv.length){for(var i=0;i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}}}catch(e3){}' +
     'app.echoToOE("SZBWARN:Collection logo placement failed ("+pe+") — exported without repositioning the logo.");' +
-    'dd.saveToOE("jpg:0.90");}');
-
-  // STEP 2 — move + export: translate every art layer in LOGO by the LITERAL dy the panel computed,
-  // then export. Per-leaf try so one stubborn layer can't abort the export.
-  const collectionMoveScript = (dy) => px(
-    'var dd=app.activeDocument;' +
-    'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
-    'var lg=fg(dd.layers);' +
-    'if(lg&&' + dy + '!==0){var lvs=[];function lv(g){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];if(L.typename=="LayerSet"){lv(L);}else{lvs.push(L);}}}lv(lg);' +
-    'for(var i=0;i<lvs.length;i++){try{lvs[i].translate(0,' + dy + ');}catch(_e){}}}' +
-    'dd.saveToOE("jpg:0.90");');
+    'dd.saveToOE("jpg:0.90");}', SWITCHED));
 
   // Undo the collection move: translate every art layer in LOGO back by -dy, restore the manual-c
   // visibility, and sweep any __PFLTMPLOGO__ orphans left by older (copy-based) runs.
   const collectionCleanupScript = (mv) => px(
-    'var d=app.activeDocument;' +
+    'var d=app.activeDocument;' + onBatchDoc('d',
     'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
     'var lg=fg(d.layers);' +
     'if(lg){var lvs=[];function lv(g){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];if(L.typename=="LayerSet"){lv(L);}else{lvs.push(L);}}}lv(lg);' +
@@ -1515,7 +1566,8 @@
     'var cv=' + JSON.stringify(mv.cv || []) + ';for(var i=0;i<cv.length&&i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}' +
     'if(!lg.visible)lg.visible=true;}' +
     'function fx(ls){for(var i=ls.length-1;i>=0;i--){var L=ls[i];if(L.name=="__PFLTMPLOGO__"){L.remove();}else if(L.typename=="LayerSet"){fx(L.layers);}}}fx(d.layers);' +
-    'app.echoToOE("SZCLEAN:ok");');
+    'app.echoToOE("SZCLEAN:ok");',
+    'app.echoToOE("SZBWARN:Another document became active before the collection logo was moved back. Check the LOGO group in that PSD.");app.echoToOE("SZCLEAN:ok");'));
 
   const startBatch = (mode) => {
     if (batchBusy) return;
@@ -1528,8 +1580,17 @@
   // The scan is shared; the active button (batchMode) forces which branch we take, so the two modes
   // never fight over auto-detection. 'tags' = one JPG per s0/s1…/main/show/c layer; 'seasons' = a
   // season range from a single poster's SEASONS group.
+  // An orange finish with one poster ('single' batch mode): its main JPG, then the seasons typed.
+  let singleMain = null;
+  // The show item when POSTER holds exactly one layer and it is tagged show / main; else null.
+  const soleShowFrom = (init, base) => {
+    if (!init || !init.poster || init.poster.count !== 1) return null;
+    const items = buildTagItems(init.variants || [], { season: init.seasonText || [], specials: init.specialsText || [], cls: init.clsText || [], collection: init.collectionText || [] }, base).items;
+    return items.length === 1 && items[0].key === 'show' ? items[0] : null;
+  };
   const onBatchInit = (json) => {
     let init; try { init = JSON.parse(json); } catch (_) { batchNote('Scan failed.'); return; }
+    batchPrint = typeof init.print === 'string' ? init.print : null;
     batchBase = (init.name || pendingDocName || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
     batchStyle = detectedStyle;
     if (batchMode === 'tags') {
@@ -1543,20 +1604,38 @@
       batchRow.classList.remove('hidden'); batchInput.style.display = '';
       batchInput.value = ''; batchInput.placeholder = 'blank = all · filter: c, cls, main, s1-8';
       batchNote('Found ' + batchItems.length + ' tagged export(s)' + (built.warnings.length ? ' (' + built.warnings.length + ' warning(s))' : '') + '. Run all, or type a filter.');
+    } else if (batchMode === 'single') {
+      batchWarnings = []; batchConvention = false;
+      singleMain = soleShowFrom(init, batchBase);
+      if (!singleMain) { batchNote('POSTER does not hold a single show poster.'); return; }
+      batchRow.classList.remove('hidden'); batchInput.style.display = '';
+      batchInput.value = ''; batchInput.placeholder = 'blank = main + Season 1 · e.g. 3, 0-5'; batchInput.focus();
+      batchNote('One poster. Run exports the main JPG and Season 1 from it. For more seasons type e.g. "3" (=1–3) or "0-5" (0 = Specials).');
     } else {
       batchWarnings = [];
       if (!(byRole('season').length || model.singles.length)) { batchNote('No SEASONS group or season layers found. For layers tagged s0/s1…/main/show, use the amber ⚡ instead.'); return; }
       batchConvention = false;
       batchRow.classList.remove('hidden'); batchInput.style.display = '';
-      batchInput.value = ''; batchInput.placeholder = 'e.g. 8, 0-5, or blank = all'; batchInput.focus();
-      batchNote('Which seasons? e.g. "8" (=1–8), "0-5" (0 = Specials), "2015-2020" (years), or blank = all.');
+      batchInput.value = ''; batchInput.placeholder = 'e.g. 8, 3-6, 0-5'; batchInput.focus();
+      batchNote('Which seasons? e.g. "8" (=1–8), "3-6", "0-5" (0 = Specials), "2015-2020" (years).');
     }
+  };
+  // The blue ⚡ needs a typed range: a blank box never means every season the template has text for
+  // (60 and Specials). What to tell the user, or '' when the box holds a range. A one-poster finish
+  // accepts blank: its main JPG and Season 1.
+  const seasonRangeProblem = () => {
+    const typed = String(batchInput.value || '').trim();
+    if (!typed) return batchMode === 'single' ? '' : 'Type the seasons first: e.g. "8" (=1–8), "3-6", "0-5" (0 = Specials) or "2015-2020" (years).';
+    return parseRange(typed).start == null ? 'Could not read "' + typed + '". Type seasons like "8" (=1–8), "3-6" or "0-5" (0 = Specials).' : '';
   };
   const runBatch = () => {
     if (batchBusy) return;
     if (!batchConvention) {
-      const r = parseRange(batchInput.value);
-      batchItems = (isYearRange(r) && byRole('year').length) ? yearItems(r.start, r.end) : seasonItems(r.start, r.end);
+      const why = seasonRangeProblem();
+      if (why) { batchNote(why); return; }
+      const typed = String(batchInput.value || '').trim(), r = typed ? parseRange(typed) : { start: 1, end: 1 };   // blank only gets this far for one poster
+      const seasons = (isYearRange(r) && byRole('year').length) ? yearItems(r.start, r.end) : seasonItems(r.start, r.end);
+      batchItems = batchMode === 'single' ? (singleMain ? [singleMain].concat(seasons) : []) : seasons;
     } else {
       const fk = parseTagFilter(batchInput.value);
       if (fk) batchItems = batchItems.filter((it) => fk[it.key]);
@@ -1565,7 +1644,7 @@
     batchBusy = true; modeBtn().textContent = '…'; batchRow.classList.add('hidden');
     batchWarnings.forEach((w) => note('Batch: ' + w));
     batchIdx = 0; batchOk = 0; batchColMove = null;
-    if (gradChk.checked) send(GRAD_SCRIPT);   // gradient safety net first (runs before the first item — messages are ordered)
+    if (gradChk.checked) send(gradScript());   // gradient safety net first (runs before the first item — messages are ordered)
     batchNext();
   };
 
@@ -1599,10 +1678,11 @@
 
   // ⚙ finish steps: every step can be unticked; the order never changes. Every step is on by default.
   const STEP_DEFAULTS = {
-    movie: { clear: true, main: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, squareArt: true },
-    show:  { clear: true, logoName: true, trim: true, save: true, tagCheck: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
-    collection: { c: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, saveAgain: true, squareArt: true },
+    movie: { clear: true, main: true, logoName: true, trim: true, save: true, coverage: true, jpg: true, logoPng: true, squareArt: true },
+    show:  { clear: true, logoName: true, trim: true, save: true, tagCheck: true, coverage: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
+    collection: { c: true, logoName: true, trim: true, save: true, coverage: true, jpg: true, logoPng: true, saveAgain: true, squareArt: true },
   };
+  const COVERAGE_WHY = 'Check that every poster this finish exports covers the canvas inside the border, down to the bottom guide. Blank canvas stops the finish before the exports. The PSD is still saved';
   const STEP_LABELS = {   // [key, chip text, what it does] in pipeline order
     movie: [
       ['clear', 'clear', 'Clear all season / Specials / Collection / Limited Series layers first: a stray visible season layer would misname the JPG'],
@@ -1610,6 +1690,7 @@
       ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
       ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
       ['save', 'save', 'Save with Photopea (File > Save) by script. Only a document opened from a file can be saved this way; untick it and press Ctrl+S yourself otherwise'],
+      ['coverage', 'coverage', COVERAGE_WHY],
       ['jpg', 'JPG', 'Export the flattened JPG'],
       ['logoPng', 'logo PNG', 'Export the LOGO group as a transparent PNG'],
       ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
@@ -1620,7 +1701,8 @@
       ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
       ['save', 'save', 'Save with Photopea (File > Save) by script before the batch. Only a document opened from a file can be saved this way'],
       ['tagCheck', 'tag check', 'Check the tags before the batch: any problem stops the finish (orange only)'],
-      ['batch', 'batch', 'Run the batch (orange: every tag, unattended; blue: the seasons you type)'],
+      ['coverage', 'coverage', COVERAGE_WHY],
+      ['batch', 'batch', 'Run the batch (orange: every tag, unattended, or a single show poster and the seasons you type; blue: the seasons you type)'],
       ['logoPng', 'logo PNG', 'Export the LOGO group as a transparent PNG'],
       ['showOnly', 'show only', 'Hide the season text and show only the show-tagged poster'],
       ['saveAgain', 'save again', 'Save with Photopea again after the batch (same limits as save)'],
@@ -1631,6 +1713,7 @@
       ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
       ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
       ['save', 'save', 'Save with Photopea (File > Save) by script. Only a document opened from a file can be saved this way; untick it and press Ctrl+S yourself otherwise'],
+      ['coverage', 'coverage', COVERAGE_WHY],
       ['jpg', 'JPG', 'Export the Collection JPG through the tag batch: the logo moves to the collection ruler and the file is named like the batch names it'],
       ['logoPng', 'logo PNG', 'Export the LOGO group as a transparent PNG'],
       ['saveAgain', 'save again', 'Save with Photopea again after the export (same limits as save)'],
@@ -1677,23 +1760,41 @@
     ? 'Right-click: finish the movie poster: ' + stepList('movie')
     : tag === 'c'
     ? 'Right-click: finish the collection poster: ' + stepList('collection')
-    : 'Right-click: finish the show with the orange ⚡ (unattended)  ·  Shift+right-click: with the blue ⚡ (you type the seasons).  Steps: ' + stepList('show');
+    : tag === 'cls'
+    ? 'Right-click: finish the limited series: the main JPG and " - Season 1" with this text. One poster makes both. A show layer and a cls layer export as tagged. Season layers stop it. Steps: ' + stepList('show')
+    : 'Right-click: finish the show with the orange ⚡ (unattended; a single show poster waits for its seasons, blank = main + Season 1)  ·  Shift+right-click: with the blue ⚡ (you type the seasons).  Steps: ' + stepList('show');
   const skippedTail = (f, keys) => {   // "X and Y skipped" for whichever of the remaining steps are on, else "stopped"
     const names = STEP_LABELS[f].filter(([k]) => keys.indexOf(k) >= 0 && steps[f][k]).map(([, l]) => l);
     return names.length ? names.join(' and ') + ' skipped' : 'stopped';
   };
   const jpgs = (n) => n + ' JPG' + (n === 1 ? '' : 's');
-  const finishRun = (label) => {   // checklist: ✓ step · ✓ step (info) · – step skipped (why) · ✗ step: why
+  // `print` is the PSD the finish is for: once another document is active, no later step runs.
+  const finishRun = (label, print) => {   // checklist: ✓ step · ✓ step (info) · – step skipped (why) · ✗ step: why
     const parts = [], failed = [];
+    let stopped = false;
+    // True once another document is active (and from then on); the first call records why.
+    const switched = async (name) => {
+      if (print == null) return false;
+      if (stopped) return true;
+      let now = null; try { now = await readPrint(); } catch (_) {}
+      if (now === print) return false;
+      stopped = true; failed.push(name);
+      parts.push('✗ ' + name + ': ' + (now == null ? 'Photopea did not answer' : now ? 'another document became active' : 'the document was closed') + ', so the finish stopped');
+      return true;
+    };
     const step = async (name, fn) => {
+      if (await switched(name)) return false;
       try {
         const r = await fn();
         parts.push(r && r.skipped ? '– ' + name + ' skipped (' + r.skipped + ')' : '✓ ' + name + (r && r.info ? ' (' + r.info + ')' : ''));
         return true;
       } catch (e) { parts.push('✗ ' + name + ': ' + (e && e.message ? e.message : e)); failed.push(name); return false; }
     };
-    const report = (tail) => note(label + ': ' + parts.concat(tail ? [tail] : []).join('  ·  '));
-    return { step, report, failed };
+    const report = (tail) => {
+      const t = label + ': ' + parts.concat(tail ? [tail] : []).join('  ·  ');
+      if (failed.length || /^STOPPED/.test(tail || '')) fail(t); else note(t);
+    };
+    return { step, report, failed, switched };
   };
 
   // Context for a finish: resolves the doc's Posterflow context the same way JPG does (so the logo
@@ -1701,13 +1802,13 @@
   const finCtxScript = () => 'try{var d=app.activeDocument;app.echoToOE("SZNAME:"+d.name);' +
     'function hasGrp(ls,re){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(re.test(L.name))return true;if(hasGrp(L.layers,re))return true;}}return false;}' +
     'var pg=false;for(var i=0;i<d.layers.length;i++){var L=d.layers[i];if(L.typename=="LayerSet"&&/^\\s*poster\\s*$/i.test(L.name)){pg=true;break;}}' +
-    'app.echoToOE("SZFIN:"+JSON.stringify({poster:pg,logo:hasGrp(d.layers,/^\\s*logos?\\s*$/i)}));' +
+    PRINT_FN + 'app.echoToOE("SZFIN:"+JSON.stringify({poster:pg,logo:hasGrp(d.layers,/^\\s*logos?\\s*$/i),print:pfPrint(d)}));' +
     '}catch(e){app.echoToOE("SZERR:"+e);}';
   const onFinCtx = (json) => {
     let o = null; try { o = JSON.parse(json); } catch (_) {}
     const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
     if (!o) settle('ctx', false, { reason: 'could not read the document' });
-    else settle('ctx', true, { poster: !!o.poster, logo: !!o.logo, base });
+    else settle('ctx', true, { poster: !!o.poster, logo: !!o.logo, base, print: typeof o.print === 'string' ? o.print : null });
   };
   // Rename the visible layer inside a group ('poster' = the root POSTER group, 'logo' = the LOGO
   // group anywhere); `one` refuses when several are visible (two visible posters would both export).
@@ -1747,6 +1848,8 @@
   // guard tripped) settles at once so nothing waits on an operation that never began.
   const startOp = (op, start, isBusy, ms) => { const p = finWait(op, ms); start(); if (!isBusy()) settle(op, false, { reason: 'could not start (busy)' }); return p; };
   const refreshModel = async () => { const p = finWait('fetch', 15000); fetchLayers(); await p; };
+  const PRINT_SCRIPT = 'try{' + PRINT_FN + 'app.echoToOE("SZPRINT:"+pfPrint(app.activeDocument));}catch(e){app.echoToOE("SZPRINT:");}';
+  const readPrint = async () => { const p = finWait('print', 15000); send(PRINT_SCRIPT); return must(await p).print; };
   const scanDoc = async () => { const p = finWait('scan', 15000); send(BATCH_SCAN); const r = must(await p); return JSON.parse(r.json); };
   const stepClear = async () => { const p = finWait('vis', 15000); clearAll(); must(await p); };
   const stepRename = async (which, target, one) => { const p = finWait('rename', 15000); send(finRenameScript(which, target, one)); return must(await p); };
@@ -1755,6 +1858,47 @@
   // (the finish used to carry on and quietly produce a poster with no logo PNG).
   const needLogo = (ctx) => { if (!ctx.logo && detectedStyle !== 'MM2K') throw new Error('no LOGO group'); return !!ctx.logo; };
   const stepLogoName = async (ctx) => { if (!needLogo(ctx)) return { skipped: 'no LOGO group on MM2K' }; await stepRename('logo', cleanTitle(ctx.base) + ' - Logo', false); };
+  // ---- Coverage: blank canvas in the poster layers about to be exported. Bounds only here (the
+  // Photoshop panel also reads pixels). The box is the one Fit Poster covers; mirrors geometry.js. ----
+  const coverageBox = (cw, bottomY) => ({ left: 25, top: 25, right: Math.round(cw) - 25, bottom: Math.floor(bottomY) });
+  const coverageGaps = (b, box) => [
+    { edge: 'bottom', px: box.bottom - b.bottom }, { edge: 'top', px: b.top - box.top },
+    { edge: 'left', px: b.left - box.left }, { edge: 'right', px: box.right - b.right },
+  ].filter((g) => g.px >= 1).sort((a, c) => c.px - a.px);
+  // Every direct child of the root POSTER group: name, visibility and bounds (art layers only: group bounds are unreliable here).
+  const COVER_SCRIPT = px(
+    "var d=app.activeDocument,pg=null,pi=-1;for(var i=0;i<d.layers.length;i++){var L=d.layers[i];if(L.typename=='LayerSet'&&/^\\s*poster\\s*$/i.test(L.name)){pg=L;pi=i;break;}}" +
+    "var out=[];if(pg){for(var j=0;j<pg.layers.length;j++){var K=pg.layers[j],o={n:''+K.name,v:!!K.visible};" +
+    "if(K.typename=='LayerSet'){o.g=true;}else{try{var b=K.bounds;o.b=[nv(b[0]),nv(b[1]),nv(b[2]),nv(b[3])];}catch(e){}}out.push(o);}}" +
+    "app.echoToOE('SZCOVER:'+JSON.stringify({name:''+d.name,poster:!!pg,pi:pi,cw:nv(d.width),kids:out}));");
+  const readCover = async (ms) => { const p = finWait('cover', ms || 15000); send(COVER_SCRIPT); return must(await p).cover; };
+  // targets: [{ label, kid, why? }] (kid null = missing). Returns { skipped } or { problems: [text], unread: [label] }.
+  const coverCheck = (cover, targets) => {
+    const bottomY = BOTTOM_GUIDE[detectedStyle];
+    if (!bottomY) return { skipped: 'unknown template' };
+    const box = coverageBox(cover.cw, bottomY), problems = [], unread = [];
+    targets.forEach(({ label, kid, why }) => {
+      if (!kid) { problems.push(label + ': ' + (why || 'layer not found')); return; }
+      if (!kid.b) { unread.push(label); return; }
+      const b = { left: kid.b[0], top: kid.b[1], right: kid.b[2], bottom: kid.b[3] };
+      if (!(b.right - b.left > 0 && b.bottom - b.top > 0)) { problems.push(label + ': the layer is empty'); return; }
+      const gaps = coverageGaps(b, box);
+      if (gaps.length) problems.push(label + ': blank canvas (' + gaps.map((g) => '~' + Math.round(g.px) + ' px ' + (g.edge === 'bottom' ? 'above the bottom guide' : 'at the ' + g.edge + ' edge')).join(', ') + ')');
+    });
+    return { problems, unread };
+  };
+  // MOVIE, blue SHOW and the JPG button export what POSTER shows: its topmost visible layer.
+  const visibleTarget = (cover) => { const k = cover.kids.find((x) => x.v); return [{ label: k ? k.n : 'POSTER', kid: k || null, why: 'no visible layer' }]; };
+  // Tagged exports (orange SHOW, COLLECTION, an orange ⚡ Run): every tagged POSTER layer, or those `pick` keeps.
+  const taggedTargets = async (cover, pick) =>
+    ((await scanDoc()).variants || []).filter((v) => !pick || pick(v)).map((v) => ({ label: v.nm, kid: cover.kids[v.p[v.p.length - 1]] || null }));
+  const stepCoverage = async (pick) => {
+    const cover = await readCover();
+    const r = coverCheck(cover, await pick(cover));
+    if (r.skipped) return { skipped: r.skipped };
+    if (r.problems.length) throw new Error(r.problems.join('; '));
+    return r.unread.length ? { info: 'not checked: ' + r.unread.join(', ') } : undefined;
+  };
   const stepTrim = async () => must(await startOp('trim', trimDoc, () => trimBusy, 30000));
   const SAVE_SCRIPT = 'try{app.activeDocument.save();app.echoToOE("SZSAVED:ok");}catch(e){app.echoToOE("SZSAVED:"+e);}';
   const stepSave = async () => { const p = finWait('save', 60000); send(SAVE_SCRIPT); return must(await p); };
@@ -1775,7 +1919,8 @@
     fetchLayers();
   };
 
-  let finishBusy = false, finishWaiting = false;   // a finish is running / the blue path is waiting on the range box
+  let finishBusy = false, finishWaiting = false;   // a finish is running / a SHOW finish is waiting on the range box (blue, or orange with one poster)
+  let finishDoc = null;   // the running finish's document (its print)
   const abandonFinish = () => { if (finishWaiting && !batchBusy) settle('batch', false, { reason: 'season batch cancelled' }); };
   const finishGuard = async (label) => {   // → ctx, or null after a note
     if (finishBusy || anyBusy()) { note(label + ': busy (close Square Art or wait for the current step).'); return null; }
@@ -1785,26 +1930,33 @@
       await refreshModel();
       const p = finWait('ctx', 15000); send(finCtxScript()); const ctx = must(await p);
       if (!ctx.poster) { note(label + ': not a poster PSD (no POSTER group at the top level). Nothing was changed.'); finishBusy = false; return null; }
+      finishDoc = ctx.print;
       return ctx;
-    } catch (e) { note(label + ': ' + (e && e.message ? e.message : e)); finishBusy = false; return null; }
+    } catch (e) { fail(label + ': ' + (e && e.message ? e.message : e)); finishBusy = false; return null; }
   };
 
+  // The end of every finish. Square Art never opens on another document.
+  const finishSquareArt = async (F, f) => {
+    if (!steps[f].squareArt) { F.report('done'); return; }
+    if (await F.switched('Square Art')) { F.report(); return; }
+    F.report('opening Square Art'); squareArtClick();
+  };
   const onFinishMovie = async () => {
     const label = 'MOVIE', S_ = steps.movie;
     const ctx = await finishGuard(label); if (!ctx) return;
-    const F = finishRun(label);
+    const F = finishRun(label, ctx.print);
     try {
       if (S_.clear) await F.step('cleared', stepClear);
       if (S_.main) await F.step('main', stepMain);
       if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
       if (S_.trim) await F.step('trim', stepTrim);
       if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return; }
-      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('movie', ['jpg', 'logoPng', 'squareArt'])); return; }
+      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('movie', ['coverage', 'jpg', 'logoPng', 'squareArt'])); return; }
+      if (S_.coverage && !(await F.step('coverage', () => stepCoverage(visibleTarget)))) { F.report(skippedTail('movie', ['jpg', 'logoPng', 'squareArt'])); return; }
       if (S_.jpg && !(await F.step('JPG', stepJpg))) { F.report(skippedTail('movie', ['logoPng', 'squareArt'])); return; }
       if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('movie', ['squareArt'])); return; }
-      if (S_.squareArt) { F.report('opening Square Art'); squareArtClick(); }
-      else F.report('done');
-    } catch (e) { note('Error: ' + (e && e.message ? e.message : e)); }
+      await finishSquareArt(F, 'movie');
+    } catch (e) { fail('Error: ' + (e && e.message ? e.message : e)); }
     finally { finishBusy = false; }
   };
   // ---- Right-click COLLECTION: the MOVIE finish with "c" in place of "main" ----
@@ -1821,19 +1973,19 @@
   const onFinishCollection = async () => {
     const label = 'COLLECTION', S_ = steps.collection;
     const ctx = await finishGuard(label); if (!ctx) return;
-    const F = finishRun(label);
+    const F = finishRun(label, ctx.print);
     try {
       if (S_.c) await F.step('c', stepCollectionTag);
       if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
       if (S_.trim) await F.step('trim', stepTrim);
       if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return; }
-      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('collection', ['jpg', 'logoPng', 'saveAgain', 'squareArt'])); return; }
+      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('collection', ['coverage', 'jpg', 'logoPng', 'saveAgain', 'squareArt'])); return; }
+      if (S_.coverage && !(await F.step('coverage', () => stepCoverage((cover) => taggedTargets(cover, (v) => v.nm === 'c'))))) { F.report(skippedTail('collection', ['jpg', 'logoPng', 'saveAgain', 'squareArt'])); return; }
       if (S_.jpg && !(await F.step('JPG', stepCollectionJpg))) { F.report(skippedTail('collection', ['logoPng', 'saveAgain', 'squareArt'])); return; }
       if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('collection', ['saveAgain', 'squareArt'])); return; }
       if (S_.saveAgain) await F.step('saved again', stepSave);   // the export toggled layers after the first save; this one spares a prompt on close
-      if (S_.squareArt) { F.report('opening Square Art'); squareArtClick(); }
-      else F.report('done');
-    } catch (e) { note('Error: ' + (e && e.message ? e.message : e)); }
+      await finishSquareArt(F, 'collection');
+    } catch (e) { fail('Error: ' + (e && e.message ? e.message : e)); }
     finally { finishBusy = false; }
   };
   const finishShowTail = async (F, ctx) => {
@@ -1842,39 +1994,105 @@
     const shown = S_.showOnly ? await F.step('show only', () => stepShowOnly(ctx)) : true;
     if (S_.saveAgain) await F.step('saved again', stepSave);   // the first save holds the work; this one spares a prompt on close
     if (!shown) { F.report(skippedTail('show', ['squareArt'])); return; }
-    if (S_.squareArt) { F.report('opening Square Art'); squareArtClick(); }
-    else F.report('done');
+    await finishSquareArt(F, 'show');
+  };
+  // The SHOW finish's prep steps, then the save. false = stopped here and reported.
+  const SHOW_TAIL = ['logoPng', 'showOnly', 'saveAgain', 'squareArt'];
+  const showPrep = async (F, ctx) => {
+    const S_ = steps.show;
+    if (S_.clear) await F.step('cleared', stepClear);
+    if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
+    if (S_.trim) await F.step('trim', stepTrim);
+    if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return false; }
+    if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('show', ['coverage', 'batch'].concat(SHOW_TAIL))); return false; }
+    return true;
+  };
+  // A SHOW finish waits here for Run in the range box: Run's batchFinish / batchAbort, or ✕ / a bolt click.
+  const waitForRun = async (F, stepName) => {
+    finishWaiting = true;
+    const r = await finWait('batch', 3600000);
+    finishWaiting = false;
+    return F.step(stepName, async () => { must(r); return { info: jpgs(r.count) }; });
   };
   const onFinishShow = async (mode) => {   // 'tags' = orange ⚡ (unattended), 'seasons' = blue ⚡ (waits for Run)
     const label = 'SHOW (' + (mode === 'seasons' ? 'blue' : 'orange') + ' ⚡)', S_ = steps.show;
     const ctx = await finishGuard(label); if (!ctx) return;
-    const F = finishRun(label);
-    const TAIL = ['logoPng', 'showOnly', 'saveAgain', 'squareArt'];
+    const F = finishRun(label, ctx.print);
     try {
-      if (S_.clear) await F.step('cleared', stepClear);
-      if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
-      if (S_.trim) await F.step('trim', stepTrim);
-      if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return; }
-      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('show', ['batch'].concat(TAIL))); return; }
+      if (!(await showPrep(F, ctx))) return;
+      if (S_.batch && await F.switched('batch')) { F.report(skippedTail('show', SHOW_TAIL)); return; }
       if (S_.batch && mode === 'tags') {
-        if (S_.tagCheck) {
-          const probs = tagProblems(await scanDoc(), ctx.base);
-          if (probs.length) { F.report('STOPPED. Fix these tags, then right-click SHOW again:  ' + probs.join('   ·   ')); return; }
-        }
-        if (!(await F.step('tag batch', stepTagBatch))) { F.report(skippedTail('show', TAIL)); return; }
+        const probs = S_.tagCheck ? tagProblems(await scanDoc(), ctx.base) : [];
+        // Checked before the tag stop, so one report lists the blank canvas and the tag problems together.
+        const covered = !S_.coverage || await F.step('coverage', () => stepCoverage((cover) => taggedTargets(cover)));
+        if (probs.length) { F.report('STOPPED. Fix these tags, then right-click SHOW again:  ' + probs.join('   ·   ')); return; }
+        if (!covered) { F.report(skippedTail('show', ['batch'].concat(SHOW_TAIL))); return; }
+        // One poster (POSTER holds a single show / main layer): wait for the seasons it should also make.
+        if (soleShowFrom(await scanDoc(), ctx.base)) {
+          const init = await startOp('batchInit', () => startBatch('single'), () => !batchBar.classList.contains('hidden'), 15000);
+          if (!init.ok) { F.report(skippedTail('show', ['batch'].concat(SHOW_TAIL))); return; }
+          F.report((S_.save ? 'PSD saved. ' : '') + 'One poster: press Run for the main JPG and Season 1, or type more seasons');
+          if (!(await waitForRun(F, 'tag batch'))) { F.report(skippedTail('show', SHOW_TAIL)); return; }
+        } else if (!(await F.step('tag batch', stepTagBatch))) { F.report(skippedTail('show', SHOW_TAIL)); return; }
       } else if (S_.batch) {
+        if (S_.coverage && !(await F.step('coverage', () => stepCoverage(visibleTarget)))) { F.report(skippedTail('show', ['batch'].concat(SHOW_TAIL))); return; }
         const init = await startOp('batchInit', () => startBatch('seasons'), () => !batchBar.classList.contains('hidden'), 15000);
-        if (!init.ok) { F.report('no season layers to batch; ' + skippedTail('show', TAIL)); return; }
+        if (!init.ok) { F.report('no season layers to batch; ' + skippedTail('show', SHOW_TAIL)); return; }
         F.report((S_.save ? 'PSD saved. ' : '') + 'Type the seasons and press Run');
-        finishWaiting = true;
-        const r = await finWait('batch', 3600000);   // Run's batchFinish / batchAbort, or ✕ / a bolt click
-        finishWaiting = false;
-        const ran = await F.step('season batch', async () => { must(r); return { info: jpgs(r.count) }; });
-        if (!ran) { F.report(skippedTail('show', TAIL)); return; }
+        if (!(await waitForRun(F, 'season batch'))) { F.report(skippedTail('show', SHOW_TAIL)); return; }
       }
       await finishShowTail(F, ctx);
-    } catch (e) { note('Error: ' + (e && e.message ? e.message : e)); }
+    } catch (e) { fail('Error: ' + (e && e.message ? e.message : e)); }
     finally { finishBusy = false; finishWaiting = false; }
+  };
+
+  // ---- Right-click LIMITED SERIES: the main JPG and " - Season 1" with the limited series text ----
+  // A show layer and a cls layer export as tagged, like the orange SHOW finish. One poster (tagged
+  // show / main / cls, or untagged) makes both JPGs. A season layer stops it: a limited series has none.
+  // What to export: { stop: why } or { items, targets, probs } (items null = the tag batch as it stands).
+  const limitedSeriesPlan = async (ctx, tagCheck) => {
+    const init = await scanDoc(), baseNorm = normName(ctx.base), variants = init.variants || [];
+    const keysOf = (v) => parseTagName(v.nm, baseNorm).tags.map((t) => t.key);
+    const seasonal = variants.filter((v) => keysOf(v).some((k) => /^s\d/.test(k)));
+    if (seasonal.length) return { stop: 'a limited series has no season posters, but POSTER has ' + seasonal.map((v) => '"' + v.nm + '"').join(', ') + '. Rename or delete them, then right-click LIMITED SERIES again' };
+    const has = (k) => variants.some((v) => keysOf(v).indexOf(k) >= 0);
+    const cover = await readCover();
+    if (has('show') && has('cls')) return { items: null, targets: await taggedTargets(cover), probs: tagCheck ? tagProblems(init, ctx.base) : [] };
+    // One poster: the layer tagged show / cls, else the topmost visible POSTER layer.
+    const one = variants.find((v) => keysOf(v).some((k) => k === 'show' || k === 'cls'));
+    const idx = one ? one.p[one.p.length - 1] : cover.kids.findIndex((K) => K.v);
+    if (idx < 0 || !(cover.pi >= 0)) return { stop: 'no visible poster in POSTER; nothing exported' };
+    const at = [cover.pi, idx];
+    const others = cover.kids.map((_, i) => ({ nm: '', p: [cover.pi, i], v: false })).filter((o) => o.p[1] !== idx);   // hidden for both JPGs
+    const items = buildTagItems([{ nm: 'show', p: at, v: true }, { nm: 'cls', p: at, v: true }].concat(others), scanTexts(init), ctx.base).items;
+    return { items, targets: [{ label: cover.kids[idx].n, kid: cover.kids[idx] }], probs: [] };
+  };
+  // Run a finish's own export items through the tag batch: its start sets the export name and style,
+  // then its items are swapped for ours.
+  const stepItemsBatch = async (items) => {
+    await startOp('batchInit', () => startBatch('tags'), () => !batchBar.classList.contains('hidden'), 15000);
+    batchMode = 'tags'; batchConvention = true; batchItems = items; batchWarnings = []; batchInput.value = '';
+    const r = must(await startOp('batch', runBatch, () => batchBusy, 900000));
+    return { info: jpgs(r.count) };
+  };
+  const onFinishCls = async () => {
+    const label = 'LIMITED SERIES', S_ = steps.show;
+    const ctx = await finishGuard(label); if (!ctx) return;
+    const F = finishRun(label, ctx.print);
+    try {
+      if (!(await showPrep(F, ctx))) return;
+      if (S_.batch && await F.switched('batch')) { F.report(skippedTail('show', SHOW_TAIL)); return; }
+      if (S_.batch) {
+        const plan = await limitedSeriesPlan(ctx, S_.tagCheck);
+        if (plan.stop) { F.report('STOPPED: ' + plan.stop); return; }
+        const covered = !S_.coverage || await F.step('coverage', () => stepCoverage(() => plan.targets));
+        if (plan.probs.length) { F.report('STOPPED. Fix these tags, then right-click LIMITED SERIES again:  ' + plan.probs.join('   ·   ')); return; }
+        if (!covered) { F.report(skippedTail('show', ['batch'].concat(SHOW_TAIL))); return; }
+        if (!(await F.step('tag batch', () => (plan.items ? stepItemsBatch(plan.items) : stepTagBatch())))) { F.report(skippedTail('show', SHOW_TAIL)); return; }
+      }
+      await finishShowTail(F, ctx);
+    } catch (e) { fail('Error: ' + (e && e.message ? e.message : e)); }
+    finally { finishBusy = false; }
   };
 
   // ---- incoming messages from Photopea -------------------------------------
@@ -1884,25 +2102,21 @@
     if (d.startsWith('SZNAME:'))       { pendingDocName = d.slice(7) || 'poster'; }
     else if (d.startsWith('SZDET:'))   { detectedStyle = d.slice(6); updateDocUI(); }
     else if (d.startsWith('SZSIG:'))   { lastActiveSig = d.slice(6); }   // baseline the watcher from the read we just did → the next poll's identical sig doesn't trigger a redundant re-fetch
+    else if (d.startsWith('SZPRINT:')) { settle('print', true, { print: d.slice(8) }); }
+    else if (d.startsWith('SZSWITCHED:')) { if (batchBusy) batchAbort('another document became active; the batch stopped after ' + jpgs(batchOk)); }
     else if (d.startsWith('SZBINIT:')) { if (finWaits.scan) settle('scan', true, { json: d.slice(8) }); else { onBatchInit(d.slice(8)); settle('batchInit', !batchRow.classList.contains('hidden'), { reason: 'nothing to export' }); } }
+    else if (d.startsWith('SZCOVER:')) { let o = null; try { o = JSON.parse(d.slice(8)); } catch (_) {} settle('cover', !!o, o ? { cover: o } : { reason: 'unreadable reply' }); }
     else if (d.startsWith('SZGRAD:'))  { if (d.slice(7) === '1') note('The GRADIENT group had hidden layers — turned on and left visible in the PSD.'); }
     else if (d.startsWith('SZBWARN:')) { note('Batch: ' + d.slice(8)); }
-    else if (d.startsWith('SZCOLGEO:')) {
-      // Logo bounds arrived as plain numbers — compute dy HERE (in-script bounds math sign-flips),
-      // remember the undo data, and send the literal move+export script.
-      const raw = d.slice(9);
-      const bar = raw.indexOf('|');
+    else if (d.startsWith('SZCOLMV:')) {
+      // The script moved the logo by dy and exports next: remember the undo for the cleanup.
+      const raw = d.slice(8), bar = raw.indexOf('|');
       const nums = raw.slice(0, bar).split(',').map(parseFloat);
       let cvv = []; try { cvv = JSON.parse(raw.slice(bar + 1)); } catch (_) {}
-      const top = nums[1], bottom = nums[3], H = nums[4];
-      const targetBottom = H - (181 / 1500) * H;
-      const allowedH = ((400 - 181) / 1500) * H;
-      if (bottom - top > allowedH) note('Batch: the logo is taller than fits above the collection ruler — placed at its original size, crossing the max height line.');
-      const dy = Math.round(targetBottom - bottom);
-      batchColMove = { dy: dy, cv: cvv };
-      send(collectionMoveScript(dy));
+      if (nums[1]) note('Batch: the logo is taller than fits above the collection ruler — placed at its original size, crossing the max height line.');
+      batchColMove = { dy: nums[0] || 0, cv: cvv };
     }
-    else if (d.startsWith('SZCLEAN:')) { /* collection logo restored — ack only */ }
+    else if (d.startsWith('SZCLEAN:')) { batchLateDone(); }   // the logo is back; nothing of the stopped item can arrive after this
     else if (d.startsWith('SZACT:'))   { const sig = d.slice(6); if (sig !== lastActiveSig && !jpgBusy && !placeBusy && !batchBusy && !posterExpBusy && !squareArtBusy) { lastActiveSig = sig; fetchLayers(); } }
     else if (d.startsWith('SZSTALE:')) { fetchLayers(); note('The document changed under the panel — list refreshed, click again.'); settle('vis', false, { reason: 'the document changed under the panel' }); }
     else if (d.startsWith('SZVIS:'))   { settle('vis', true); }
@@ -1938,7 +2152,7 @@
     else if (d.startsWith('SZSQTEMP:')) {
       if (sqArmTimer) { clearTimeout(sqArmTimer); sqArmTimer = null; }
       const nm = d.slice(9);
-      if (!nm) { flashSquare('✗'); note('Square Art: Photopea didn\'t open the crop tab.'); }
+      if (!nm) { flashSquare('✗'); fail('Square Art: Photopea didn\'t open the crop tab.'); }
       else {
         sqTempName = nm;
         squareArtBusy = false; sqArmed = true; squareArtBtn.classList.add('crop');
@@ -1951,7 +2165,7 @@
     }
     else if (d.startsWith('SZPEXLIST:')) {
       let o = null; try { o = JSON.parse(d.slice(10)); } catch (_) {}
-      if (!o || !o.items || !o.items.length) { flashPex('✗'); note('Poster export failed.'); }
+      if (!o || !o.items || !o.items.length) { flashPex('✗'); fail('Poster export failed.'); }
       else {
         pexQueue = o.items.slice();
         pexIdx = 0; pexOk = 0; pexUsed = {};
@@ -1963,13 +2177,76 @@
     else if (d.startsWith('SZSQVIS:')) { try { posterRestore = JSON.parse(d.slice(8)); } catch (_) { posterRestore = null; } }
     else if (d.startsWith('SZSQNOPOSTER:')) { flashSquare('✗'); note('No POSTER group in this document.'); }
     else if (d.startsWith('SZSQEMPTY:')) { restorePosterVis(); flashSquare('✗'); note('The POSTER group has no visible variant.'); }
-    else if (d.startsWith('SZERR:'))   { if (renameBusy) { renameBusy = false; note('Rename failed: ' + d.slice(6)); } else if (squareArtBusy && !sqArmed && sqPath === 'dup') { sqFallback('Photopea could not copy the layer (' + d.slice(6) + ')'); } else if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); note('Square Art failed: ' + d.slice(6)); } else if (posterExpBusy) { restorePexVis(); pexQueue = []; flashPex('✗'); note('Poster export failed: ' + d.slice(6)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(6)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(6)); } else if (batchBusy) { batchAbort(d.slice(6)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(6)); } else { note('Error: ' + d.slice(6)); flashJpg('JPG'); settleAll(false, d.slice(6)); } }
+    else if (d.startsWith('SZERR:'))   { if (renameBusy) { renameBusy = false; fail('Rename failed: ' + d.slice(6)); } else if (squareArtBusy && !sqArmed && sqPath === 'dup') { sqFallback('Photopea could not copy the layer (' + d.slice(6) + ')'); } else if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); fail('Square Art failed: ' + d.slice(6)); } else if (posterExpBusy) { restorePexVis(); pexQueue = []; flashPex('✗'); fail('Poster export failed: ' + d.slice(6)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); fail('Logo export failed: ' + d.slice(6)); } else if (trimBusy) { flashTrim('✗'); fail('Trim failed: ' + d.slice(6)); } else if (batchBusy) { batchAbort(d.slice(6)); } else if (placeBusy) { finishPlace(false); fail('Photopea error: ' + d.slice(6)); } else { fail('Error: ' + d.slice(6)); flashJpg('JPG'); settleAll(false, d.slice(6)); } }
     else if (d.startsWith('SZ:'))      { try { model = JSON.parse(d.slice(3)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} settle('fetch', true); }
     // SZVIS: also settles a finish waiting on a visibility write.
   });
 
   // ---- controls ------------------------------------------------------------
-  jpgBtn.addEventListener('click', exportJpg);
+  // A manual export (the JPG button, a ⚡ Run) checks its poster layers first. Blank canvas holds it back
+  // once: the same press again within HOLD_MS goes ahead. Anything that can't be checked exports as before.
+  const HOLD_MS = 10000;
+  const makeHold = () => {
+    let h = { key: '', until: 0, alert: null };
+    return {
+      // Whether this press repeats a held one in time. Either way the old note goes and the hold is spent.
+      again(key) { const yes = h.key === key && Date.now() < h.until; if (h.alert) h.alert.remove(); h = { key: '', until: 0, alert: null }; return yes; },
+      set(key, text) { h = { key, until: Date.now() + HOLD_MS, alert: fail(text) }; },
+    };
+  };
+  const jpgHold = makeHold(), batchHold = makeHold();
+  let jpgChecking = false, batchChecking = false;
+  const jpgClick = async () => {
+    if (model.nodoc) { exportJpg(); return; }
+    if (jpgChecking || jpgBusy || placeBusy || logoExpBusy || posterExpBusy || squareArtBusy) return;
+    jpgChecking = true; jpgBtn.textContent = '…';
+    let cover = null, blank = '';
+    try { cover = await readCover(5000); } catch (_) {}
+    const key = cover ? cover.name : '', again = jpgHold.again(key);
+    if (cover && cover.poster && !again) { const r = coverCheck(cover, visibleTarget(cover)); if (!r.skipped) blank = r.problems.join('; '); }
+    jpgChecking = false; jpgBtn.textContent = 'JPG';
+    if (!blank) { exportJpg(); return; }
+    jpgHold.set(key, 'JPG not exported. ' + blank + '. Press JPG again to export anyway.');
+    jpgBtn.textContent = '✗'; setTimeout(() => { if (!jpgBusy) jpgBtn.textContent = 'JPG'; }, 1400);
+  };
+  // Run checks what it is about to export: the visible poster (blue), or the tagged layers its filter keeps (orange).
+  const batchRunClick = async () => {
+    if (finishWaiting && finishDoc != null && !batchBusy) {   // Run only counts on the PSD the waiting finish is for
+      if (batchChecking) return;
+      batchChecking = true;
+      let now = null; try { now = await readPrint(); } catch (_) {}
+      batchChecking = false;
+      if (now !== finishDoc) { batchNote(now == null ? 'Photopea did not answer. Press Run again.' : 'This finish is waiting on another PSD. Switch back to it and press Run, or press ✕ to cancel.'); return; }
+    }
+    if (batchMode === 'single' && !model.nodoc) {
+      if (batchChecking || batchBusy) return;
+      const why = seasonRangeProblem(); if (why) { batchNote(why); return; }
+      batchChecking = true;
+      try { singleMain = soleShowFrom(await scanDoc(), batchBase); } catch (_) { singleMain = null; }
+      batchChecking = false;
+      if (!singleMain) { batchNote('POSTER no longer holds a single show poster. Press ✕, then right-click SHOW again.'); return; }
+    }
+    if (finishWaiting || model.nodoc) { runBatch(); return; }   // a finish waiting for Run has made its own check
+    if (batchChecking || batchBusy) return;
+    if (!batchConvention) { const why = seasonRangeProblem(); if (why) { batchNote(why); return; } }   // before the blank canvas check
+    batchChecking = true;
+    let cover = null, blank = '';
+    try { cover = await readCover(5000); } catch (_) {}
+    const key = (cover ? cover.name : '') + '|' + batchMode + '|' + String(batchInput.value || '').trim(), again = batchHold.again(key);
+    try {
+      if (cover && cover.poster && !again) {
+        const fk = batchConvention ? parseTagFilter(batchInput.value) : null, baseNorm = normName(batchBase || '');
+        const targets = batchConvention ? await taggedTargets(cover, (v) => !fk || parseTagName(v.nm, baseNorm).tags.some((t) => fk[t.key])) : visibleTarget(cover);
+        const r = coverCheck(cover, targets);
+        if (!r.skipped) blank = r.problems.join('; ');
+      }
+    } catch (_) {}
+    batchChecking = false;
+    if (!blank) { runBatch(); return; }
+    batchHold.set(key, 'Batch not started. ' + blank + '. Press Run again to export anyway.');
+    batchNote('Blank canvas found. Press Run again to export anyway.');
+  };
+  jpgBtn.addEventListener('click', jpgClick);
   logoBtn.addEventListener('click', startLogo);
   fitBtn.addEventListener('click', startFit);
   trimBtn.addEventListener('click', trimDoc);
@@ -1988,17 +2265,19 @@
   };
   batchBtn.addEventListener('click', () => boltClick('tags'));
   seasonsBtn.addEventListener('click', () => boltClick('seasons'));
-  document.querySelector('[data-act="batch-run"]').addEventListener('click', runBatch);
+  document.querySelector('[data-act="batch-run"]').addEventListener('click', batchRunClick);
   document.querySelector('[data-act="batch-help"]').addEventListener('click', () => {
     const rows = batchMode === 'tags'
       ? [['blank', 'run everything'], ['c', 'Collection'], ['cls', 'Limited Series'], ['main / show', 'main poster'],
          ['s3 or 3', 'one season'], ['0', 'Specials'], ['s1-8', 'a season range'], ['main, c', 'combine with commas']]
-      : [['blank', 'all seasons + Specials'], ['8', 'seasons 1-8'], ['3-6', 'that range'], ['0-5', 'includes Specials'], ['2015-2020', 'year layers']];
+      : batchMode === 'single'
+      ? [['blank', 'main + Season 1'], ['3', 'main + seasons 1-3'], ['3-6', 'main + that range'], ['0-5', 'main + Specials + 1-5'], ['0', 'main only']]
+      : [['8', 'seasons 1-8'], ['3-6', 'that range'], ['0-5', 'includes Specials'], ['2015-2020', 'year layers']];
     batchHelp.innerHTML = rows.map((r) => '<div><b>' + r[0] + '</b> — ' + r[1] + '</div>').join('');
     batchHelp.classList.toggle('hidden');
   });
   document.querySelector('[data-act="batch-cancel"]').addEventListener('click', () => { abandonFinish(); closeBatch(); });
-  batchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runBatch(); } });
+  batchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); batchRunClick(); } });
 
   updateDocUI();
 

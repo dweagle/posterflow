@@ -54,14 +54,19 @@ function stripPng(buf) {
   return concat(keep);
 }
 
+// Scrub by file name (.png, else JPEG); bytes that can't be scrubbed come back untouched.
+function scrubBytes(name, buf) {
+  try { return /\.png$/i.test(name) ? stripPng(buf) : stripJpeg(buf); } catch (_) { return buf; }
+}
+
 // Rewrite an exported file in place without its metadata; on failure the export stays as written.
 async function scrubFile(entry) {
   const formats = require('uxp').storage.formats;
   try {
     const buf = await entry.read({ format: formats.binary });
-    const out = /\.png$/i.test(entry.name) ? stripPng(buf) : stripJpeg(buf);
+    const out = scrubBytes(entry.name, buf);
     if (out !== buf) await entry.write(out, { format: formats.binary });
   } catch (_) {}
 }
 
-module.exports = { stripJpeg, stripPng, scrubFile };
+module.exports = { stripJpeg, stripPng, scrubBytes, scrubFile };

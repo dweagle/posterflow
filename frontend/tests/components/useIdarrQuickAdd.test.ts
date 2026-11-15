@@ -2,21 +2,18 @@ import { describe, expect, it } from 'vitest'
 import {
   effectiveUploadAction,
   readUploadPreferences,
-  uploadActionAddsToIdarr,
   uploadActionButtonLabel,
   uploadActionHint,
-  uploadActionPostsToDiscord,
   uploadDoneLabel,
+  uploadResultLabel,
 } from '../../src/components/community/useIdarrQuickAdd'
 
 describe('community upload action helpers', () => {
-  it('splits the three actions into Discord / IDarr halves', () => {
-    expect(uploadActionPostsToDiscord('discord')).toBe(true)
-    expect(uploadActionPostsToDiscord('discord_idarr')).toBe(true)
-    expect(uploadActionPostsToDiscord('idarr')).toBe(false)
-    expect(uploadActionAddsToIdarr('discord')).toBe(false)
-    expect(uploadActionAddsToIdarr('discord_idarr')).toBe(true)
-    expect(uploadActionAddsToIdarr('idarr')).toBe(true)
+  it('labels a finished upload by what the server says it did', () => {
+    expect(uploadResultLabel({ posted: 1, idarr: 0 })).toBe('Posted!')
+    expect(uploadResultLabel({ posted: 4, idarr: 4 })).toBe('Posted 4!')        // both ran: the post is what the card names
+    expect(uploadResultLabel({ posted: 0, idarr: 1 })).toBe('Added to IDarr!')
+    expect(uploadResultLabel({ posted: 0, idarr: 3 })).toBe('Added 3 to IDarr!')
   })
 
   it('words the button, tooltip, and done state per action', () => {

@@ -1007,8 +1007,10 @@ export const openPhotopeaWithPsd = (
   const config = {
     files: [psdUrl],
     script: `try{var d=app.activeDocument;if(d&&d.name!==${JSON.stringify(docName)})d.name=${JSON.stringify(docName)};}catch(e){}`,
-    // 550 = 420 of controls + the Square Art preset row + the fixed 96px message strip.
-    environment: { plugins: [{ name: 'PosterFlow (App)', url: pluginUrl, icon, w: 228, h: 600 }] },
+    // h: the controls, the Square Art bar with its preset row, the 38px Upload / Complete bar and
+    // the fixed 144px message strip. Photopea puts the pane 104px down and does not shrink it, so
+    // its window must be at least h + 104 tall or the strip's bottom is cut off.
+    environment: { plugins: [{ name: 'PosterFlow (App)', url: pluginUrl, icon, w: 228, h: 686 }] },
   }
   const w = window.open(`https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`, '_blank')
   if (sameTab) {
@@ -1164,13 +1166,17 @@ export interface PosterExportFile {
   size: number
   mtime: number                 // unix seconds
   season: number | null         // 0 = Specials, null = plain poster
+  collection: boolean           // a " - Collection" poster exported beside this title's own; never the requested one
   match: 'exact' | 'item' | null
+  requested: boolean            // a poster the request asks for
+  selected: boolean             // the newest export of a requested poster: what an upload sends unless changed
 }
 
 export interface PosterExportListResponse {
   folders: { source: PosterExportSource; folder: string; exists: boolean }[]
   files: PosterExportFile[]
   truncated: boolean
+  seasons: number[]             // the season numbers the request asks for (0 = Specials)
 }
 
 export interface PosterExportQuery {
@@ -1178,19 +1184,22 @@ export interface PosterExportQuery {
   tvdb_id?: number | null
   title?: string
   year?: number | null
-  seasons?: number[]            // requested season numbers (0 = Specials); empty = the plain poster
   media_type?: string           // the request's type; keeps an id match inside its TMDB namespace
+  season_number?: number | null
+  notes?: string | null         // a multi-season request names its seasons here
 }
 
-/** Finished exports on the server, newest first, each tagged with how it relates to the item. */
+/** Finished exports on the server, newest first, each tagged with how it relates to the request.
+ * The server decides which posters the request asks for and which exports are selected. */
 export const listPosterExports = (q: PosterExportQuery): Promise<PosterExportListResponse> => {
   const params: Record<string, string | number> = {}
   if (q.tmdb_id) params.tmdb_id = q.tmdb_id
   if (q.tvdb_id) params.tvdb_id = q.tvdb_id
   if (q.title) params.title = q.title
   if (q.year) params.year = q.year
-  if (q.seasons?.length) params.seasons = q.seasons.join(',')
   if (q.media_type) params.media_type = q.media_type
+  if (q.season_number != null) params.season_number = q.season_number
+  if (q.notes) params.notes = q.notes.split('\n')[0]   // only the first line names seasons; the rest can be long
   return getData('/api/maker-tools/poster-exports', { params })
 }
 
@@ -1202,8 +1211,3 @@ const posterExportPath = (file: Pick<PosterExportFile, 'name'>) =>
 export const getPosterExportUrl = (file: Pick<PosterExportFile, 'name' | 'source'>, thumb = false): string =>
   `${API_URL}${posterExportPath(file)}?source=${file.source}${thumb ? '&thumb=1' : ''}`
 
-/** One export as a File, so it goes through the same upload path as a file picked from disk. */
-export const fetchPosterExportFile = async (file: Pick<PosterExportFile, 'name' | 'source'>): Promise<File> => {
-  const blob = await getData<Blob>(posterExportPath(file), { params: { source: file.source }, responseType: 'blob' })
-  return new File([blob], file.name, { type: blob.type })
-}

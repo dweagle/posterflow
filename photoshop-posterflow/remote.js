@@ -66,6 +66,21 @@ async function putBytes(path, bytes) {
   if (!r.ok) throw new Error('upload failed (HTTP ' + r.status + ')');
 }
 
+// One call to a Posterflow endpoint; `body` is raw bytes or nothing. Returns the JSON reply, and throws
+// with the server's own reason when it refuses.
+async function api(method, path, body) {
+  const cfg = getConfig();
+  const r = await fetch(baseUrl(cfg) + path, {
+    method,
+    headers: Object.assign(body ? { 'Content-Type': 'application/octet-stream' } : {}, authHeaders(cfg)),
+    body,
+  });
+  let data = null;
+  try { data = await r.json(); } catch (_) {}
+  if (!r.ok) throw new Error(data && typeof data.detail === 'string' ? data.detail : 'HTTP ' + r.status);
+  return data || {};
+}
+
 // Fresh temp file for a derived export (JPG/PNG) of a remote doc.
 async function tempFile(name) {
   const tmp = await uxpfs.getTemporaryFolder();
@@ -75,4 +90,4 @@ async function tempFile(name) {
 const tempFolder = () => uxpfs.getTemporaryFolder();
 const readBytes = (entry) => entry.read({ format: formats.binary });
 
-module.exports = { getConfig, setConfig, isConfigured, baseUrl, pollQueue, openQueued, putBytes, tempFile, tempFolder, readBytes };
+module.exports = { getConfig, setConfig, isConfigured, baseUrl, pollQueue, openQueued, putBytes, api, tempFile, tempFolder, readBytes };

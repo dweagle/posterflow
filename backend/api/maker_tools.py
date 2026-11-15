@@ -3353,6 +3353,35 @@ async def save_squareart_export(filename: str, request: Request, db: Session = D
     return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
 
 
+@router.put("/background-exports/{filename}")
+async def save_background_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Write a background JPG the Photoshop panel saved from an edit tab (Save BG) to the background
+    export folder, the one the gallery's background saves use.
+    400s when unconfigured so the panel falls back to its own folder.
+    Security: filename is validated (no traversal, must be an image extension).
+    """
+    _validate_image_filename(filename)
+    folder = (get_setting_value(db, SETTING_BACKGROUND_EXPORT_FOLDER) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail="No background export folder configured.")
+    save_dir = Path(folder)
+
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        (save_dir / filename).write_bytes(body)
+        log_user_action("Saved exported background", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Background export save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save background: {exc}")
+
+    return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
+
+
 @router.put("/poster-exports/{filename}")
 async def save_poster_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
     """Write a poster JPG (the panel's Poster button — the selected poster layer, exported alone
@@ -3397,6 +3426,8 @@ _EXPORT_THUMB_SIZE = (320, 480)
 # " - Season N" / " - Specials" from the panels' Poster button, then Photopea's " (k)" duplicate suffix.
 _EXPORT_SEASON_RE = re.compile(r" - (?:Season (\d+)|(Specials))(?: \(\d{1,3}\))?$", re.IGNORECASE)
 _EXPORT_TAIL_RE = re.compile(r"(?: - (?:Season \d+|Specials))?(?: \(\d{1,3}\))?$", re.IGNORECASE)
+_EXPORT_COLLECTION_RE = re.compile(r" - Collection(?: \(\d{1,3}\))?$", re.IGNORECASE)
+_EXPORT_COLLECTION = "collection"   # the slot of a collection poster exported beside another title's own
 
 
 def _export_picker_roots(db: Session) -> list[tuple[str, Path]]:
@@ -3424,6 +3455,11 @@ def _export_season(stem: str) -> int | None:
     return 0 if m.group(2) else int(m.group(1))
 
 
+def _export_is_collection(stem: str) -> bool:
+    """A collection poster exported from a movie or show PSD: it carries that title's ids and ends " - Collection"."""
+    return _EXPORT_COLLECTION_RE.search(stem) is not None
+
+
 def _export_looks_like_person(stem: str) -> bool:
     """A person export is "Name {tmdb-N}": no year, no tvdb/imdb tag, no season suffix. Movie and
     TV exports always carry a year (and usually an imdb/tvdb tag)."""
@@ -3437,7 +3473,9 @@ def _export_match(stem: str, *, tmdb_id: int | None, tvdb_id: int | None, title:
     """'exact' when the file is the requested item in a requested slot (one of `seasons`, or the
     plain poster when none), 'item' when it is the same title in another slot, None otherwise.
     Id tags decide; untagged files fall back to title + year. TMDB ids are per namespace, so a
-    person request only id-matches a person-looking file and a movie/show request never does."""
+    person request only id-matches a person-looking file and a movie/show request never does.
+    A " - Collection" export is the plain poster only for a collection request; for the movie or
+    show it was exported from it is 'item'."""
     file_tmdb, file_tvdb, _ = extract_ids(stem)
     if file_tmdb or file_tvdb:
         same = ((tmdb_id is not None and file_tmdb == tmdb_id)
@@ -3454,6 +3492,8 @@ def _export_match(stem: str, *, tmdb_id: int | None, tvdb_id: int | None, title:
             same = m is None or int(m.group(1)) == year
     if not same:
         return None
+    if media_type != "collection" and _export_is_collection(stem):
+        return "item"
     file_season = _export_season(stem)
     wanted = file_season in seasons if seasons else file_season is None
     return "exact" if wanted else "item"
@@ -3479,17 +3519,48 @@ def _list_export_files(root: Path, source: str) -> list[dict]:
     return files
 
 
-@router.get("/poster-exports")
-def list_poster_exports(tmdb_id: int | None = None, tvdb_id: int | None = None, title: str = "",
-                        year: int | None = None, seasons: str = "", media_type: str = "",
-                        db: Session = Depends(get_db)) -> JSONResponse:
-    """Finished exports on the server for the request upload picker: every configured export
-    folder, newest first, each file tagged with how it relates to the request. `seasons` is a
-    comma list of requested season numbers (0 = Specials); empty means the plain poster.
-    `media_type` is the request's (movie/show/season/collection/person) and keeps an id match
-    inside its TMDB namespace. Blocking FS work, so sync on purpose."""
-    wanted = {int(part) for part in seasons.split(",") if part.strip().isdigit()}
+# Which posters a request asks for, and which exports are picked for it. The one copy of this rule:
+# the upload picker shows it, and the editor panels' Upload button posts by it (api/community_maker.py).
+
+def _export_slot(stem: str, media_type: str = "") -> int | str | None:
+    """Which poster an export is: None the plain poster, N a season (0 = Specials), "collection" a
+    collection poster exported beside another title's own. For a collection request that one is the plain poster."""
+    if _export_is_collection(stem):
+        return None if media_type == "collection" else _EXPORT_COLLECTION
+    return _export_season(stem)
+
+
+def _export_requested_slots(media_type: str, season_number: int | None, notes: str | None) -> list | None:
+    """The slots a request asks for, in request order; None = every poster of the show. A multi-season
+    request names its seasons on the first notes line ("Seasons: 1, 2")."""
+    if media_type == "show":
+        return None
+    if media_type != "season":
+        return [None]
+    if season_number is not None:
+        return [int(season_number)]
+    first = str(notes or "").split("\n")[0]
+    if not first.startswith("Seasons: "):
+        return None
+    numbers = [re.match(r"[+-]?\d+", part.strip()) for part in first[len("Seasons: "):].split(",")]
+    return [int(m.group()) for m in numbers if m] or None
+
+
+def _export_slot_requested(slot: int | str | None, slots: list | None) -> bool:
+    """Whether the request asks for a slot. No request asks for another title's collection poster."""
+    return slot != _EXPORT_COLLECTION if slots is None else slot in slots
+
+
+def list_request_exports(db: Session, *, tmdb_id: int | None, tvdb_id: int | None, title: str, year: int | None,
+                         media_type: str, season_number: int | None, notes: str | None) -> dict:
+    """Finished exports on the server, seen from one request: every configured export folder, newest
+    first. Each file says how it relates to the request: `match` ('exact', 'item' = same title in
+    another slot, None), `season`, `collection`, `requested`, and `selected` for the newest export of
+    each requested poster. `seasons` lists the requested season numbers (0 = Specials). The request's
+    type keeps an id match inside its TMDB namespace. Blocking FS work."""
     mt = str(media_type or "").strip().lower()
+    slots = _export_requested_slots(mt, season_number, notes)
+    seasons = [s for s in (slots or []) if isinstance(s, int)]
     folders: list[dict] = []
     files: list[dict] = []
     for source, folder in _export_picker_roots(db):
@@ -3500,12 +3571,29 @@ def list_poster_exports(tmdb_id: int | None = None, tvdb_id: int | None = None, 
     files.sort(key=lambda f: f["mtime"], reverse=True)
     truncated = len(files) > _EXPORT_PICKER_CAP
     files = files[:_EXPORT_PICKER_CAP]
+    newest: dict = {}
     for f in files:
         stem = Path(f["name"]).stem
+        slot = _export_slot(stem, mt)
         f["season"] = _export_season(stem)
+        f["collection"] = slot == _EXPORT_COLLECTION
         f["match"] = _export_match(stem, tmdb_id=tmdb_id, tvdb_id=tvdb_id, title=title, year=year,
-                                   seasons=wanted, media_type=mt)
-    return JSONResponse({"folders": folders, "files": files, "truncated": truncated})
+                                   seasons=set(seasons), media_type=mt)
+        f["requested"] = f["match"] is not None and _export_slot_requested(slot, slots)
+        f["selected"] = f["requested"] and slot not in newest
+        if f["match"] is not None:
+            newest.setdefault(slot, f)
+    return {"folders": folders, "files": files, "truncated": truncated, "seasons": seasons}
+
+
+@router.get("/poster-exports")
+def list_poster_exports(tmdb_id: int | None = None, tvdb_id: int | None = None, title: str = "",
+                        year: int | None = None, media_type: str = "", season_number: int | None = None,
+                        notes: str = "", db: Session = Depends(get_db)) -> JSONResponse:
+    """The request upload picker's file list (list_request_exports). The request is described by its
+    ids, title, year, type (movie/show/season/collection/person), season number and notes. Sync on purpose."""
+    return JSONResponse(list_request_exports(db, tmdb_id=tmdb_id, tvdb_id=tvdb_id, title=title, year=year,
+                                             media_type=media_type, season_number=season_number, notes=notes))
 
 
 def _resolve_export_file(db: Session, source: str, filename: str) -> Path:
@@ -3628,6 +3716,21 @@ def save_gallery_artwork(request: SaveGalleryArtworkRequest, db: Session = Depen
     log_user_action("Saved gallery artwork to export folder", subtype=request.subtype,
                     filename=filename, folder=folder)
     return JSONResponse({"status": "added", "written": filename})
+
+
+@router.get("/artwork-exports/{subtype}/{filename}")
+def artwork_export_exists(subtype: str, filename: str, db: Session = Depends(get_db)) -> dict:
+    """Whether this file is already in the subtype's export folder (a gallery save, or the panel's
+    Save BG). The editor panels' backdrop step asks this instead of looking at the maker's network
+    share, where a new file can stay unseen for half a minute."""
+    folder_key = _ARTWORK_EXPORT_FOLDER_KEYS.get(subtype)
+    if folder_key is None:
+        raise HTTPException(status_code=400, detail="subtype must be logo, background, or squareart")
+    _validate_image_filename(filename)
+    folder = (get_setting_value(db, folder_key) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail=f"No {subtype} export folder configured.")
+    return {"exists": (Path(folder) / filename).is_file()}
 
 
 class GeminiImageRequest(BaseModel):

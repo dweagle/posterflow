@@ -66,4 +66,44 @@ const squareOnCanvas = (s) => {
   return { x: Math.round(s.l), y: Math.round(s.t), side: Math.min(w, h) };
 };
 
-module.exports = { rnd, computeLogoGeometry, computePosterFitGeometry, keepSquareInside, squareOnCanvas };
+// ---- Coverage: the box a poster must fill, and what a layer leaves blank in it ----
+// The box Fit Poster covers: inside the 25 px border, from the top border down to the bottom line.
+const coverageBox = (cw, bottomY) => ({ left: 25, top: 25, right: Math.round(cw) - 25, bottom: Math.floor(bottomY) });
+// Where a layer's bounds fall short of the box by a pixel or more, worst first: [{ edge, px }].
+const coverageGaps = (b, box) => [
+  { edge: 'bottom', px: box.bottom - b.bottom }, { edge: 'top', px: b.top - box.top },
+  { edge: 'left', px: b.left - box.left }, { edge: 'right', px: box.right - b.right },
+].filter((g) => g.px >= 1).sort((a, c) => c.px - a.px);
+// The gaps as text: "~75 px at the left edge", and for the bottom "~40 px above the bottom guide".
+const coverageGapText = (gaps) => gaps.map((g) => '~' + Math.round(g.px) + ' px ' + (g.edge === 'bottom' ? 'above the bottom guide' : 'at the ' + g.edge + ' edge')).join(', ');
+// Alpha below this (90 %) counts as blank; the slightly soft edge pixels a transform leaves pass.
+const COVER_ALPHA = 230;
+// See-through pixels in chunky 8-bit pixel data whose last component is alpha: { count, x0, x1, y0, y1 }.
+const blankPixels = (data, w, h, comps, opaque = COVER_ALPHA) => {
+  let count = 0, x0 = w, x1 = -1, y0 = h, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    let i = y * w * comps + comps - 1;
+    for (let x = 0; x < w; x++, i += comps) {
+      if (data[i] < opaque) { count++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+  }
+  return { count, x0, x1, y0, y1 };
+};
+
+// ---- Send back: is an edited poster tab now a cut-out logo? ----
+// A poster covers its whole tab. With this much of the tab see-through, it holds a logo cut out of the poster.
+const LOGO_SHARE = 0.02;
+// The see-through share of a cw x ch canvas, from the pixels Photoshop handed over for one layer.
+// `data` (w x h, alpha last of `comps`) covers the areaW x areaH part that holds pixels, perhaps scaled
+// down; everything outside that part is see-through. No alpha channel = every pixel there is solid.
+const seeThroughShare = (data, w, h, comps, hasAlpha, areaW, areaH, cw, ch) => {
+  const n = w * h;
+  let solid = n;
+  if (hasAlpha) {
+    solid = 0;
+    for (let i = comps - 1; i < data.length; i += comps) if (data[i] >= COVER_ALPHA) solid++;
+  }
+  return Math.max(0, 1 - (n ? solid / n : 0) * (areaW * areaH) / (cw * ch));
+};
+
+module.exports = { rnd, computeLogoGeometry, computePosterFitGeometry, keepSquareInside, squareOnCanvas, coverageBox, coverageGaps, coverageGapText, blankPixels, COVER_ALPHA, LOGO_SHARE, seeThroughShare };

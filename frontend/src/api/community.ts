@@ -100,6 +100,74 @@ export const storeDiscordIdentity = (
 ): Promise<{ ok: boolean }> =>
   postData('/api/community/identity', { discord_user_id, discord_username, discord_token })
 
+// ── Upload and complete, through Posterflow ─────────────────────────────────
+// One implementation on the server (backend/api/community_maker.py), shared with the editor
+// panels' Upload and Complete. Each call carries this browser's Discord login (`token`), so the
+// server acts as the maker who pressed the button.
+
+export type ClaimWhere = 'requests' | 'list-items'
+export type ClaimUploadAction = 'discord' | 'discord_idarr' | 'idarr'
+
+/** What Upload is set to on screen, sent along so the upload does exactly that. */
+export interface ClaimUploadSettings {
+  action: ClaimUploadAction
+  drive: string | null          // the IDarr drive picked in the app (its picker value)
+}
+
+export interface ClaimUploadResult {
+  posted: number                // posters posted to the Discord thread
+  messages: number
+  idarr: number                 // posters added to IDarr
+  drive: string                 // the IDarr drive's label
+  idarr_job: { id: number; index: number; sync_after: boolean } | null   // the IDarr run it started
+  warnings: string[]            // a half that did not work while the other did
+  did: string
+}
+
+/** Which Discord message a running upload is on (ten posters a message). */
+export interface ClaimUploadProgress {
+  message: number
+  of: number
+}
+
+/** One part of an upload sent ten posters a request: the whole upload's id, and which part this is. */
+export interface ClaimUploadPart {
+  batch: string
+  part: number
+  of: number
+}
+
+/** An export already on the server, as the upload picker lists it. */
+export interface ExportRef {
+  source: string
+  name: string
+}
+
+const claimPath = (where: ClaimWhere, id: string) => `/api/maker-tools/community/${where}/${encodeURIComponent(id)}`
+
+/** Upload exports the server already has (ticked in the upload picker), by name. `part` says which
+ * part of a larger upload these are. */
+export const uploadClaimExports = (where: ClaimWhere, id: string, files: ExportRef[], settings: ClaimUploadSettings, token: string | null, part: ClaimUploadPart | null = null): Promise<ClaimUploadResult> =>
+  postData(`${claimPath(where, id)}/upload`, { files: files.map(({ source, name }) => ({ source, name })), ...settings, token, ...(part ?? {}) })
+
+/** Upload files from this computer (a drop on the card, the file dialog). */
+export const uploadClaimFiles = (where: ClaimWhere, id: string, files: File[], settings: ClaimUploadSettings, token: string | null, part: ClaimUploadPart | null = null): Promise<ClaimUploadResult> => {
+  const form = new FormData()
+  form.append('action', settings.action)
+  if (settings.drive) form.append('drive', settings.drive)
+  if (token) form.append('token', token)
+  if (part) {
+    form.append('batch', part.batch)
+    form.append('part', String(part.part))
+    form.append('of', String(part.of))
+  }
+  files.forEach((file) => form.append('files', file))
+  return postData(`${claimPath(where, id)}/upload-files`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
+
+/** Mark a claimed request or list item complete. Answers with the row's new status and names. */
+export const completeClaim = <T>(where: ClaimWhere, id: string, token: string): Promise<T> => postData(`${claimPath(where, id)}/complete`, { token })
+
 // ── Community Lists ──────────────────────────────────────────────────────────
 
 export interface CommunityListItem {

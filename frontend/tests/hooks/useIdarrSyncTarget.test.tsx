@@ -3,10 +3,12 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 
 const mocks = vi.hoisted(() => ({
   getMakerIdarrConfig: vi.fn(),
+  saveSettings: vi.fn(),
 }))
 
 vi.mock('../../src/api/client', () => ({
   getMakerIdarrConfig: mocks.getMakerIdarrConfig,
+  saveSettings: mocks.saveSettings,
 }))
 
 const TARGETS = [
@@ -25,6 +27,7 @@ async function loadModule() {
 beforeEach(() => {
   localStorage.clear()
   mocks.getMakerIdarrConfig.mockResolvedValue({ sync_targets: TARGETS })
+  mocks.saveSettings.mockResolvedValue({})
 })
 
 afterEach(() => {
@@ -93,6 +96,48 @@ describe('useIdarrSyncTarget', () => {
       window.dispatchEvent(new StorageEvent('storage', { key: IDARR_SYNC_TARGET_STORAGE_KEY, newValue: 'scope:tok-a' }))
     })
     expect(result.current.selectedIndex).toBe(0)
+  })
+
+  it('sends each pick to the server once, so the editor panels add to the same IDarr drive', async () => {
+    const { useIdarrSyncTarget } = await loadModule()
+    const { result } = renderHook(() => useIdarrSyncTarget())
+    await waitFor(() => expect(result.current.loaded).toBe(true))
+    expect(mocks.saveSettings).not.toHaveBeenCalled()   // nothing picked yet: the server falls back as the app does
+
+    act(() => { result.current.setSelectedValue('scope:tok-d') })
+    await waitFor(() => expect(mocks.saveSettings).toHaveBeenCalledWith({ idarr_selected_sync_target: 'scope:tok-d' }))
+    act(() => { result.current.setSelectedValue('scope:tok-d') })
+    act(() => { result.current.setSelectedValue('scope:tok-a') })
+    await waitFor(() => expect(mocks.saveSettings).toHaveBeenLastCalledWith({ idarr_selected_sync_target: 'scope:tok-a' }))
+    expect(mocks.saveSettings).toHaveBeenCalledTimes(2)
+  })
+
+  it('sends a pick made before the server kept it on the next load, and not again after that', async () => {
+    localStorage.setItem('posterflow.idarr.selectedSyncTarget', 'scope:tok-d')
+    const first = await loadModule()
+    const one = renderHook(() => first.useIdarrSyncTarget())
+    await waitFor(() => expect(mocks.saveSettings).toHaveBeenCalledWith({ idarr_selected_sync_target: 'scope:tok-d' }))
+    await waitFor(() => expect(localStorage.getItem('posterflow.idarr.selectedSyncTarget.sent')).toBe('scope:tok-d'))
+    one.unmount()
+
+    const second = await loadModule()
+    const two = renderHook(() => second.useIdarrSyncTarget())
+    await waitFor(() => expect(two.result.current.loaded).toBe(true))
+    expect(mocks.saveSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed save is tried again on the next load', async () => {
+    localStorage.setItem('posterflow.idarr.selectedSyncTarget', 'scope:tok-d')
+    mocks.saveSettings.mockRejectedValueOnce(new Error('offline'))
+    const first = await loadModule()
+    const one = renderHook(() => first.useIdarrSyncTarget())
+    await waitFor(() => expect(mocks.saveSettings).toHaveBeenCalledTimes(1))
+    one.unmount()
+    expect(localStorage.getItem('posterflow.idarr.selectedSyncTarget.sent')).toBeNull()
+
+    const second = await loadModule()
+    renderHook(() => second.useIdarrSyncTarget())
+    await waitFor(() => expect(mocks.saveSettings).toHaveBeenCalledTimes(2))
   })
 
   it('poster-only pickers skip artwork and PSD drives and fall back when the shared pick is one of them', async () => {

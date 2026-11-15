@@ -174,6 +174,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     # Community Requests maker preferences
     "idarr_quick_add_community",
     "community_upload_action",
+    "idarr_selected_sync_target",
     "request_export_picker",
     # General settings: community styles hidden across the UI
     "hidden_poster_styles",

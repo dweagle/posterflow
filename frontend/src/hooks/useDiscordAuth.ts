@@ -1,13 +1,47 @@
 import { useState, useEffect, useCallback } from 'react'
-import { storeDiscordIdentity, clearCommunityCache, type CommunityRequest, type RequestMatch } from '../api/community'
+import {
+  storeDiscordIdentity, clearCommunityCache, completeClaim, uploadClaimExports, uploadClaimFiles,
+  type ClaimUploadProgress, type ClaimUploadResult, type ClaimUploadSettings, type ClaimWhere, type CommunityRequest, type ExportRef, type RequestMatch,
+} from '../api/community'
+import { getApiErrorMessage } from '../api/client'
 
 const STORAGE_KEY = 'posterflow_discord_auth'
 const RESULT_KEY = 'discord_oauth_result'
 const SUPABASE_PROJECT = 'qwudwkxfqowjtisdlplv'
 const OAUTH_URL = `https://${SUPABASE_PROJECT}.supabase.co/functions/v1/discord-oauth`
-const POST_POSTER_URL = `https://${SUPABASE_PROJECT}.supabase.co/functions/v1/post-poster`
 const UPDATE_STATUS_URL = `https://${SUPABASE_PROJECT}.supabase.co/functions/v1/update-request-status`
 const UPDATE_LIST_ITEM_URL = `https://${SUPABASE_PROJECT}.supabase.co/functions/v1/update-list-item`
+
+const UPLOAD_PART_FILES = 10     // Discord takes ten posters a message; a request this size also passes any reverse proxy
+const UPLOAD_PART_GAP_MS = 1500  // between Discord messages, for the channel's rate limit
+
+// An upload that stopped partway, by row. The same posters sent again go on from the part that failed,
+// so nothing is posted twice.
+interface UnfinishedUpload { signature: string; batch: string; done: number; result: ClaimUploadResult }
+const unfinishedUploads = new Map<string, UnfinishedUpload>()
+
+const uploadSignature = (files: File[] | ExportRef[], settings: ClaimUploadSettings): string =>
+  JSON.stringify([settings.action, settings.drive, files.map((f) => (f instanceof File ? [f.name, f.size, f.lastModified] : [f.source, f.name]))])
+
+// What the parts of one upload did, added up.
+function addUploadResult(total: ClaimUploadResult, part: ClaimUploadResult): void {
+  total.posted += part.posted
+  total.messages += part.messages
+  total.idarr += part.idarr
+  total.drive = part.drive || total.drive
+  total.idarr_job = part.idarr_job ?? total.idarr_job
+  total.did = part.did
+  for (const warning of part.warnings) if (!total.warnings.includes(warning)) total.warnings.push(warning)
+}
+
+// A call to Posterflow's server, failing with the server's own reason.
+async function inServerWords<T>(call: Promise<T>, fallback: string): Promise<T> {
+  try {
+    return await call
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, fallback))
+  }
+}
 
 interface DiscordAuth {
   token: string
@@ -157,29 +191,44 @@ export function useDiscordAuth() {
     localStorage.removeItem(STORAGE_KEY)
   }, [])
 
-  const uploadPoster = useCallback(
-    async (requestId: string, files: File[]): Promise<void> => {
-      if (!auth?.token) throw new Error('Not connected to Discord')
-
-      const form = new FormData()
-      form.append('token', auth.token)
-      form.append('request_id', requestId)
-      // Send names separately — Deno's formData parser truncates a multipart filename
-      // at the first ";" (e.g. "ChäoS;HEAd"), so the edge function can't trust f.name.
-      form.append('filenames', JSON.stringify(files.map((f) => f.name)))
-      for (const file of files) {
-        form.append('file', file)
+  // Upload posters for a request or list item: files from this computer, or exports the server
+  // already has (ticked in the upload picker). `settings` is what Upload is set to on screen.
+  // Posterflow's server does it, as this login. An IDarr-only upload needs no login.
+  // They go ten a request (one Discord message each), so no request is large or slow; `onProgress`
+  // hears which one is going out when there is more than one.
+  const uploadForClaim = useCallback(
+    async (where: ClaimWhere, id: string, files: File[] | ExportRef[], settings: ClaimUploadSettings,
+      onProgress?: (progress: ClaimUploadProgress) => void): Promise<ClaimUploadResult> => {
+      const token = auth?.token ?? null
+      const fromComputer = files[0] instanceof File
+      const of = Math.max(1, Math.ceil(files.length / UPLOAD_PART_FILES))
+      const key = `${where}/${id}`, signature = uploadSignature(files, settings)
+      const kept = unfinishedUploads.get(key)
+      const upload: UnfinishedUpload = kept && kept.signature === signature ? kept
+        : { signature, batch: generateNonce(), done: 0, result: { posted: 0, messages: 0, idarr: 0, drive: '', idarr_job: null, warnings: [], did: '' } }
+      unfinishedUploads.set(key, upload)
+      for (let n = upload.done + 1; n <= of; n++) {
+        const these = files.slice((n - 1) * UPLOAD_PART_FILES, n * UPLOAD_PART_FILES)
+        const part = of > 1 ? { batch: upload.batch, part: n, of } : null
+        if (of > 1) onProgress?.({ message: n, of })
+        const did = await inServerWords(
+          fromComputer
+            ? uploadClaimFiles(where, id, these as File[], settings, token, part)
+            : uploadClaimExports(where, id, these as ExportRef[], settings, token, part),
+          'Upload failed',
+        )
+        addUploadResult(upload.result, did)
+        upload.done = n
+        if (n < of && did.posted) await new Promise((resolve) => setTimeout(resolve, UPLOAD_PART_GAP_MS))
       }
-
-      const resp = await fetch(POST_POSTER_URL, { method: 'POST', body: form })
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}))
-        throw new Error((data as { error?: string }).error ?? 'Upload failed')
-      }
+      unfinishedUploads.delete(key)
+      return upload.result
     },
     [auth],
   )
 
+  // Request status actions go to the community service, except Complete: Posterflow's server does
+  // that one, the same action the editor panels' Complete runs.
   const updateRequestStatus = useCallback(
     async (
       requestId: string,
@@ -187,6 +236,7 @@ export function useDiscordAuth() {
       message?: string,
     ): Promise<{ status: string; claimed_by: string | null; fulfilled_by: string | null }> => {
       if (!auth?.token) throw new Error('Not connected to Discord')
+      if (action === 'complete') return inServerWords(completeClaim('requests', requestId, auth.token), 'Action "complete" failed')
 
       const resp = await fetch(UPDATE_STATUS_URL, {
         method: 'POST',
@@ -238,7 +288,8 @@ export function useDiscordAuth() {
     [moderateRequest],
   )
 
-  // Community list-item actions — mirrors updateRequestStatus, different endpoint.
+  // Community list-item actions — mirrors updateRequestStatus, different endpoint (Complete goes
+  // through Posterflow's server here too).
   // 'remove' is publisher-or-owner; 'remove_mine' (no itemId) clears all the
   // caller's own items; the maker actions require the Maker role.
   const updateListItem = useCallback(
@@ -247,6 +298,7 @@ export function useDiscordAuth() {
       action: 'claim' | 'complete' | 'release' | 'reject' | 'remove' | 'remove_mine',
     ): Promise<{ status?: string; claimed_by?: string | null; claimed_by_discord_id?: string | null; removed?: boolean | number }> => {
       if (!auth?.token) throw new Error('Not connected to Discord')
+      if (action === 'complete' && itemId) return inServerWords(completeClaim('list-items', itemId, auth.token), 'Action "complete" failed')
 
       const resp = await fetch(UPDATE_LIST_ITEM_URL, {
         method: 'POST',
@@ -275,7 +327,7 @@ export function useDiscordAuth() {
     connectError,
     login,
     logout,
-    uploadPoster,
+    uploadForClaim,
     updateRequestStatus,
     matchRequest,
     upgradeRequest,

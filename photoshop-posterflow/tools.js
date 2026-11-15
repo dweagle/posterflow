@@ -8,16 +8,15 @@
 const { app, core, action } = require('photoshop');
 const G = require('./geometry');
 const { treeFromList } = require('./model');
-const { JPG_QUALITY } = require('./save');
-const { scrubFile } = require('./strip');
+const { JPG_QUALITY, writeViaTemp } = require('./save');
 
 // Neutral density: the export's logo formula has a transparency term that needs the layer's pixels
 // (fragile to read for one layer), so — like the Photopea panel — we skip it and use 0.30 (no sparse
 // boost / dense shrink). Aspect ratio + pixel area (the dominant factors) are still exact.
 const LOGO_DENSITY = 0.30;
 
-// The doc's lowest horizontal guide (the template's bottom-fade line), or canvas − 25.
-function bottomGuideY(doc, constants) {
+// The doc's lowest horizontal guide (the template's bottom-fade line), or 0 when it has none.
+function lowestGuideY(doc, constants) {
   let y = 0;
   try {
     const gs = doc.guides;
@@ -26,7 +25,58 @@ function bottomGuideY(doc, constants) {
       if (g.direction === constants.Direction.HORIZONTAL && g.coordinate > y) y = g.coordinate;
     }
   } catch (_) {}
+  return y;
+}
+// Fit Poster's bottom line: that guide, or canvas − 25.
+function bottomGuideY(doc, constants) {
+  const y = lowestGuideY(doc, constants);
   return y > 0 ? y : doc.height - 25;
+}
+
+// ---- Coverage: blank canvas in the poster layers a finish is about to export ----
+// See-through pixels of `layer` inside `box` (G.blankPixels, in document pixels), or null when
+// Photoshop can't hand over the layer's pixels; the check then rests on the bounds alone.
+async function blankInBox(doc, layer, box) {
+  const imaging = require('photoshop').imaging;
+  if (!imaging || !imaging.getPixels) return null;
+  let img = null;
+  try {
+    const res = await imaging.getPixels({ documentID: doc.id, layerID: layer.id, sourceBounds: box, componentSize: 8, applyAlpha: false });
+    img = res && res.imageData;
+    const sb = res && res.sourceBounds;
+    // The bounds already cover the box, so a trimmed or scaled-down answer isn't the layer's real pixels.
+    if (!img || !sb || res.level || sb.left > box.left || sb.top > box.top || sb.right < box.right || sb.bottom < box.bottom) return null;
+    if (!img.hasAlpha) return { count: 0 };
+    const hit = G.blankPixels(await img.getData({ chunky: true }), img.width, img.height, img.components);
+    return { count: hit.count, x0: hit.x0 + sb.left, x1: hit.x1 + sb.left, y0: hit.y0 + sb.top, y1: hit.y1 + sb.top };
+  } catch (_) { return null; }
+  finally { try { if (img) img.dispose(); } catch (_) {} }
+}
+// Each target ({ label, layer, why? }; layer null = missing, why says so) must cover the box Fit Poster
+// fits into. Bounds first; the pixels are only read when the bounds pass. Returns { skipped } for a
+// document with no horizontal guide, else { problems: [text], boundsOnly: [label] }.
+async function checkCoverage(doc, constants, targets) {
+  const guideY = lowestGuideY(doc, constants);
+  if (!(guideY > 0)) return { skipped: 'no horizontal guide' };
+  const box = G.coverageBox(doc.width, guideY);
+  const problems = [], boundsOnly = [];
+  await core.executeAsModal(async () => {
+    for (const { label, layer, why } of targets) {
+      if (!layer) { problems.push(label + ': ' + (why || 'layer not found')); continue; }
+      let b = null;
+      try { b = layer.boundsNoEffects || layer.bounds; } catch (_) {}
+      if (!b || !(b.right - b.left > 0 && b.bottom - b.top > 0)) { problems.push(label + ': the layer is empty'); continue; }
+      const gaps = G.coverageGaps(b, box);
+      if (gaps.length) {
+        problems.push(label + ': blank canvas (' + G.coverageGapText(gaps) + ')');
+        continue;
+      }
+      const blank = await blankInBox(doc, layer, box);
+      if (!blank) boundsOnly.push(label);
+      else if (blank.count) problems.push(label + ': see-through area inside the poster (~' + blank.count + ' px, x ' + blank.x0 + ' to ' + blank.x1 + ', y ' + blank.y0 + ' to ' + blank.y1 + ')');
+    }
+  }, { commandName: 'Check poster coverage' });
+  return { problems, boundsOnly };
 }
 
 // mode: 'logo' | 'fit'. Returns { ok } or { ok:false, reason:'no-layer' }.
@@ -75,16 +125,38 @@ const TMP_LOGO = '__PFLTMPLOGO__';   // marker for temp copies (+ orphans of old
 const COLLECTION_BOTTOM = 181 / 1500;   // ruler the logo's bottom edge sits on
 const LOGO_TOP_LIMIT = 400 / 1500;      // the logo may never reach above this line
 
-function findGroupBy(layers, isGroup, re) {
-  for (let i = 0; i < layers.length; i++) {
-    const L = layers[i];
-    if (isGroup(L)) {
-      if (re.test(L.name)) return L;
-      const f = findGroupBy(L.layers, isGroup, re);
+// Path to the LOGO group as indexes from the top, or null. Top level first, then one whole-layer-list
+// call; the layers are walked one by one only if that call fails or does not line up with the document.
+const LOGO_RE = /^\s*logos?\s*$/i;
+async function findLogoPath(doc, constants) {
+  const isGroup = (L) => L.kind === constants.LayerKind.GROUP;
+  const top = doc.layers;
+  for (let i = 0; i < top.length; i++) if (isGroup(top[i]) && LOGO_RE.test(top[i].name)) return [i];
+  const search = (layers, at) => {   // first match, a group before its children
+    for (let i = 0; i < layers.length; i++) {
+      if (!isGroup(layers[i])) continue;
+      if (LOGO_RE.test(layers[i].name)) return at.concat(i);
+      const f = search(layers[i].layers, at.concat(i));
       if (f) return f;
     }
-  }
-  return null;
+    return null;
+  };
+  let tree = null;
+  try { tree = await readLayerTree(doc, constants); } catch (_) {}
+  if (!tree) return search(top, []);
+  const p = search(tree, []);
+  if (!p) return null;
+  const listed = layerAtPath({ layers: tree }, p), live = layerAtPath(doc, p);
+  return live && live.id === listed.id ? p : search(top, []);
+}
+function layerAtPath(doc, p) {
+  let L = null, list = doc.layers;
+  for (const i of p) { L = list && list[i]; if (!L) return null; list = L.layers; }
+  return L;
+}
+async function findLogoGroup(doc, constants) {
+  const p = await findLogoPath(doc, constants);
+  return p ? layerAtPath(doc, p) : null;
 }
 
 // Returns { placed, copyId, warning, note } — warning set when the logo couldn't be placed (the
@@ -97,7 +169,7 @@ async function placeCollectionLogo(doc, constants) {
   await core.executeAsModal(async () => {
     let lg = null;
     try {
-      lg = findGroupBy(doc.layers, isGroup, /^\s*logos?\s*$/i);
+      lg = await findLogoGroup(doc, constants);
       if (!lg) { out.warning = 'No LOGO group; the Collection poster was exported without a logo.'; return; }
       if (!lg.visible) { out.warning = 'The LOGO group is hidden; the Collection poster was exported without a logo.'; return; }
       const manualLayers = [];
@@ -181,7 +253,7 @@ async function removeCollectionLogo(doc, constants, placed) {
         }
       };
       await sweep(doc.layers);
-      const lg = findGroupBy(doc.layers, isGroup, /^\s*logos?\s*$/i);
+      const lg = await findLogoGroup(doc, constants);
       if (lg && !lg.visible) lg.visible = true;
     } catch (_) {}
   }, { commandName: 'Remove collection logo' });
@@ -191,9 +263,8 @@ async function removeCollectionLogo(doc, constants, placed) {
 // every non-collection export — they only appear during the Collection placement itself. Without
 // this, a visible c logo renders alongside the normal logo on main/season exports.
 async function hideManualCollectionLogos(doc, constants) {
-  const isGroup = (L) => L.kind === constants.LayerKind.GROUP;
   await core.executeAsModal(async () => {
-    const lg = findGroupBy(doc.layers, isGroup, /^\s*logos?\s*$/i);
+    const lg = await findLogoGroup(doc, constants);
     if (!lg) return;
     for (let i = 0; i < lg.layers.length; i++) {
       if (/^c\d*$/.test(('' + lg.layers[i].name).trim().toLowerCase()) && lg.layers[i].visible) {
@@ -225,35 +296,22 @@ async function forceGradientVisible(doc, constants) {
 // Works on a DUPLICATE so the open doc is untouched: isolate the chain down to the LOGO group,
 // alpha-trim the duplicate (Image > Trim, transparent), save a PNG copy, close the duplicate.
 async function exportLogoPng(doc, constants, folder, filename) {
-  const isGroup = (L) => L.kind === constants.LayerKind.GROUP;
-  const findLogo = (layers) => {
-    for (let i = 0; i < layers.length; i++) {
-      const L = layers[i];
-      if (isGroup(L)) {
-        if (/^\s*logos?\s*$/i.test(L.name)) return { L, chain: [i] };
-        const f = findLogo(L.layers);
-        if (f) return { L: f.L, chain: [i].concat(f.chain) };
-      }
-    }
-    return null;
-  };
   let result = { ok: false, reason: 'error' };
   await core.executeAsModal(async () => {
     const dup = await doc.duplicate();
     try {
-      const found = findLogo(dup.layers);
-      if (!found) { result = { ok: false, reason: 'no-logo' }; return; }
+      const chain = await findLogoPath(dup, constants);
+      const logo = chain && layerAtPath(dup, chain);
+      if (!logo) { result = { ok: false, reason: 'no-logo' }; return; }
       let cont = dup.layers;   // hide non-chain siblings at every level; keep the chain visible
-      for (let k = 0; k < found.chain.length; k++) {
-        for (let i = 0; i < cont.length; i++) cont[i].visible = (i === found.chain[k]);
-        cont = cont[found.chain[k]].layers;
+      for (let k = 0; k < chain.length; k++) {
+        for (let i = 0; i < cont.length; i++) cont[i].visible = (i === chain[k]);
+        cont = cont[chain[k]].layers;
       }
-      const b = found.L.bounds;
+      const b = logo.bounds;
       if (!(b.right - b.left > 0 && b.bottom - b.top > 0)) { result = { ok: false, reason: 'empty' }; return; }
       await dup.trim(constants.TrimType.TRANSPARENT);
-      const file = await folder.createFile(filename, { overwrite: true });
-      await dup.saveAs.png(file, {}, true);
-      await scrubFile(file);
+      const file = await writeViaTemp(folder, filename, (tmp) => dup.saveAs.png(tmp, {}, true));
       result = { ok: true, filename, folderName: folder.name, entry: file };   // entry: remote docs upload it
     } finally {
       await dup.closeWithoutSaving();
@@ -283,15 +341,21 @@ function isolatePosterArt(dup, constants) {
 }
 
 // Create the crop doc: duplicate, isolate the POSTER art, trim to its pixels. Leaves the
-// duplicate OPEN as the active tab — the caller closes it via closeCropDoc.
+// duplicate OPEN as the active tab — the caller closes it via closeCropDoc. If any of that fails,
+// the duplicate is closed, so no stray copy of the PSD stays open.
 async function makeCropDoc(doc, constants) {
   let result = { ok: false, reason: 'error' };
   await core.executeAsModal(async () => {
     const dup = await doc.duplicate();
-    const iso = isolatePosterArt(dup, constants);
-    if (iso) { await dup.closeWithoutSaving(); result = { ok: false, reason: iso }; return; }
-    await dup.trim(constants.TrimType.TRANSPARENT);
-    result = { ok: true, doc: dup, width: Math.round(dup.width), height: Math.round(dup.height) };
+    try {
+      const iso = isolatePosterArt(dup, constants);
+      if (iso) { await dup.closeWithoutSaving(); result = { ok: false, reason: iso }; return; }
+      await dup.trim(constants.TrimType.TRANSPARENT);
+      result = { ok: true, doc: dup, width: Math.round(dup.width), height: Math.round(dup.height) };
+    } catch (e) {
+      try { await dup.closeWithoutSaving(); } catch (_) {}
+      throw e;
+    }
   }, { commandName: 'Open Square Art crop' });
   return result;
 }
@@ -338,9 +402,7 @@ async function cropSaveSquare(dup, folder, filename, rect, wantSide) {
     await dup.crop({ left: rect.x, top: rect.y, right: rect.x + rect.side, bottom: rect.y + rect.side });
     const up = wantSide && wantSide > rect.side;
     if (up) await dup.resizeImage(wantSide, wantSide);
-    const file = await folder.createFile(filename, { overwrite: true });
-    await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
-    await scrubFile(file);
+    const file = await writeViaTemp(folder, filename, (tmp) => dup.saveAs.jpg(tmp, { quality: JPG_QUALITY }, true));
     result = { ok: true, filename, folderName: folder.name, entry: file, side: up ? wantSide : rect.side, srcSide: rect.side };
   }, { commandName: 'Crop square art' });
   return result;
@@ -390,9 +452,7 @@ async function exportSelectedLayersJpg(doc, constants, folder, nameFor) {
         }
         await dup.trim(constants.TrimType.TRANSPARENT);
         const filename = dedupe(nameFor(target.name));
-        const file = await folder.createFile(filename, { overwrite: true });
-        await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
-        await scrubFile(file);
+        const file = await writeViaTemp(folder, filename, (tmp) => dup.saveAs.jpg(tmp, { quality: JPG_QUALITY }, true));
         files.push({ filename, entry: file });
       } finally {
         await dup.closeWithoutSaving();
@@ -437,9 +497,208 @@ async function setLayersVisible(pairs, commandName) {
   }, { commandName: commandName || 'Toggle poster layers' });
 }
 
+// ---- Edit in tab / Send back: clean up one poster or logo layer in a document of its own ----
+// Edit duplicates the layer into a new document (Layer > Duplicate Layer > New), reveals all of it and
+// crops to it, so the tab holds the layer's full pixels, off-canvas overhang included. Send back stamps
+// what the tab shows into one layer and brings it into the PSD as ONE history step, rolled back whole
+// if any part fails:
+//  - a logo tab replaces its layer
+//  - a poster tab that is now see-through (G.LOGO_SHARE: a logo cut out of the poster) becomes the new
+//    top layer of LOGO, placed like Place Logo, earlier logos hidden; the poster is left as it was
+//  - any other poster tab replaces its layer
+// A replacement keeps the original's name, visibility, opacity, blend mode and place in the stack.
+// Unchanged size lands on the original's exact spot; a resized one is placed like Fit Poster / Place Logo.
+const SENT_BACK = '__PFLSENTBACK__';   // the arriving copy's name until it takes its real one
+
+// Scale `layer` (now `w` wide) about its centre to res.width, then move its top-left to res.left / res.top.
+async function fitTo(layer, res, w, constants) {
+  const sc = (res.width / w) * 100;
+  await layer.scale(sc, sc, constants.AnchorPosition.MIDDLECENTER);
+  const b = layer.bounds;   // re-measure after the resize
+  await layer.translate(res.left - b.left, res.top - b.top);
+}
+
+// Open `layer` of `doc` in a tab of its own, named `name`. Returns the tab's document.
+async function openLayerInTab(doc, layer, name) {
+  let tab = null;
+  await core.executeAsModal(async () => {
+    app.activeDocument = doc;
+    await action.batchPlay([
+      { _obj: 'select', _target: [{ _ref: 'layer', _id: layer.id }], makeVisible: false },
+      { _obj: 'make', _target: [{ _ref: 'document' }], name, using: { _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' }, version: 5 },
+    ], {});
+    tab = app.activeDocument;
+    if (!tab || tab.id === doc.id) { tab = null; throw new Error('Photoshop did not open a new tab'); }   // never crop the PSD itself
+    try {
+      const copy = tab.layers[0];
+      copy.visible = true;   // a hidden season layer arrives hidden
+      await action.batchPlay([{ _obj: 'revealAll' }], {});
+      const b = copy.bounds;
+      await tab.crop({ left: b.left, top: b.top, right: b.right, bottom: b.bottom });
+    } catch (e) {   // no half-made tab stays open
+      try { await tab.closeWithoutSaving(); app.activeDocument = doc; } catch (_) {}
+      throw e;
+    }
+  }, { commandName: 'Edit in tab' });
+  return tab;
+}
+
+// Whether a layer still exists, asked by id in one call (a DOM walk costs a host round trip per layer).
+async function layerExists(docId, id) {
+  try {
+    const r = await action.batchPlay([{ _obj: 'get', _target: [{ _property: 'layerID' }, { _ref: 'layer', _id: id }, { _ref: 'document', _id: docId }] }], {});
+    return !!(r && r[0] && r[0].layerID === id);
+  } catch (_) { return false; }
+}
+
+// How much of `doc`'s canvas is see-through in one layer (G.seeThroughShare), or null when Photoshop
+// can't hand over the pixels. Runs inside the caller's modal scope.
+async function seeThroughShare(doc, layerId) {
+  const imaging = require('photoshop').imaging;
+  if (!imaging || !imaging.getPixels) return null;
+  const W = Math.round(doc.width), H = Math.round(doc.height);
+  let img = null;
+  try {
+    const res = await imaging.getPixels({ documentID: doc.id, layerID: layerId, componentSize: 8, applyAlpha: false, sourceBounds: { left: 0, top: 0, right: W, bottom: H } });
+    img = res && res.imageData;
+    if (!img) return null;
+    const sb = res.sourceBounds || { left: 0, top: 0, right: W, bottom: H };   // trimmed to the part that holds pixels
+    const data = img.hasAlpha ? await img.getData({ chunky: true }) : null;
+    return G.seeThroughShare(data, img.width, img.height, img.components, !!img.hasAlpha, sb.right - sb.left, sb.bottom - sb.top, W, H);
+  } catch (_) { return null; }
+  finally { try { if (img) img.dispose(); } catch (_) {} }
+}
+
+function findLayerNamed(layers, name) {
+  for (let i = 0; i < layers.length; i++) {
+    if (layers[i].name === name) return layers[i];
+    const f = layers[i].layers ? findLayerNamed(layers[i].layers, name) : null;
+    if (f) return f;
+  }
+  return null;
+}
+
+// ctx, recorded at Edit: { srcDocId, layerId, layer, kind: 'poster' | 'logo', tag, logoName, left, top, w, h }.
+// Returns { ok: true, mode: 'poster' | 'logo' | 'newLogo', refit, share, hidOld }, or
+// { ok: false, reason: 'psd-closed' | 'layer-gone' | 'no-logo-group' }. On any failure the tab stays open.
+async function sendBackFromTab(tab, ctx, constants) {
+  const src = Array.from(app.documents || []).find((d) => d.id === ctx.srcDocId);
+  if (!src) return { ok: false, reason: 'psd-closed' };
+  const old = (await layerExists(src.id, ctx.layerId)) ? ctx.layer : null;
+  let out = null;
+  await core.executeAsModal(async (ec) => {
+    app.activeDocument = tab;
+    // Stamp Visible: what the tab shows, as one new layer. A tab with a single layer can't be stamped: that layer is it.
+    let stampId, stamped = false;
+    try {
+      await action.batchPlay([{ _obj: 'mergeVisible', duplicate: true }], {});
+      stampId = tab.activeLayers[0].id;
+      stamped = true;
+    } catch (e) {
+      const shown = Array.from(tab.layers).filter((L) => L.visible);
+      if (shown.length !== 1) throw e;
+      stampId = shown[0].id;
+    }
+    let mode = ctx.kind, share = null;
+    if (mode === 'poster') {
+      share = await seeThroughShare(tab, stampId);
+      if (share !== null && share >= G.LOGO_SHARE) mode = 'newLogo';
+    }
+    const logoGrp = mode === 'newLogo' ? await findLogoGroup(src, constants) : null;
+    const stop = mode === 'newLogo' ? (logoGrp ? '' : 'no-logo-group') : (old ? '' : 'layer-gone');
+    if (stop) {
+      if (stamped) { try { await action.batchPlay([{ _obj: 'delete', _target: [{ _ref: 'layer', _id: stampId }] }], {}); } catch (_) {} }
+      out = { ok: false, reason: stop };
+      return;
+    }
+    // Everything that touches the PSD, the arriving copy included, is one history step: kept when it
+    // all worked, rolled back otherwise.
+    const step = await ec.hostControl.suspendHistory({ documentID: src.id, name: mode === 'newLogo' ? 'Send back as logo' : 'Send back ' + ctx.tag });
+    let done = false;
+    try {
+      await action.batchPlay([
+        { _obj: 'select', _target: [{ _ref: 'layer', _id: stampId }], makeVisible: false },
+        { _obj: 'duplicate', _target: [{ _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' }], to: { _ref: 'document', _id: src.id }, name: SENT_BACK, version: 5 },
+      ], {});
+      app.activeDocument = src;
+      let copy = null;   // selecting it by name makes it the active layer
+      try {
+        await action.batchPlay([{ _obj: 'select', _target: [{ _ref: 'layer', _name: SENT_BACK }], makeVisible: false }], {});
+        const active = src.activeLayers[0];
+        if (active && active.name === SENT_BACK) copy = active;
+      } catch (_) {}
+      if (!copy) copy = findLayerNamed(src.layers, SENT_BACK);
+      if (!copy) throw new Error('the cleaned layer did not arrive in the PSD');
+      const b = copy.bounds, w = b.right - b.left, h = b.bottom - b.top;
+      if (mode === 'newLogo') {
+        const logos = Array.from(logoGrp.layers || []);
+        if (logos.length) await copy.move(logos[0], constants.ElementPlacement.PLACEBEFORE);
+        else await copy.move(logoGrp, constants.ElementPlacement.PLACEINSIDE);
+        let hidOld = 0;
+        for (const K of logos) { if (K.visible) { K.visible = false; hidOld++; } }
+        copy.name = ctx.logoName;
+        copy.visible = true;
+        await fitTo(copy, G.computeLogoGeometry(w, h, src.width, src.height, LOGO_DENSITY), w, constants);
+        if (old) {   // the poster stays selected, so the next Edit opens it again (to clean its lettering)
+          try { await action.batchPlay([{ _obj: 'select', _target: [{ _ref: 'layer', _id: old.id }], makeVisible: false }], {}); } catch (_) {}
+        }
+        out = { ok: true, mode, share, hidOld };
+      } else {
+        const wasVisible = old.visible;
+        await copy.move(old, constants.ElementPlacement.PLACEBEFORE);
+        copy.name = old.name;
+        try { copy.opacity = old.opacity; copy.blendMode = old.blendMode; } catch (_) {}
+        const refit = Math.abs(w - ctx.w) >= 1 || Math.abs(h - ctx.h) >= 1;
+        if (refit) {
+          await fitTo(copy, mode === 'logo'
+            ? G.computeLogoGeometry(w, h, src.width, src.height, LOGO_DENSITY)
+            : G.computePosterFitGeometry(w, h, src.width, bottomGuideY(src, constants)), w, constants);
+        } else {
+          await copy.translate(ctx.left - b.left, ctx.top - b.top);
+        }
+        copy.visible = wasVisible;
+        await deleteById(src, old.id);
+        out = { ok: true, mode, refit };
+      }
+      done = true;
+    } finally {
+      await ec.hostControl.resumeHistory(step, done);   // false rolls the PSD back to before Send back
+      if (!done) {   // and the arriving copy never stays behind
+        try { await action.batchPlay([{ _obj: 'delete', _target: [{ _ref: 'layer', _name: SENT_BACK }, { _ref: 'document', _id: src.id }] }], {}); } catch (_) {}
+      }
+    }
+    await tab.closeWithoutSaving();
+    app.activeDocument = src;
+  }, { commandName: 'Send back' });
+  return out;
+}
+
+// Close an edit tab without sending it back, and return to its PSD when that is still open.
+async function closeEditTab(tab, srcDocId) {
+  await core.executeAsModal(async () => {
+    await tab.closeWithoutSaving();
+    const src = Array.from(app.documents || []).find((d) => d.id === srcDocId);
+    if (src) app.activeDocument = src;
+  }, { commandName: 'Close edit tab' });
+}
+
+// Save BG's last step: close the tab, return to its PSD and take the layer it was opened from out of it
+// (one history step). Returns whether the layer was still there to remove.
+async function closeEditTabAndRemove(tab, srcDocId, layerId) {
+  let removed = false;
+  await core.executeAsModal(async () => {
+    await tab.closeWithoutSaving();
+    const src = Array.from(app.documents || []).find((d) => d.id === srcDocId);
+    if (!src) return;
+    app.activeDocument = src;
+    if (await layerExists(src.id, layerId)) { await deleteById(src, layerId); removed = true; }
+  }, { commandName: 'Remove backdrop layer' });
+  return removed;
+}
+
 module.exports = {
-  readLayerTree, setLayersVisible,
+  readLayerTree, setLayersVisible, openLayerInTab, sendBackFromTab, closeEditTab, closeEditTabAndRemove, findLogoGroup,
   placeSelected, trim, exportLogoPng, placeCollectionLogo, removeCollectionLogo, forceGradientVisible,
   hideManualCollectionLogos, LOGO_DENSITY, makeCropDoc, setSquareSelection, readSelectionBounds,
-  selectTool, cropSaveSquare, closeCropDoc, exportSelectedLayersJpg,
+  selectTool, cropSaveSquare, closeCropDoc, exportSelectedLayersJpg, checkCoverage, TMP_LOGO,
 };

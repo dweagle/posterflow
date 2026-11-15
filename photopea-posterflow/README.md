@@ -75,7 +75,7 @@ can also point them at the install page:
 
 ### Panel size
 
-`manifest.json` sets `"w": 228, "h": 600` so the panel opens at the same size as the in-app
+`manifest.json` sets `"w": 228, "h": 648` so the panel opens at the same size as the in-app
 plugin (the tag chips sit in two rows, MOVIE · SHOW · COLLECTION over SPECIALS · LIMITED SERIES,
 and wrap on narrower hosts). **Heads-up:** unlike the HTML (fetched live from
 `url`), Photopea copies `name` / `icon` / `w` / `h` into its gallery record **when you publish**.

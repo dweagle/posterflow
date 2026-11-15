@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { Check, FolderOpen } from 'lucide-react'
 import type { CommunityRequest } from '../../api/community'
 import {
-  fetchPosterExportFile,
   getPosterExportUrl,
   listPosterExports,
   type PosterExportFile,
@@ -19,8 +18,8 @@ type Props = {
   /** What posting does (Discord, Discord + IDarr, IDarr only); only changes the button label here. */
   action?: CommunityUploadAction
   onClose: () => void
-  /** Files chosen from the server, wrapped as File objects for the normal upload path. */
-  onPost: (files: File[]) => void
+  /** The exports chosen. They are already on the server, which uploads them by name. */
+  onPost: (picks: PosterExportFile[]) => void
   /** Fall back to the browser's own file dialog. */
   onPickFromComputer: () => void
 }
@@ -49,59 +48,28 @@ export function sortForRequest(files: PosterExportFile[]): PosterExportFile[] {
   return [...files].sort((a, b) => rank(a.match) - rank(b.match) || b.mtime - a.mtime)
 }
 
-/** Poster slot = null for the plain poster, N for season N (0 = Specials). */
-export type PosterSlot = number | null
-
-/** "Seasons: 1, 2" on the first notes line (multi-season requests carry no season_number). */
-export function requestedSeasonsFromNotes(notes: string | null | undefined): number[] {
-  const first = (notes ?? '').split('\n')[0]
-  if (!first.startsWith('Seasons: ')) return []
-  return first.slice('Seasons: '.length).split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n))
-}
-
-/** The slots a request asks for; 'all' for a whole show, where every exported slot is wanted. */
-export function requestedSlots(request: Pick<CommunityRequest, 'media_type' | 'season_number' | 'notes'>): Set<PosterSlot> | 'all' {
-  if (request.media_type === 'show') return 'all'
-  if (request.media_type === 'season') {
-    if (request.season_number != null) return new Set<PosterSlot>([request.season_number])
-    const seasons = requestedSeasonsFromNotes(request.notes)
-    return seasons.length ? new Set<PosterSlot>(seasons) : 'all'
-  }
-  return new Set<PosterSlot>([null])
-}
-
-/** The newest same-item export per requested slot: what the picker selects on open. */
-export function autoSelect(files: PosterExportFile[], slots: Set<PosterSlot> | 'all'): PosterExportFile[] {
-  const newest = new Map<PosterSlot, PosterExportFile>()
-  for (const f of files.filter((f) => f.match).sort((a, b) => b.mtime - a.mtime)) {
-    if (!newest.has(f.season)) newest.set(f.season, f)
-  }
-  return [...newest.values()].filter((f) => slots === 'all' || slots.has(f.season))
-}
-
 /** Pick finished posters that the panels already exported to the server and post them to the
- * request's Discord thread, skipping the OS file dialog (slow on Macs with network shares). */
+ * request's Discord thread, skipping the OS file dialog (slow on Macs with network shares).
+ * The server says which posters the request asks for and which exports start selected (the newest
+ * of each): the same choice the editor panels' Upload button makes. */
 export default function RequestUploadPickerModal({ request, action = 'discord', onClose, onPost, onPickFromComputer }: Props) {
   const [data, setData] = useState<PosterExportListResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<View>('matching')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [preparing, setPreparing] = useState(false)
   const [preview, setPreview] = useState<PosterExportFile | null>(null)
   const [autoCount, setAutoCount] = useState(0)
 
   const { tmdb_id, tvdb_id, title, year, media_type, season_number, notes } = request
-  const slots = useMemo(() => requestedSlots({ media_type, season_number, notes }), [media_type, season_number, notes])
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    const seasons = slots === 'all' ? [] : [...slots].filter((n): n is number => n != null)
-    listPosterExports({ tmdb_id, tvdb_id, title, year, seasons, media_type })
+    listPosterExports({ tmdb_id, tvdb_id, title, year, media_type, season_number, notes })
       .then((res) => {
         if (cancelled) return
-        const picked = autoSelect(res.files, slots)
+        const picked = res.files.filter((f) => f.selected)
         setData(res)
         setSelected(new Set(picked.map(fileKey)))
         setAutoCount(picked.length)
@@ -110,7 +78,7 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
       .catch((e) => { if (!cancelled) setError(getApiErrorMessage(e, 'Failed to list exports')) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [tmdb_id, tvdb_id, title, year, slots, media_type])
+  }, [tmdb_id, tvdb_id, title, year, media_type, season_number, notes])
 
   const all = useMemo(() => sortForRequest(data?.files ?? []), [data])
   const matching = useMemo(() => all.filter((f) => f.match), [all])
@@ -129,22 +97,13 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
     })
   }
 
-  const handlePost = async () => {
+  const handlePost = () => {
     const picks = [...selected].map((k) => byKey.get(k)).filter((f): f is PosterExportFile => !!f)
-    if (!picks.length) return
-    setPreparing(true)
-    setError(null)
-    try {
-      const files = await Promise.all(picks.map((f) => fetchPosterExportFile(f)))
-      onPost(files)
-    } catch (e) {
-      setError(getApiErrorMessage(e, 'Could not read the selected files'))
-    } finally {
-      setPreparing(false)
-    }
+    if (picks.length) onPost(picks)
   }
 
-  const slotLabel = slots === 'all' ? '' : [...slots].filter((n): n is number => n != null).map((n) => seasonLabel(n)).join(', ')
+  // A one-season request is named at once; a multi-season one when the server has read its notes.
+  const slotLabel = (data?.seasons ?? (season_number != null ? [season_number] : [])).map((n) => seasonLabel(n)).join(', ')
   const heading = `${title}${year ? ` (${year})` : ''}${slotLabel ? ` · ${slotLabel}` : ''}`
 
   return (
@@ -192,7 +151,7 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
               {shown.map((f) => {
                 const k = fileKey(f)
                 const isSel = selected.has(k)
-                const badge = seasonLabel(f.season)
+                const badge = f.collection ? 'Collection' : seasonLabel(f.season)
                 return (
                   <div key={k} className="tmdb-gallery-item">
                     <div className="tmdb-gallery-thumb-wrapper">
@@ -212,7 +171,7 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
                     <div className="tmdb-gallery-item-meta">
                       <span className="export-picker-name" title={f.name}>{f.name}</span>
                       <span className="export-picker-age">
-                        {ageLabel(f.mtime)}{f.match && slots !== 'all' && !slots.has(f.season) ? ' · not requested' : ''}
+                        {ageLabel(f.mtime)}{f.match && !f.requested ? ' · not requested' : ''}
                       </span>
                       <button type="button" className="btn-link" onClick={() => setPreview(f)}>Preview</button>
                     </div>
@@ -230,10 +189,10 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
           <button
             type="button"
             className="btn-primary"
-            disabled={preparing || selected.size === 0}
-            onClick={() => void handlePost()}
+            disabled={selected.size === 0}
+            onClick={handlePost}
           >
-            {preparing ? 'Preparing…' : uploadActionButtonLabel(action, selected.size)}
+            {uploadActionButtonLabel(action, selected.size)}
           </button>
         </Modal.Footer>
       </Modal>

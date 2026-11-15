@@ -13,6 +13,7 @@ from PIL import Image
 
 import services.apple_tv as apple_tv
 from models.setting import Setting
+import api.maker_tools as maker_tools_module
 
 
 # ---------------------------------------------------------------------------
@@ -2249,6 +2250,33 @@ def test_save_squareart_export_invalid_filename_rejected(client, test_db):
         assert not (Path(squareart_dir) / "evil.exe").exists()
 
 
+def test_background_export_is_saved_and_then_reported_as_there(client, test_db):
+    """The panel's Save BG writes a title's background; the backdrop step asks whether it is there."""
+    name = "Alien (1979) {tmdb-348} {imdb-tt0078748} - background.jpg"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # nothing configured: the panel falls back to its own folder, and the check says why it cannot answer
+        assert client.put(f"/api/maker-tools/background-exports/{name}", content=b"jpg").status_code == 400
+        r = client.get(f"/api/maker-tools/artwork-exports/background/{name}")
+        assert r.status_code == 400 and r.json()["detail"] == "No background export folder configured."
+
+        test_db.add(Setting(key="background_export_folder", value=tmpdir))
+        test_db.commit()
+        assert client.get(f"/api/maker-tools/artwork-exports/background/{name}").json() == {"exists": False}
+        r = client.put(f"/api/maker-tools/background-exports/{name}", content=b"jpg-bytes")
+        assert r.status_code == 200 and r.json()["folder"] == tmpdir
+        assert (Path(tmpdir) / name).read_bytes() == b"jpg-bytes"
+        assert client.get(f"/api/maker-tools/artwork-exports/background/{name}").json() == {"exists": True}
+        # a gallery save lands in the same folder, so it is seen the same way
+        (Path(tmpdir) / "Dark (2017) {tmdb-70523} {tvdb-1} - background.jpg").write_bytes(b"x")
+        assert client.get("/api/maker-tools/artwork-exports/background/Dark (2017) {tmdb-70523} {tvdb-1} - background.jpg").json() == {"exists": True}
+
+        assert client.put("/api/maker-tools/background-exports/notes.txt", content=b"x").status_code == 400
+        assert client.put(f"/api/maker-tools/background-exports/{name}", content=b"").status_code == 400
+        assert client.get(f"/api/maker-tools/artwork-exports/posters/{name}").status_code == 400
+        assert client.get("/api/maker-tools/artwork-exports/background/notes.txt").status_code == 400
+        assert client.get("/api/maker-tools/artwork-exports/background/..%2Fsecret.jpg").status_code in (400, 404)
+
+
 def test_save_poster_export_writes_to_configured_folder(client, test_db):
     with tempfile.TemporaryDirectory() as poster_dir:
         test_db.add(Setting(key="poster_export_folder", value=poster_dir))
@@ -3705,7 +3733,7 @@ def _seed_export_folder(test_db, folder: str, key: str = "poster_export_folder")
 def test_poster_exports_list_unconfigured_is_empty(client):
     response = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 1})
     assert response.status_code == 200
-    assert response.json() == {"folders": [], "files": [], "truncated": False}
+    assert response.json() == {"folders": [], "files": [], "truncated": False, "seasons": []}
 
 
 def test_poster_exports_list_tags_files_by_request(client, test_db):
@@ -3748,14 +3776,16 @@ def test_poster_exports_list_tags_files_by_request(client, test_db):
         assert by_name[names[0]]["size"] == 1
 
         # season request: the season file is exact, the plain show poster is the same item
-        response = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 157239, "seasons": "1"})
+        response = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 157239, "media_type": "season", "season_number": 1})
+        assert response.json()["seasons"] == [1]
         by_name = {f["name"]: f for f in response.json()["files"]}
         assert by_name[names[1]]["match"] == "exact"
         assert by_name[names[0]]["match"] == "item"
         assert by_name[names[2]]["match"] == "item"
 
         # several requested seasons (0 = Specials) are all exact; junk in the list is ignored
-        response = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 157239, "seasons": "0, 1,x"})
+        response = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 157239, "media_type": "season", "notes": "Seasons: 0, 1,x\nany style"})
+        assert response.json()["seasons"] == [0, 1]
         by_name = {f["name"]: f for f in response.json()["files"]}
         assert by_name[names[1]]["match"] == "exact"
         assert by_name[names[2]]["match"] == "exact"
@@ -3769,6 +3799,94 @@ def test_poster_exports_list_tags_files_by_request(client, test_db):
         response = client.get("/api/maker-tools/poster-exports", params={"title": "Dune", "year": 1984})
         by_name = {f["name"]: f for f in response.json()["files"]}
         assert by_name[names[4]]["match"] is None
+
+
+def test_export_requested_slots_follow_the_request_type_season_and_notes():
+    slots = maker_tools_module._export_requested_slots
+    assert slots("movie", None, None) == [None]
+    assert slots("collection", None, None) == [None]
+    assert slots("person", None, None) == [None]
+    assert slots("", None, None) == [None]
+    assert slots("show", None, "Seasons: 1") is None
+    assert slots("season", 0, None) == [0]
+    assert slots("season", None, "Seasons: 3, 1\nplease") == [3, 1]     # the order they were asked in
+    assert slots("season", None, "Seasons: x") is None
+    assert slots("season", None, "any style") is None
+
+
+def test_export_slots_keep_a_collection_poster_apart():
+    slot, asked = maker_tools_module._export_slot, maker_tools_module._export_slot_requested
+    assert slot("Alien (1979) {tmdb-348}") is None
+    assert slot("Alien (1979) {tmdb-348} - Collection") == "collection"
+    assert slot("Alien (1979) {tmdb-348} - Collection (2)") == "collection"
+    assert slot("Dark (2017) {tmdb-1} - Season 3") == 3 and slot("Dark (2017) {tmdb-1} - Specials") == 0
+    assert slot("Alien {tmdb-8091} - Collection", "collection") is None   # for a collection request it is the poster
+    assert not asked("collection", [None]) and not asked("collection", None)   # a movie request, and a whole show
+    assert asked(None, None) and asked(4, None) and asked(2, [2]) and not asked(1, [2])
+
+
+def test_poster_exports_select_the_newest_export_of_each_requested_poster(client, test_db):
+    base = "Dark (2017) {tmdb-70523} {tvdb-1}"
+    names = [base + ".jpg", base + " (1).jpg", base + " - Season 1.jpg", base + " - Season 2.jpg",
+             base + " - Season 2 (1).jpg", base + " - Specials.jpg", base + " - Collection.jpg", "Other (2020) {tmdb-9}.jpg"]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _seed_export_folder(test_db, tmpdir)
+        for i, name in enumerate(names):   # each one newer than the one before
+            path = Path(tmpdir) / name
+            path.write_bytes(b"x")
+            os.utime(path, (1_000 + i, 1_000 + i))
+
+        def picked(**request):
+            files = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 70523, "tvdb_id": 1, **request}).json()["files"]
+            return ([f["name"] for f in files if f["selected"]], [f["name"] for f in files if f["match"] and not f["requested"]])
+
+        selected, not_requested = picked(media_type="show")              # every poster of the show, newest of each
+        assert sorted(selected) == sorted([names[1], names[2], names[4], names[5]])
+        assert not_requested == [names[6]]                               # never the collection poster
+        selected, not_requested = picked(media_type="season", season_number=2)
+        assert selected == [names[4]]
+        assert sorted(not_requested) == sorted([names[0], names[1], names[2], names[5], names[6]])
+        selected, _ = picked(media_type="season", notes="Seasons: 1, 0")
+        assert sorted(selected) == sorted([names[2], names[5]])
+        selected, _ = picked(media_type="season", season_number=9)
+        assert selected == []
+        files = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 70523, "media_type": "show"}).json()["files"]
+        other = next(f for f in files if f["name"] == names[7])
+        assert (other["match"], other["requested"], other["selected"]) == (None, False, False)
+
+
+def test_poster_exports_a_collection_poster_is_not_the_titles_own_poster(client, test_db):
+    """A " - Collection" JPG exported from a movie or show PSD carries that title's ids. It is the
+    plain poster only for a collection request."""
+    names = [
+        "Alien (1979) {tmdb-348} {imdb-tt0078748}.jpg",
+        "Alien (1979) {tmdb-348} {imdb-tt0078748} - Collection.jpg",
+        "Alien (1979) {tmdb-348} {imdb-tt0078748} - Collection (1).jpg",
+        "Alien Collection {tmdb-8091}.jpg",
+        "Alien {tmdb-8091} - Collection.jpg",
+    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _seed_export_folder(test_db, tmpdir)
+        for name in names:
+            (Path(tmpdir) / name).write_bytes(b"x")
+
+        movie = client.get("/api/maker-tools/poster-exports",
+                           params={"tmdb_id": 348, "title": "Alien", "year": 1979, "media_type": "movie"})
+        by_name = {f["name"]: f for f in movie.json()["files"]}
+        assert (by_name[names[0]]["match"], by_name[names[0]]["collection"]) == ("exact", False)
+        assert (by_name[names[1]]["match"], by_name[names[1]]["collection"]) == ("item", True)
+        assert (by_name[names[2]]["match"], by_name[names[2]]["collection"]) == ("item", True)   # Photopea's re-export suffix
+        assert by_name[names[1]]["season"] is None
+
+        show = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 348, "media_type": "show"})
+        assert {f["name"]: f for f in show.json()["files"]}[names[1]]["match"] == "item"
+
+        collection = client.get("/api/maker-tools/poster-exports",
+                                params={"tmdb_id": 8091, "title": "Alien Collection", "media_type": "collection"})
+        by_name = {f["name"]: f for f in collection.json()["files"]}
+        assert (by_name[names[3]]["match"], by_name[names[3]]["collection"]) == ("exact", False)
+        assert (by_name[names[4]]["match"], by_name[names[4]]["collection"]) == ("exact", False)   # its own poster, whatever the PSD is called
+        assert by_name[names[1]]["match"] is None                                               # the movie's id, not the collection's
 
 
 def test_poster_exports_keep_an_id_match_inside_its_tmdb_namespace(client, test_db):

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { posterLayerNames } from '../../src/api/makerTools'
 
 describe('posterLayerNames (tag → export payload)', () => {
@@ -19,6 +19,20 @@ describe('posterLayerNames (tag → export payload)', () => {
   it('preserves order so it maps to poster_paths index', () => {
     const posters = ['/x.jpg', '/y.jpg']
     expect(posterLayerNames(posters, { '/y.jpg': 'main', '/x.jpg': 'show' })).toEqual(['show', 'main'])
+  })
+})
+
+describe('listPosterExports', () => {
+  it('sends only the first notes line: the one that names seasons, however long the rest is', async () => {
+    const http = (await import('../../src/api/http')).default
+    const get = vi.spyOn(http, 'get').mockResolvedValue({ data: { folders: [], files: [], truncated: false, seasons: [1, 2] } })
+    try {
+      const { listPosterExports } = await import('../../src/api/makerTools')
+      await listPosterExports({ tmdb_id: 7, media_type: 'season', notes: 'Seasons: 1, 2\n' + 'please match the earlier seasons '.repeat(400) })
+      expect(get.mock.calls[0][1]?.params).toEqual({ tmdb_id: 7, media_type: 'season', notes: 'Seasons: 1, 2' })
+    } finally {
+      get.mockRestore()
+    }
   })
 })
 

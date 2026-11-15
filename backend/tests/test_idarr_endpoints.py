@@ -245,6 +245,43 @@ def test_idarr_upload_files_to_selected_sync_target(client, test_db, tmp_path):
     assert (source_dir / data["uploaded"][0]).exists()
 
 
+def test_idarr_upload_stores_each_file_before_reading_the_next(client, test_db, tmp_path, monkeypatch):
+    """A large drop is never held in memory whole: each file is written as soon as it is read."""
+    import api.idarr as idarr_api
+    from starlette.datastructures import UploadFile
+
+    source_dir = tmp_path / "idarr-source"
+    payload = {"sync_targets": [{"label": "Drive 1", "personal_drive_id": "folder-123", "source_dir": str(source_dir)}], "tmdb_api_key": "tmdb-key"}
+    test_db.add(Setting(key="maker_tools_idarr_config", value=json.dumps(payload)))
+    test_db.commit()
+
+    events = []
+    real_read, real_store = UploadFile.read, idarr_api.store_idarr_upload
+
+    async def read(self, size=-1):
+        events.append(f"read {self.filename}")
+        return await real_read(self, size)
+
+    def store(source_dir, is_asset_drive, filename, data):
+        events.append(f"store {filename}")
+        return real_store(source_dir, is_asset_drive, filename, data)
+
+    monkeypatch.setattr(UploadFile, "read", read)
+    monkeypatch.setattr(idarr_api, "store_idarr_upload", store)
+
+    response = client.post(
+        "/api/idarr/upload",
+        data={"sync_target_index": "0"},
+        files=[("files", ("a.jpg", b"first", "image/jpeg")), ("files", ("notes.txt", b"x", "text/plain")), ("files", ("b.jpg", b"second", "image/jpeg"))],
+    )
+
+    assert response.status_code == 200
+    assert events == ["read a.jpg", "store a.jpg", "store notes.txt", "read b.jpg", "store b.jpg"]
+    data = response.json()
+    assert data["uploaded"] == ["a.jpg", "b.jpg"] and data["skipped"] == ["notes.txt"]
+    assert (source_dir / "a.jpg").read_bytes() == b"first" and (source_dir / "b.jpg").read_bytes() == b"second"
+
+
 def test_idarr_upload_rejects_when_no_valid_images(client, test_db, tmp_path):
     source_dir = tmp_path / "idarr-source"
     payload = {

@@ -45,6 +45,8 @@
   .btn.sqcancel:hover { background: #b83a3a; }
   .btn.crop { background: #2e7d46; }   /* green while armed: the press that exports */
   .btn.crop:hover { background: #3a9a58; }
+  .btn[data-act="batch-run"] { background: #2e7d46; }   /* Run exports too: the same green */
+  .btn[data-act="batch-run"]:hover { background: #3a9a58; }
   .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; padding: 8px 4px; border-bottom: 1px solid #3a3a42; }
   .singles.hidden, .sequels.hidden { display: none; }
   .rowlabel { color: #9aa; margin-right: 2px; }
@@ -102,12 +104,26 @@
   .pexbtn.hidden { display: none; }
   .sqcancel.hidden { display: none; }
   /* Message strip — fixed height (fits a couple of notes; extras scroll), never grows or moves. */
-  .notes { height: 96px; flex: none; box-sizing: border-box; overflow-y: auto; padding: 5px 8px; background: #1b1b20;
+  .notes { height: 144px; flex: none; box-sizing: border-box; overflow-y: auto; padding: 5px 8px; background: #1b1b20;
     border-top: 1px solid #3a3a42; font-size: 11px; scrollbar-width: thin; scrollbar-color: #3a3a42 transparent; }
   .notes .msg { padding: 2px 0; }
+  /* Failures: red notes that stay until dismissed (fail()). Same red as the Square Art cancel. */
+  /* Requests waiting for their backdrop (the gear's backdrop step): amber, above the messages, until the
+     backdrop is saved, Complete now, X, or the wait runs out. */
+  .waits { flex: none; padding: 0 8px; background: #1b1b20; font-size: 11px; }
+  .waitnote { margin: 4px 0 0; padding: 3px 3px 3px 6px; background: rgba(237, 162, 0, 0.16); border: 1px solid #eda200; border-radius: 4px; }
+  .waitrow { display: flex; align-items: center; gap: 4px; }   /* the title and X, then the status line and Complete now */
+  .waitnote .waittext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .waitnote .waitstatus { flex: 1; min-width: 0; color: #9aa; font-size: 10px; }
+  .waitnote .btn { padding: 0 5px; font-size: 11px; white-space: nowrap; }
+  .alert { display: flex; align-items: flex-start; gap: 4px; margin: 2px 0; padding: 2px 2px 2px 6px; background: rgba(155, 44, 44, 0.3); border: 1px solid #9b2c2c; border-radius: 4px; }
+  .alert .alerttext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .alert .btn { padding: 0 5px; font-size: 11px; }
   .sqpresets { display: flex; justify-content: center; gap: 3px; }
   .sqpresets.hidden { display: none; }
   .sqpresets .btn { padding: 4px 3px; font-size: 11px; }
+  /* A question the next press answers (ask()). The blue of the MOVIE / SHOW chips. */
+  .notes .ask { margin: 2px 0; padding: 3px 6px; background: rgba(90, 130, 200, 0.22); border: 1px solid #5a86f0; border-radius: 4px; color: #e6e6e6; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -133,7 +149,7 @@
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
     <div class="batchrow hidden">
-      <input class="batchinput" type="text" placeholder="e.g. 8, 0-5, or blank = all" />
+      <input class="batchinput" type="text" placeholder="e.g. 8, 3-6, 0-5" />
       <button class="btn" data-act="batch-run">Run</button>
       <button class="btn" data-act="batch-help" title="Show what you can type here">?</button>
       <button class="btn" data-act="batch-cancel" title="Cancel">✕</button>
@@ -167,6 +183,11 @@
       <button class="btn" data-sq="1000" title="Place a 1000×1000 selection 100px from the top">1000</button>
     </span>
   </div>
+  <div class="trimbar cmbar">
+    <button class="btn" data-act="upload" title="Upload this PSD&#039;s exports for your claimed request, as the Upload button in Posterflow is set: to its Discord thread, to IDarr, or both. Posterflow picks the newest export of each poster the request asks for. The first press shows what will happen. Press again to do it.">Upload</button>
+    <button class="btn" data-act="complete" title="Mark your claimed request for this PSD complete. The first press names the request. Press again to complete it.">Complete</button>
+  </div>
+  <div class="waits"></div>
   <div class="notes"></div>
 
 <script>
@@ -192,6 +213,8 @@
   const squareArtBtn = document.querySelector('[data-act="squareart"]');
   const sqPresets = document.querySelector('.sqpresets');
   const sqCancelBtn = document.querySelector('[data-act="sq-cancel"]');
+  const uploadBtn = document.querySelector('[data-act="upload"]');
+  const completeBtn = document.querySelector('[data-act="complete"]');
   let sqArmed = false, squareArtBusy = false;   // armed = crop tab open, waiting for Crop
   let posterRestore = null;                     // visibility changes to undo after the isolate render
   let sqArt = null, sqCtx = null, sqWant = 0;   // trimmed art PNG (ArrayBuffer, fallback path only) + export ctx + last preset size
@@ -230,6 +253,10 @@
 
   // ---- talk to Photopea ----------------------------------------------------
   const send = (script) => PP.postMessage(script, '*');
+  // What tells a document from another tab (Photopea gives documents no id). /psd-exports/ tabs go by file name: the watcher renames them.
+  // A named function: Photopea drops a script that calls a function expression on the spot.
+  const PRINT_FN = 'function pfPrint(D){var s=""+(D.source||""),n=""+D.name,m=s.match(/\\/psd-exports\\/([^/?#]+)/);' +
+    'if(m){try{n=decodeURIComponent(m[1]).replace(/\\.psd$/i,"");}catch(e){}}return JSON.stringify([n,s,D.width*1,D.height*1]);}';
 
   const FETCH = `try{
     if(app.documents.length===0){app.echoToOE('PFL:'+JSON.stringify({singles:[],seasons:[],nodoc:true}));}
@@ -477,11 +504,11 @@
   const onRenamed = (json) => {
     renameBusy = false;
     let o = null; try { o = JSON.parse(json); } catch (_) {}
-    if (!o) { note('Rename failed.'); return; }
+    if (!o) { fail('Rename failed.'); return; }
     if (o.err === 'nodoc') note('No document open.');
     else if (o.err === 'same') note('That layer is already named "' + o.from + '".');
     else if (o.err === 'changed') note('The logo layer changed before it could be renamed — try again.');
-    else if (o.err) note('Rename failed.');
+    else if (o.err) fail('Rename failed.');
     else note('Renamed "' + o.from + '" \u2192 "' + o.to + '"' + (o.vis > 1 ? '  (' + o.vis + ' visible \u2014 only the topmost was renamed)' : '') + '.');
   };
 
@@ -525,8 +552,9 @@
       if (SI.lab === 'C') return;   // rendered above, in the finish row
       const c = chip(SINGLE_TEXT[SI.lab] || SI.lab, SI.v, false);
       const tag = SINGLE_TAG[SI.lab] || null;
-      c.title = tag ? tagTitle(SI.n, tag) : SI.n;
+      c.title = (tag ? tagTitle(SI.n, tag) : SI.n) + (SI.lab === 'CLS' ? '  ·  ' + finishTip('cls') : '');
       c.addEventListener('click', (ev) => { if (tag && ev.altKey) renameSelectedTo(tag); else clickSingle(SI); });
+      if (SI.lab === 'CLS') c.addEventListener('contextmenu', (ev) => { ev.preventDefault(); onFinishCls(); });
       togRow.appendChild(c);
     });
     singles.appendChild(finRow);
@@ -682,7 +710,7 @@
         let folder = ''; try { folder = (await r.json()).folder || ''; } catch (_) {}
         note('Saved "' + (ex.name || pendingDocName) + '.psd" → ' + (folder || 'the PSD export folder') + '.');
         flashSave('✓');
-      } catch (e) { flashSave('✗'); note('PSD save failed: ' + (e && e.message ? e.message : e)); console.error('PSD save failed:', e); }
+      } catch (e) { flashSave('✗'); fail('PSD save failed: ' + (e && e.message ? e.message : e)); console.error('PSD save failed:', e); }
       return;
     }
     // Name the JPG after the doc's authoritative full name (from its context) — Photopea mangles
@@ -693,6 +721,7 @@
       ? ex.name
       : (ex.raw || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
     const filename = base + activeSuffix() + '.jpg';
+    keepFinishJpg(filename, buf);
     const styleQ = ex.style ? '?style=' + encodeURIComponent(ex.style) : '';
     try {
       const r = await fetch(location.origin + '/api/maker-tools/image-exports/' + encodeURIComponent(filename) + styleQ, {
@@ -726,6 +755,21 @@
     d.className = 'msg'; d.textContent = t;
     notesEl.insertBefore(d, notesEl.firstChild);
     setTimeout(() => { if (d.parentNode) d.parentNode.removeChild(d); }, NOTE_TTL);
+  };
+  // A failure: a red note that stays until its ✕ is pressed. Newest first; past MAX_ALERTS the oldest go.
+  const MAX_ALERTS = 5;
+  const fail = (t) => {
+    const d = document.createElement('div');
+    d.className = 'alert';
+    const text = document.createElement('div');
+    text.className = 'alerttext'; text.textContent = t;
+    const x = document.createElement('button');
+    x.className = 'btn'; x.title = 'Dismiss'; x.textContent = '✕';
+    x.addEventListener('click', () => d.remove());
+    d.append(text, x);
+    notesEl.insertBefore(d, notesEl.firstChild);
+    Array.from(notesEl.querySelectorAll('.alert')).slice(MAX_ALERTS).forEach((a) => a.remove());
+    return d;
   };
 
   // --- the formula (mirror of backend/api/maker_tools.py) ---
@@ -775,11 +819,11 @@
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
   };
 
-  // Coerce a Photopea bound/dimension to a PRIMITIVE px number. The trailing *1 matters:
-  // Photopea bounds are UnitValue objects, and `number - UnitValue` arithmetic inside a script
-  // sign-flips (ExtendScript trap) — so we never do bounds math in-script; nv() is only used to
-  // echo clean numbers, and all deltas are computed in JS.
-  const NV = "function nv(x){if(x==null)return 0;if(typeof x=='number')return x;var v=x;if(x.as){try{v=x.as('px');}catch(e){v=(x.value!==undefined?x.value:x);}}else if(x.value!==undefined){v=x.value;}return v*1;}";
+  // Coerce a Photopea bound/dimension to a PRIMITIVE px number. Photopea's script engine reports
+  // `typeof` of a UnitValue as 'number', so that branch multiplies by 1 too: a raw UnitValue
+  // sign-flips `number - it`, turns Math.round/floor/max into NaN and JSON-serializes as an object
+  // (all measured in the real Photopea). Scripts may do math on what nv() returns.
+  const NV = "function nv(x){if(x==null)return 0;if(typeof x=='number')return x*1;var v=x;if(x.as){try{v=x.as('px');}catch(e){v=(x.value!==undefined?x.value:x);}}else if(x.value!==undefined){v=x.value;}return v*1;}";
 
   // Photopea follows Adobe's DOM, where bounds / translate use the document's RULER unit — if the
   // PSD's ruler is points/inches, our pixel numbers are misread (the layer flies off-canvas). So
@@ -928,7 +972,7 @@
     let o = null; try { o = JSON.parse(json); } catch (_) {}
     if (!o || o.err) {
       renameBusy = false;
-      note(!o ? 'Rename failed.' : o.err === 'nodoc' ? 'No document open.' : o.err === 'nologo' ? 'No LOGO group in this document.'
+      (o ? note : fail)(!o ? 'Rename failed.' : o.err === 'nodoc' ? 'No document open.' : o.err === 'nologo' ? 'No LOGO group in this document.'
         : o.err === 'empty' ? 'The LOGO group is empty.' : 'No visible layer in the LOGO group.');
       return;
     }
@@ -1004,7 +1048,7 @@
         note('Downloaded "' + filename + '" — no logo export folder configured (or the save failed).');
       }
       flashLogoExp('✓');
-    } catch (e) { flashLogoExp('✗'); note('Logo export failed: ' + (e && e.message ? e.message : e)); }
+    } catch (e) { flashLogoExp('✗'); fail('Logo export failed: ' + (e && e.message ? e.message : e)); }
   };
 
   // ---- Poster export -------------------------------------------------------
@@ -1122,7 +1166,7 @@
       }
       pexOk++; pexIdx++;
       pexNext();
-    } catch (e) { pexQueue = []; flashPex('✗'); note('Poster export failed: ' + (e && e.message ? e.message : e)); }
+    } catch (e) { pexQueue = []; flashPex('✗'); fail('Poster export failed: ' + (e && e.message ? e.message : e)); }
   };
 
   // ---- Square Art crop -----------------------------------------------------
@@ -1227,7 +1271,7 @@
   let sqArmTimer = null;
   const sqArmWatch = () => {
     if (sqArmTimer) clearTimeout(sqArmTimer);
-    sqArmTimer = setTimeout(() => { sqArmTimer = null; if (squareArtBusy && !sqArmed) { flashSquare('\u2717'); note('Square Art: no reply from Photopea. If a "' + SQ_TEMP + '" tab is open, close it and try again.'); } }, 20000);
+    sqArmTimer = setTimeout(() => { sqArmTimer = null; if (squareArtBusy && !sqArmed) { flashSquare('\u2717'); fail('Square Art: no reply from Photopea. If a "' + SQ_TEMP + '" tab is open, close it and try again.'); } }, 20000);
   };
   // Square Art's start, the Photoshop way (probed Sep 2026): a fresh transparent document the size of
   // the canvas, then layer.duplicate(newDoc) WITH THE PSD ACTIVE copies the visible POSTER variant into
@@ -1323,7 +1367,7 @@
         '}catch(e){app.echoToOE("PFLERR:"+e);}'), 600);
     } catch (e) {
       if (sqPath === 'dup') { sqFallback('the copied layer had no pixels'); return; }
-      flashSquare('\u2717'); note('Square Art failed: ' + (e && e.message ? e.message : e));
+      flashSquare('\u2717'); fail('Square Art failed: ' + (e && e.message ? e.message : e));
     }
   };
   // Duplicate path failed before arming: close its document and take the in-place route instead.
@@ -1340,7 +1384,7 @@
     if (docName !== sqTempName) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('That isn\'t the crop tab — switch to "' + SQ_TEMP + '", or press ✕ to cancel.'); return; }
     const n = raw.slice(0, bar).split(',').map(parseFloat);
     const [l, t, r, b, cw, ch] = n;
-    if (n.length !== 6 || n.some((v) => !isFinite(v))) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('Could not read the selection.'); return; }
+    if (n.length !== 6 || n.some((v) => !isFinite(v))) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; fail('Could not read the selection.'); return; }
     const { side, x, y, why } = sqPlan(l, t, r, b, cw, ch, sqSide);
     if (side < SQ_MIN) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('Selection is ' + side + 'px — square art must be at least ' + SQ_MIN + '×' + SQ_MIN + '.'); return; }
     // Anything that isn't a square sitting on the canvas is re-selected visibly first (why = edge /
@@ -1367,7 +1411,7 @@
         note('Downloaded "' + filename + '" (' + sizeTxt + ') — no square art folder configured (or the save failed).');
       }
       flashSquare('✓');
-    } catch (e) { flashSquare('✗'); note('Square Art failed: ' + (e && e.message ? e.message : e)); }
+    } catch (e) { flashSquare('✗'); fail('Square Art failed: ' + (e && e.message ? e.message : e)); }
   };
   // Crop the square out of the trimmed art canvas and encode a JPG on white; upscale to the wanted
   // preset size ONLY when the selection was maxed out by the art.
@@ -1390,7 +1434,7 @@
   // frontend/tests/lib/photopeaBatch.test.ts) — keep the two in sync when changing behavior.
   // One JPG per poster variant, saved INDIVIDUALLY to the image folder (or downloaded) — no ZIP,
   // no new subfolder. Two modes: (1) layers named s0/s1…/main/show → export each; (2) a single
-  // poster with a SEASONS group → ask which seasons (a count "8"=1–8, a range "3-6", or blank=all)
+  // poster with a SEASONS group → ask which seasons (a count "8"=1–8, or a range "3-6")
   // plus any singles (Specials/…). Runs one export at a time (Photopea posts one JPG per saveToOE).
   const batchBtn = document.querySelector('[data-act="batch"]');            // amber ⚡ — name-tag batch
   const seasonsBtn = document.querySelector('[data-act="batch-seasons"]');  // blue ⚡ — seasons from one poster
@@ -1611,19 +1655,26 @@
     } catch (e) { console.warn('Batch PUT failed, downloading:', e); download(buf, filename); return false; }
   };
 
+  // A batch belongs to the document its bar was opened on: on any other tab its scripts change nothing.
+  let batchPrint = null;
+  const SWITCHED = 'app.echoToOE("PFLSWITCHED:");';
+  const onBatchDoc = (doc, work, other) => batchPrint == null ? work : PRINT_FN + 'if(pfPrint(' + doc + ')!==' + JSON.stringify(batchPrint) + '){' + (other || '') + '}else{' + work + '}';
   const batchItemScript = (changes) =>
-    'try{var dd=app.activeDocument;var ch=' + JSON.stringify(changes) + ';' +
+    'try{var dd=app.activeDocument;' + onBatchDoc('dd', 'var ch=' + JSON.stringify(changes) + ';' +
     'for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}' +
-    'dd.saveToOE("jpg:0.90");}catch(e){app.echoToOE("PFLERR:"+e);}';
+    'dd.saveToOE("jpg:0.90");', SWITCHED) + '}catch(e){app.echoToOE("PFLERR:"+e);}';
 
   const batchNext = () => {
     if (batchIdx >= batchItems.length) { batchFinish(); return; }
     batchNote('Exporting ' + (batchIdx + 1) + '/' + batchItems.length + '…');
     const item = batchItems[batchIdx];
     send(item.collection ? batchCollectionScript(item.changes) : batchItemScript(item.changes));
+    batchWatchStart();
   };
   const onBatchBytes = async (buf) => {
+    batchWatchStop();
     const item = batchItems[batchIdx];
+    keepFinishJpg(batchBase + item.suffix + '.jpg', buf);
     const saved = await putImage(buf, batchBase + item.suffix + '.jpg', batchStyle);
     if (item.collection && batchColMove) { send(collectionCleanupScript(batchColMove)); batchColMove = null; }   // undo the logo move before the next item (messages are processed in order)
     batchOk++; batchIdx++;
@@ -1631,13 +1682,40 @@
     batchNext();
   };
   const batchFinish = () => {
+    batchWatchStop();
     batchBusy = false; resetBolts();
     batchNote('Done — exported ' + batchOk + ' JPG' + (batchOk === 1 ? '' : 's') + '.');
     fetchLayers();
     setTimeout(closeBatch, 2600);
     settle('batch', true, { count: batchOk });
   };
-  const batchAbort = (msg) => { batchBusy = false; resetBolts(); batchNote('Stopped: ' + msg); settle('batch', false, { reason: msg }); };
+  // A stopped batch puts a moved collection logo back before it reports.
+  const batchAbort = (msg) => {
+    batchWatchStop();
+    const item = batchItems[batchIdx], moved = batchColMove;
+    batchColMove = null;
+    if (moved) send(collectionCleanupScript(moved));
+    else if (batchLate) send('try{app.echoToOE("PFLCLEAN:late");}catch(e){}');   // marks the point after which no late bytes can arrive
+    const tail = moved ? '. The collection logo was moved back.' : (batchLate && item && item.collection ? '. Check the LOGO group in the PSD: the collection logo may be out of place.' : '');
+    batchBusy = false; resetBolts(); batchNote('Stopped: ' + msg + tail); settle('batch', false, { reason: msg + tail });
+  };
+  // Photopea drops a script that fails without a word, so an item that gets no reply stops the batch
+  // instead of hanging it. Only counted while the page is visible: a hidden tab pauses Photopea.
+  const BATCH_ITEM_MS = 60000;
+  let batchWatch = null, batchLate = false;   // batchLate: a reply that still turns up belongs to the stopped item
+  const batchWatchStop = () => { if (batchWatch) { clearTimeout(batchWatch); batchWatch = null; } };
+  const batchLateDone = () => { if (batchLate) { batchLate = false; discardBytes = Math.max(0, discardBytes - 1); } };
+  const batchWatchStart = () => {
+    batchWatchStop();
+    batchWatch = setTimeout(() => {
+      batchWatch = null;
+      if (!batchBusy) return;
+      if (document.hidden) { batchWatchStart(); return; }
+      batchLate = true; discardBytes++;
+      setTimeout(batchLateDone, 15000);   // never hold the next export's bytes for long if Photopea stays silent
+      batchAbort('no reply from Photopea while exporting ' + (batchIdx + 1) + '/' + batchItems.length);
+    }, BATCH_ITEM_MS);
+  };
 
   // Scan the doc for tag-candidate layers (raw name + visibility — the panel-side buildTagItems
   // parses them), every pairable text layer, and the doc's context — one round-trip. A layer named
@@ -1660,19 +1738,19 @@
     'var sm=nm.match(/^season\\s*0*(\\d+)$/);' +
     'if(sm){stx.push({n:parseInt(sm[1],10),p:here});}else if(nm=="special"||nm=="specials"){spx.push({p:here});}else if(/^complete limited/.test(nm)){clx.push({p:here});}else if(nm=="collection"){cox.push({p:here});}' +
     'if(L.typename=="LayerSet"){sc(L.layers,here);}}}sc(d.layers,[]);' +
-    'app.echoToOE("BATCHINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,clsText:clx,collectionText:cox,poster:pst,source:(""+(d.source||"")),name:d.name}));}catch(e){app.echoToOE("PFLERR:"+e);}';
+    PRINT_FN + 'app.echoToOE("BATCHINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,clsText:clx,collectionText:cox,poster:pst,source:(""+(d.source||"")),name:d.name,print:pfPrint(d)}));}catch(e){app.echoToOE("PFLERR:"+e);}';
 
   // Batch prep: (1) gradient safety net — force every root-level GRADIENT group (whole subtree)
   // visible and LEAVE it on (a nudged-off gradient otherwise ruins a whole batch; echoes whether
   // anything changed); (2) jsx parity — manual collection logos (LOGO children named c/c1/c2…)
   // are hidden so they only appear during the Collection placement, never on normal exports.
-  const GRAD_SCRIPT = 'try{var d=app.activeDocument,ch=0;function fv(g){if(!g.visible){g.visible=true;ch=1;}if(g.typename=="LayerSet"){for(var j=0;j<g.layers.length;j++)fv(g.layers[j]);}}' +
+  const gradScript = () => 'try{var d=app.activeDocument,ch=0;' + onBatchDoc('d', 'function fv(g){if(!g.visible){g.visible=true;ch=1;}if(g.typename=="LayerSet"){for(var j=0;j<g.layers.length;j++)fv(g.layers[j]);}}' +
     'for(var i=0;i<d.layers.length;i++){var L=d.layers[i];if(L.typename=="LayerSet"&&/^\\s*gradients?\\s*$/i.test(L.name))fv(L);}' +
     'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
     'var lg=fg(d.layers);' +
     'if(lg){for(var i=0;i<lg.layers.length;i++){var nm=(""+lg.layers[i].name).replace(/^\\s+|\\s+$/g,"").toLowerCase();' +
     'if(/^c\\d*$/.test(nm)&&lg.layers[i].visible){lg.layers[i].visible=false;}}}' +
-    'app.echoToOE("PFLGRAD:"+ch);}catch(e){app.echoToOE("PFLGRAD:0");}';
+    'app.echoToOE("PFLGRAD:"+ch);') + '}catch(e){app.echoToOE("PFLGRAD:0");}';
 
   // Collection export: apply the item's visibility, then move the logo so its bottom sits on the
   // collection ruler (181/1500 of canvas height from the bottom) by translating EVERY ART LAYER
@@ -1682,15 +1760,13 @@
   // copies here — and no auto-shrink (a too-tall logo is placed at original size with a warning;
   // scaling real layers isn't losslessly reversible). Direct LOGO children named c/c1/c2… are a
   // manual collection-only logo: only they show for this export (visibility restored by cleanup).
-  // Echoes PFLCOLMV:{dy,cv} so the panel builds the exact undo; any failure restores what moved,
-  // warns, and the export STILL runs, so the batch can never hang on placement.
-  // STEP 1 — read: apply the item's visibility, filter the manual-c layers, and echo the logo's
-  // bounds (union of individual layers' bounds — group-level calls misbehave in Photopea) as PLAIN
-  // NUMBERS. The panel computes dy in JS and sends the move as a literal (STEP 2): bounds arithmetic
-  // INSIDE a Photopea script sign-flips (the documented UnitValue trap — same reason Place Logo
-  // works this way). Fail paths export directly (bare) so the batch always advances.
+  // One script reads the logo's bounds (the union of its visible art layers: group-level calls
+  // misbehave in Photopea), works out dy, moves every art layer, echoes PFLCOLMV:dy,tall|cv so the
+  // panel can build the exact undo, then exports. The echo comes after the move and before the
+  // export, so the panel never holds an undo for a move that did not happen. Any failure restores
+  // the visibility it changed, warns, and the export STILL runs, so the batch can never hang here.
   const batchCollectionScript = (changes) => px(
-    'var dd=app.activeDocument;var ch=' + JSON.stringify(changes) + ';' +
+    'var dd=app.activeDocument;' + onBatchDoc('dd', 'var ch=' + JSON.stringify(changes) + ';' +
     'for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}' +
     'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
     'var lg=fg(dd.layers),cv=[];' +
@@ -1703,7 +1779,12 @@
     'if(L.typename=="LayerSet"){lv(L,ev);}else if(ev){var bb=L.bounds;var x1=nv(bb[0]),y1=nv(bb[1]),x2=nv(bb[2]),y2=nv(bb[3]);' +
     'if(x2-x1>0&&y2-y1>0){if(x1<ul)ul=x1;if(y1<ut)ut=y1;if(x2>ur)ur=x2;if(y2>ub)ub=y2;}}}}' +
     'lv(lg,true);' +
-    'if(ur>ul&&ub>ut){app.echoToOE("PFLCOLGEO:"+ul+","+ut+","+ur+","+ub+","+nv(dd.height)+"|"+JSON.stringify(cv));}' +
+    'if(ur>ul&&ub>ut){' +
+    'var H=nv(dd.height),dy=Math.round(H-(181/1500)*H-ub),tall=(ub-ut>((400-181)/1500)*H)?1:0;' +
+    'if(dy!==0){var lvs=[];function la(g){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];if(L.typename=="LayerSet"){la(L);}else{lvs.push(L);}}}la(lg);' +
+    'for(var i=0;i<lvs.length;i++){try{lvs[i].translate(0,dy);}catch(_e){}}}' +
+    'app.echoToOE("PFLCOLMV:"+dy+","+tall+"|"+JSON.stringify(cv));' +
+    'dd.saveToOE("jpg:0.90");}' +
     'else{if(cv.length){for(var i=0;i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}}' +
     'app.echoToOE("PFLBWARN:The LOGO group has no visible content — Collection exported without a logo.");dd.saveToOE("jpg:0.90");}' +
     '}else if(lg){app.echoToOE("PFLBWARN:The LOGO group is hidden — Collection exported without a logo.");dd.saveToOE("jpg:0.90");}' +
@@ -1711,22 +1792,12 @@
     '}catch(pe){' +
     'try{if(lg&&cv.length){for(var i=0;i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}}}catch(e3){}' +
     'app.echoToOE("PFLBWARN:Collection logo placement failed ("+pe+") — exported without repositioning the logo.");' +
-    'dd.saveToOE("jpg:0.90");}');
-
-  // STEP 2 — move + export: translate every art layer in LOGO by the LITERAL dy the panel computed,
-  // then export. Per-leaf try so one stubborn layer can't abort the export.
-  const collectionMoveScript = (dy) => px(
-    'var dd=app.activeDocument;' +
-    'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
-    'var lg=fg(dd.layers);' +
-    'if(lg&&' + dy + '!==0){var lvs=[];function lv(g){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];if(L.typename=="LayerSet"){lv(L);}else{lvs.push(L);}}}lv(lg);' +
-    'for(var i=0;i<lvs.length;i++){try{lvs[i].translate(0,' + dy + ');}catch(_e){}}}' +
-    'dd.saveToOE("jpg:0.90");');
+    'dd.saveToOE("jpg:0.90");}', SWITCHED));
 
   // Undo the collection move: translate every art layer in LOGO back by -dy, restore the manual-c
   // visibility, and sweep any __PFLTMPLOGO__ orphans left by older (copy-based) runs.
   const collectionCleanupScript = (mv) => px(
-    'var d=app.activeDocument;' +
+    'var d=app.activeDocument;' + onBatchDoc('d',
     'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
     'var lg=fg(d.layers);' +
     'if(lg){var lvs=[];function lv(g){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];if(L.typename=="LayerSet"){lv(L);}else{lvs.push(L);}}}lv(lg);' +
@@ -1734,7 +1805,8 @@
     'var cv=' + JSON.stringify(mv.cv || []) + ';for(var i=0;i<cv.length&&i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}' +
     'if(!lg.visible)lg.visible=true;}' +
     'function fx(ls){for(var i=ls.length-1;i>=0;i--){var L=ls[i];if(L.name=="__PFLTMPLOGO__"){L.remove();}else if(L.typename=="LayerSet"){fx(L.layers);}}}fx(d.layers);' +
-    'app.echoToOE("PFLCLEAN:ok");');
+    'app.echoToOE("PFLCLEAN:ok");',
+    'app.echoToOE("PFLBWARN:Another document became active before the collection logo was moved back. Check the LOGO group in that PSD.");app.echoToOE("PFLCLEAN:ok");'));
 
   const startBatch = (mode) => {
     if (batchBusy) return;
@@ -1747,8 +1819,17 @@
   // The scan is shared; the active button (batchMode) forces which branch we take, so the two modes
   // never fight over auto-detection. 'tags' = one JPG per s0/s1…/main/show/c layer; 'seasons' = a
   // season range from a single poster's SEASONS group.
+  // An orange finish with one poster ('single' batch mode): its main JPG, then the seasons typed.
+  let singleMain = null;
+  // The show item when POSTER holds exactly one layer and it is tagged show / main; else null.
+  const soleShowFrom = (init, base) => {
+    if (!init || !init.poster || init.poster.count !== 1) return null;
+    const items = buildTagItems(init.variants || [], { season: init.seasonText || [], specials: init.specialsText || [], cls: init.clsText || [], collection: init.collectionText || [] }, base).items;
+    return items.length === 1 && items[0].key === 'show' ? items[0] : null;
+  };
   const onBatchInit = (json) => {
     let init; try { init = JSON.parse(json); } catch (_) { batchNote('Scan failed.'); return; }
+    batchPrint = typeof init.print === 'string' ? init.print : null;
     const ctx = resolveCtx(init.source, init.name);
     batchBase = ctx.name; batchStyle = ctx.style;
     if (batchMode === 'tags') {
@@ -1762,20 +1843,38 @@
       batchRow.classList.remove('hidden'); batchInput.style.display = '';
       batchInput.value = ''; batchInput.placeholder = 'blank = all · filter: c, cls, main, s1-8';
       batchNote('Found ' + batchItems.length + ' tagged export(s)' + (built.warnings.length ? ' (' + built.warnings.length + ' warning(s))' : '') + '. Run all, or type a filter.');
+    } else if (batchMode === 'single') {
+      batchWarnings = []; batchConvention = false;
+      singleMain = soleShowFrom(init, batchBase);
+      if (!singleMain) { batchNote('POSTER does not hold a single show poster.'); return; }
+      batchRow.classList.remove('hidden'); batchInput.style.display = '';
+      batchInput.value = ''; batchInput.placeholder = 'blank = main + Season 1 · e.g. 3, 0-5'; batchInput.focus();
+      batchNote('One poster. Run exports the main JPG and Season 1 from it. For more seasons type e.g. "3" (=1–3) or "0-5" (0 = Specials).');
     } else {
       batchWarnings = [];
       if (!(byRole('season').length || model.singles.length)) { batchNote('No SEASONS group or season layers found. For layers tagged s0/s1…/main/show, use the amber ⚡ instead.'); return; }
       batchConvention = false;
       batchRow.classList.remove('hidden'); batchInput.style.display = '';
-      batchInput.value = ''; batchInput.placeholder = 'e.g. 8, 0-5, or blank = all'; batchInput.focus();
-      batchNote('Which seasons? e.g. "8" (=1–8), "0-5" (0 = Specials), "2015-2020" (years), or blank = all.');
+      batchInput.value = ''; batchInput.placeholder = 'e.g. 8, 3-6, 0-5'; batchInput.focus();
+      batchNote('Which seasons? e.g. "8" (=1–8), "3-6", "0-5" (0 = Specials), "2015-2020" (years).');
     }
+  };
+  // The blue ⚡ needs a typed range: a blank box never means every season the template has text for
+  // (60 and Specials). What to tell the user, or '' when the box holds a range. A one-poster finish
+  // accepts blank: its main JPG and Season 1.
+  const seasonRangeProblem = () => {
+    const typed = String(batchInput.value || '').trim();
+    if (!typed) return batchMode === 'single' ? '' : 'Type the seasons first: e.g. "8" (=1–8), "3-6", "0-5" (0 = Specials) or "2015-2020" (years).';
+    return parseRange(typed).start == null ? 'Could not read "' + typed + '". Type seasons like "8" (=1–8), "3-6" or "0-5" (0 = Specials).' : '';
   };
   const runBatch = () => {
     if (batchBusy) return;
     if (!batchConvention) {
-      const r = parseRange(batchInput.value);
-      batchItems = (isYearRange(r) && byRole('year').length) ? yearItems(r.start, r.end) : seasonItems(r.start, r.end);
+      const why = seasonRangeProblem();
+      if (why) { batchNote(why); return; }
+      const typed = String(batchInput.value || '').trim(), r = typed ? parseRange(typed) : { start: 1, end: 1 };   // blank only gets this far for one poster
+      const seasons = (isYearRange(r) && byRole('year').length) ? yearItems(r.start, r.end) : seasonItems(r.start, r.end);
+      batchItems = batchMode === 'single' ? (singleMain ? [singleMain].concat(seasons) : []) : seasons;
     } else {
       const fk = parseTagFilter(batchInput.value);
       if (fk) batchItems = batchItems.filter((it) => fk[it.key]);
@@ -1784,7 +1883,7 @@
     batchBusy = true; modeBtn().textContent = '…'; batchRow.classList.add('hidden');
     batchWarnings.forEach((w) => note('Batch: ' + w));
     batchIdx = 0; batchOk = 0; batchColMove = null;
-    if (gradChk.checked) send(GRAD_SCRIPT);   // gradient safety net first (runs before the first item — messages are ordered)
+    if (gradChk.checked) send(gradScript());   // gradient safety net first (runs before the first item — messages are ordered)
     batchNext();
   };
 
@@ -1807,12 +1906,17 @@
   const settleAll = (ok, reason) => Object.keys(finWaits).forEach((k) => settle(k, ok, { reason }));
   const must = (r) => { if (!r.ok) throw new Error(r.reason || 'failed'); return r; };
 
-  // ⚙ finish steps: every step can be unticked; the order never changes. Every step is on by default.
+  // ⚙ finish steps: every step can be unticked; the order never changes. Every step is on by default,
+  // except the three that reach outside this computer (upload, backdrop, complete).
   const STEP_DEFAULTS = {
-    movie: { clear: true, main: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, squareArt: true },
-    show:  { clear: true, logoName: true, trim: true, save: true, tagCheck: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
-    collection: { c: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, saveAgain: true, squareArt: true },
+    movie: { clear: true, main: true, logoName: true, trim: true, save: true, coverage: true, jpg: true, logoPng: true, upload: false, backdrop: false, complete: false, squareArt: true },
+    show:  { clear: true, logoName: true, trim: true, save: true, tagCheck: true, coverage: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, upload: false, backdrop: false, complete: false, squareArt: true },
+    collection: { c: true, logoName: true, trim: true, save: true, coverage: true, jpg: true, logoPng: true, saveAgain: true, upload: false, backdrop: false, complete: false, squareArt: true },
   };
+  const UPLOAD_WHY = 'Upload the JPGs this finish exported for your claimed request, as the Upload button in Posterflow is set: to its Discord thread, to IDarr, or both. Only the posters the request asks for are sent. Needs Discord connected in Posterflow. Skipped when no claimed request matches the PSD';
+  const BACKDROP_WHY = 'Check that this title\'s background is saved in Posterflow before the request is completed. Not saved yet: the complete waits, a note says so, and the request is completed as soon as "<PSD name> - background.jpg" is saved. Complete now on the note is for titles with no backdrop. A wait gives up after 3 days and leaves the request open. With no request to complete, the note is a reminder that clears when the background is saved';
+  const COMPLETE_WHY = 'Mark your claimed request complete in Posterflow, or your claimed list item when there is no request. A request is completed only after its posters were uploaded';
+  const COVERAGE_WHY = 'Check that every poster this finish exports covers the canvas inside the border, down to the bottom guide. Blank canvas stops the finish before the exports. The PSD is still saved';
   const STEP_LABELS = {   // [key, chip text, what it does] in pipeline order
     movie: [
       ['clear', 'clear', 'Clear all season / Specials / Collection / Limited Series layers first: a stray visible season layer would misname the JPG'],
@@ -1820,8 +1924,12 @@
       ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
       ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
       ['save', 'save', 'Save the PSD back to Posterflow: a failed save stops the finish'],
+      ['coverage', 'coverage', COVERAGE_WHY],
       ['jpg', 'JPG', 'Export the flattened JPG'],
       ['logoPng', 'logo PNG', 'Export the LOGO group as a transparent PNG'],
+      ['upload', 'upload', UPLOAD_WHY],
+      ['backdrop', 'backdrop', BACKDROP_WHY],
+      ['complete', 'complete', COMPLETE_WHY],
       ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
     ],
     show: [
@@ -1830,10 +1938,14 @@
       ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
       ['save', 'save', 'Save the PSD back to Posterflow before the batch: a failed save stops the finish'],
       ['tagCheck', 'tag check', 'Check the tags before the batch: any problem stops the finish (orange only)'],
-      ['batch', 'batch', 'Run the batch (orange: every tag, unattended; blue: the seasons you type)'],
+      ['coverage', 'coverage', COVERAGE_WHY],
+      ['batch', 'batch', 'Run the batch (orange: every tag, unattended, or a single show poster and the seasons you type; blue: the seasons you type)'],
       ['logoPng', 'logo PNG', 'Export the LOGO group as a transparent PNG'],
       ['showOnly', 'show only', 'Hide the season text and show only the show-tagged poster'],
       ['saveAgain', 'save again', 'Save the PSD again so it closes without a prompt'],
+      ['upload', 'upload', UPLOAD_WHY],
+      ['backdrop', 'backdrop', BACKDROP_WHY],
+      ['complete', 'complete', COMPLETE_WHY],
       ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
     ],
     collection: [
@@ -1841,9 +1953,13 @@
       ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
       ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
       ['save', 'save', 'Save the PSD back to Posterflow: a failed save stops the finish'],
+      ['coverage', 'coverage', COVERAGE_WHY],
       ['jpg', 'JPG', 'Export the Collection JPG through the tag batch: the logo moves to the collection ruler and the file is named like the batch names it'],
       ['logoPng', 'logo PNG', 'Export the LOGO group as a transparent PNG'],
       ['saveAgain', 'save again', 'Save the PSD again so it closes without a prompt: the export toggles layers after the first save'],
+      ['upload', 'upload', UPLOAD_WHY],
+      ['backdrop', 'backdrop', BACKDROP_WHY],
+      ['complete', 'complete', COMPLETE_WHY],
       ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
     ],
   };
@@ -1887,23 +2003,42 @@
     ? 'Right-click: finish the movie poster: ' + stepList('movie')
     : tag === 'c'
     ? 'Right-click: finish the collection poster: ' + stepList('collection')
-    : 'Right-click: finish the show with the orange ⚡ (unattended)  ·  Shift+right-click: with the blue ⚡ (you type the seasons).  Steps: ' + stepList('show');
+    : tag === 'cls'
+    ? 'Right-click: finish the limited series: the main JPG and " - Season 1" with this text. One poster makes both. A show layer and a cls layer export as tagged. Season layers stop it. Steps: ' + stepList('show')
+    : 'Right-click: finish the show with the orange ⚡ (unattended; a single show poster waits for its seasons, blank = main + Season 1)  ·  Shift+right-click: with the blue ⚡ (you type the seasons).  Steps: ' + stepList('show');
   const skippedTail = (f, keys) => {   // "X and Y skipped" for whichever of the remaining steps are on, else "stopped"
     const names = STEP_LABELS[f].filter(([k]) => keys.indexOf(k) >= 0 && steps[f][k]).map(([, l]) => l);
     return names.length ? names.join(' and ') + ' skipped' : 'stopped';
   };
   const jpgs = (n) => n + ' JPG' + (n === 1 ? '' : 's');
-  const finishRun = (label) => {   // checklist: ✓ step · ✓ step (info) · – step skipped (why) · ✗ step: why
+  // `print` is the PSD the finish is for: once another document is active, no later step runs. Without
+  // one (the community steps, which touch no document) the checklist is not tied to a PSD.
+  const finishRun = (label, print) => {   // checklist: ✓ step · ✓ step (info) · – step skipped (why) · ✗ step: why
     const parts = [], failed = [];
+    let stopped = false;
+    // True once another document is active (and from then on); the first call records why.
+    const switched = async (name) => {
+      if (print == null) return false;
+      if (stopped) return true;
+      let now = null; try { now = await readPrint(); } catch (_) {}
+      if (now === print) return false;
+      stopped = true; failed.push(name);
+      parts.push('✗ ' + name + ': ' + (now == null ? 'Photopea did not answer' : now ? 'another document became active' : 'the document was closed') + ', so the finish stopped');
+      return true;
+    };
     const step = async (name, fn) => {
+      if (await switched(name)) return false;
       try {
         const r = await fn();
         parts.push(r && r.skipped ? '– ' + name + ' skipped (' + r.skipped + ')' : '✓ ' + name + (r && r.info ? ' (' + r.info + ')' : ''));
         return true;
       } catch (e) { parts.push('✗ ' + name + ': ' + (e && e.message ? e.message : e)); failed.push(name); return false; }
     };
-    const report = (tail) => note(label + ': ' + parts.concat(tail ? [tail] : []).join('  ·  '));
-    return { step, report, failed };
+    const report = (tail) => {
+      const t = label + ': ' + parts.concat(tail ? [tail] : []).join('  ·  ');
+      if (failed.length || /^STOPPED/.test(tail || '')) fail(t); else note(t);
+    };
+    return { step, report, failed, switched };
   };
 
   // Context for a finish: resolves the doc's Posterflow context the same way JPG does (so the logo
@@ -1916,14 +2051,14 @@
     'else{app.echoToOE("PFLEXP:"+JSON.stringify({raw:d.name}));}' +
     'app.echoToOE("PFLNAME:"+d.name);' +
     'var pg=false;for(var i=0;i<d.layers.length;i++){var L=d.layers[i];if(L.typename=="LayerSet"&&/^\\s*poster\\s*$/i.test(L.name)){pg=true;break;}}' +
-    'app.echoToOE("PFLFIN:"+JSON.stringify({poster:pg,logo:hasGrp(d.layers,/^\\s*logos?\\s*$/i)}));' +
+    PRINT_FN + 'app.echoToOE("PFLFIN:"+JSON.stringify({poster:pg,logo:hasGrp(d.layers,/^\\s*logos?\\s*$/i),print:pfPrint(d)}));' +
     '}catch(e){app.echoToOE("PFLERR:"+e);}';
   const onFinCtx = (json) => {
     let o = null; try { o = JSON.parse(json); } catch (_) {}
     const ex = pendingExport || {}; pendingExport = null;
     const base = ex.name ? ex.name : (ex.raw || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
     if (!o) settle('ctx', false, { reason: 'could not read the document' });
-    else settle('ctx', true, { poster: !!o.poster, logo: !!o.logo, base });
+    else settle('ctx', true, { poster: !!o.poster, logo: !!o.logo, base, print: typeof o.print === 'string' ? o.print : null });
   };
   // Rename the visible layer inside a group ('poster' = the root POSTER group, 'logo' = the LOGO
   // group anywhere); `one` refuses when several are visible (two visible posters would both export).
@@ -1963,6 +2098,8 @@
   // guard tripped) settles at once so nothing waits on an operation that never began.
   const startOp = (op, start, isBusy, ms) => { const p = finWait(op, ms); start(); if (!isBusy()) settle(op, false, { reason: 'could not start (busy)' }); return p; };
   const refreshModel = async () => { const p = finWait('fetch', 15000); fetchLayers(); await p; };
+  const PRINT_SCRIPT = 'try{' + PRINT_FN + 'app.echoToOE("PFLPRINT:"+pfPrint(app.activeDocument));}catch(e){app.echoToOE("PFLPRINT:");}';
+  const readPrint = async () => { const p = finWait('print', 15000); send(PRINT_SCRIPT); return must(await p).print; };
   const scanDoc = async () => { const p = finWait('scan', 15000); send(BATCH_SCAN); const r = must(await p); return JSON.parse(r.json); };
   const stepClear = async () => { const p = finWait('vis', 15000); clearAll(); must(await p); };
   const stepRename = async (which, target, one) => { const p = finWait('rename', 15000); send(finRenameScript(which, target, one)); return must(await p); };
@@ -1971,6 +2108,47 @@
   // (the finish used to carry on and quietly produce a poster with no logo PNG).
   const needLogo = (ctx) => { if (!ctx.logo && detectedStyle !== 'MM2K') throw new Error('no LOGO group'); return !!ctx.logo; };
   const stepLogoName = async (ctx) => { if (!needLogo(ctx)) return { skipped: 'no LOGO group on MM2K' }; await stepRename('logo', cleanTitle(ctx.base) + ' - Logo', false); };
+  // ---- Coverage: blank canvas in the poster layers about to be exported. Bounds only here (the
+  // Photoshop panel also reads pixels). The box is the one Fit Poster covers; mirrors geometry.js. ----
+  const coverageBox = (cw, bottomY) => ({ left: 25, top: 25, right: Math.round(cw) - 25, bottom: Math.floor(bottomY) });
+  const coverageGaps = (b, box) => [
+    { edge: 'bottom', px: box.bottom - b.bottom }, { edge: 'top', px: b.top - box.top },
+    { edge: 'left', px: b.left - box.left }, { edge: 'right', px: box.right - b.right },
+  ].filter((g) => g.px >= 1).sort((a, c) => c.px - a.px);
+  // Every direct child of the root POSTER group: name, visibility and bounds (art layers only: group bounds are unreliable here).
+  const COVER_SCRIPT = px(
+    "var d=app.activeDocument,pg=null,pi=-1;for(var i=0;i<d.layers.length;i++){var L=d.layers[i];if(L.typename=='LayerSet'&&/^\\s*poster\\s*$/i.test(L.name)){pg=L;pi=i;break;}}" +
+    "var out=[];if(pg){for(var j=0;j<pg.layers.length;j++){var K=pg.layers[j],o={n:''+K.name,v:!!K.visible};" +
+    "if(K.typename=='LayerSet'){o.g=true;}else{try{var b=K.bounds;o.b=[nv(b[0]),nv(b[1]),nv(b[2]),nv(b[3])];}catch(e){}}out.push(o);}}" +
+    "app.echoToOE('PFLCOVER:'+JSON.stringify({name:''+d.name,poster:!!pg,pi:pi,cw:nv(d.width),kids:out}));");
+  const readCover = async (ms) => { const p = finWait('cover', ms || 15000); send(COVER_SCRIPT); return must(await p).cover; };
+  // targets: [{ label, kid, why? }] (kid null = missing). Returns { skipped } or { problems: [text], unread: [label] }.
+  const coverCheck = (cover, targets) => {
+    const bottomY = BOTTOM_GUIDE[detectedStyle || cfg.style];
+    if (!bottomY) return { skipped: 'unknown template' };
+    const box = coverageBox(cover.cw, bottomY), problems = [], unread = [];
+    targets.forEach(({ label, kid, why }) => {
+      if (!kid) { problems.push(label + ': ' + (why || 'layer not found')); return; }
+      if (!kid.b) { unread.push(label); return; }
+      const b = { left: kid.b[0], top: kid.b[1], right: kid.b[2], bottom: kid.b[3] };
+      if (!(b.right - b.left > 0 && b.bottom - b.top > 0)) { problems.push(label + ': the layer is empty'); return; }
+      const gaps = coverageGaps(b, box);
+      if (gaps.length) problems.push(label + ': blank canvas (' + gaps.map((g) => '~' + Math.round(g.px) + ' px ' + (g.edge === 'bottom' ? 'above the bottom guide' : 'at the ' + g.edge + ' edge')).join(', ') + ')');
+    });
+    return { problems, unread };
+  };
+  // MOVIE, blue SHOW and the JPG button export what POSTER shows: its topmost visible layer.
+  const visibleTarget = (cover) => { const k = cover.kids.find((x) => x.v); return [{ label: k ? k.n : 'POSTER', kid: k || null, why: 'no visible layer' }]; };
+  // Tagged exports (orange SHOW, COLLECTION, an orange ⚡ Run): every tagged POSTER layer, or those `pick` keeps.
+  const taggedTargets = async (cover, pick) =>
+    ((await scanDoc()).variants || []).filter((v) => !pick || pick(v)).map((v) => ({ label: v.nm, kid: cover.kids[v.p[v.p.length - 1]] || null }));
+  const stepCoverage = async (pick) => {
+    const cover = await readCover();
+    const r = coverCheck(cover, await pick(cover));
+    if (r.skipped) return { skipped: r.skipped };
+    if (r.problems.length) throw new Error(r.problems.join('; '));
+    return r.unread.length ? { info: 'not checked: ' + r.unread.join(', ') } : undefined;
+  };
   const stepTrim = async () => must(await startOp('trim', trimDoc, () => trimBusy, 30000));
   const stepSave = async () => must(await startOp('save', saveDoc, () => saving, 120000));
   const stepJpg = async () => must(await startOp('jpg', exportJpg, () => jpgBusy, 120000));
@@ -1990,36 +2168,248 @@
     fetchLayers();
   };
 
-  let finishBusy = false, finishWaiting = false;   // a finish is running / the blue path is waiting on the range box
+  let finishBusy = false, finishWaiting = false;   // a finish is running / a SHOW finish is waiting on the range box (blue, or orange with one poster)
+  let finishDoc = null;   // the running finish's document (its print)
+  let cmBusy = false;   // an Upload / Complete button press is in flight
+  // ---- Community: upload this finish's JPGs for the claimed request, then complete it ----
+  // An upload does what the Upload button in Posterflow is set to do (Discord, IDarr, or both), and
+  // sends only the posters the request asks for. Through Posterflow's own endpoints: the panel holds
+  // nothing from Discord or the community service. The steps run after the exports, in the
+  // background, so Square Art opens at once.
+  const COMMUNITY = '/api/maker-tools/community/';
+  let finishX = null;   // the running finish: { kind, name, jpgs: [{ name, buf }], uploaded }
+  const communityOn = (f) => steps[f].upload || steps[f].backdrop || steps[f].complete;
+  const startFinishX = (kind, ctx) => { finishX = { kind, name: ctx.base, jpgs: [], uploaded: false, held: false }; };
+  // A JPG the running finish exported; a re-export of the same name replaces the earlier one.
+  const keepFinishJpg = (name, buf) => { const X = finishX; if (!finishBusy || !X) return; X.jpgs = X.jpgs.filter((j) => j.name !== name).concat([{ name, buf }]); };
+  // One call to a Posterflow endpoint; `body` is raw bytes or nothing. Throws with the server's own reason when it refuses.
+  const api = async (method, path, body) => {
+    const r = await fetch(location.origin + path, { method, headers: Object.assign(body ? { 'Content-Type': 'application/octet-stream' } : {}, authHeaders()), body });
+    let data = null; try { data = await r.json(); } catch (_) {}
+    if (!r.ok) throw new Error(data && typeof data.detail === 'string' ? data.detail : 'HTTP ' + r.status);
+    return data || {};
+  };
+  // What Posterflow's answer about the claim means for a step: '' to go on, else why it is skipped. Throws when it must stop.
+  const claimSkip = (c, X) => {
+    if (c.status === 'match') return '';
+    if (c.status === 'not_connected') return 'Discord is not connected in Posterflow';
+    if (c.status === 'no_id') return 'the PSD name has no {tmdb-…} id';
+    if (c.status === 'none') return 'none of your claimed requests matches "' + cleanTitle(X.name) + '"';
+    if (c.status === 'done') return 'already completed: ' + c.label;
+    if (c.status === 'expired') throw new Error('the Discord login in Posterflow has expired. Reconnect Discord there');
+    if (c.status === 'several') throw new Error(c.labels.length + ' claimed ' + (c.type === 'list_item' ? 'list items' : 'requests') + ' match (' + c.labels.join(', ') + '). Finish this one in Posterflow');
+    throw new Error('unexpected answer from Posterflow');
+  };
+  const stepUpload = async (X, c) => {
+    const skip = claimSkip(c, X);
+    if (skip) return { skipped: skip };
+    if (c.upload.problem) return { skipped: c.upload.problem };
+    if (!X.jpgs.length) return { skipped: 'no JPGs exported in this finish' };
+    const at = COMMUNITY + c.where + '/' + c.id + '/posters';
+    for (const j of X.jpgs) await api('PUT', at + '/' + encodeURIComponent(j.name), j.buf);
+    const r = await api('POST', at);   // Posterflow uploads only the posters the request asks for
+    if (!r.posted && !r.idarr) return { skipped: c.label + ' asks for none of the ' + jpgs(X.jpgs.length) + ' this finish exported' };
+    X.uploaded = true;
+    return { info: r.did + (r.skipped.length ? '; ' + r.skipped.length + ' not requested' : '') };
+  };
+  const stepComplete = async (X, c, uploadOn) => {
+    const skip = claimSkip(c, X);
+    if (skip) return { skipped: skip };
+    if (uploadOn && !X.uploaded && c.type !== 'list_item') return { skipped: 'nothing was uploaded' };   // a list item needs no upload
+    await api('POST', COMMUNITY + c.where + '/' + c.id + '/complete');
+    return { info: c.label };
+  };
+  // The gear's backdrop step. The background is saved: the complete runs now. Not saved: a claimed request
+  // (or list item) that would have been completed waits for it instead; with nothing to complete, the
+  // note is only a reminder. Either way the wait is saved, so it outlasts a reload.
+  const backgroundName = (name) => name + ' - background.jpg';
+  const backgroundSaved = async (file) => !!(await api('GET', '/api/maker-tools/artwork-exports/background/' + encodeURIComponent(file))).exists;
+  const stepBackdrop = async (X, c, S_) => {
+    const file = backgroundName(X.name);
+    if (await backgroundSaved(file)) return { info: 'already saved' };
+    if (S_.complete && c && c.status === 'match' && (!S_.upload || X.uploaded || c.type === 'list_item')) {
+      addWait({ id: c.id, at: Date.now(), where: c.where, kind: X.kind, name: X.name, label: c.label, file });
+      X.held = true;
+      return { info: 'not saved yet' };
+    }
+    addWait({ id: 'file:' + file, at: Date.now(), remind: true, label: cleanTitle(X.name), file });
+    return { info: 'not saved yet, reminder added' };
+  };
+  // Upload, backdrop, then complete (only if the upload did not fail), reported in a note of their own.
+  const finishCommunity = (f) => {
+    const S_ = steps[f], X = finishX;
+    if (!X || !communityOn(f)) return;
+    const F = finishRun(f.toUpperCase() + ' · ' + cleanTitle(X.name));
+    let c = null;
+    const claim = async () => { if (!c) c = await api('GET', COMMUNITY + 'claim?kind=' + X.kind + '&name=' + encodeURIComponent(X.name)); return c; };
+    const claimIfAny = async () => { try { return await claim(); } catch (_) { return null; } };
+    (async () => {
+      if (S_.upload && !(await F.step('upload', async () => stepUpload(X, await claim())))) { F.report(skippedTail(f, ['backdrop', 'complete'])); return; }
+      if (S_.backdrop) {
+        if (!(await F.step('backdrop', async () => stepBackdrop(X, S_.complete ? await claimIfAny() : null, S_)))) { F.report(skippedTail(f, ['complete'])); return; }
+        if (X.held) { F.report('complete waits for the backdrop'); return; }
+      }
+      if (S_.complete) await F.step('complete', async () => stepComplete(X, await claim(), S_.upload));
+      F.report();
+    })().catch((e) => fail('Error: ' + (e && e.message ? e.message : e)));
+  };
+
+  // ---- Requests waiting for their backdrop: an amber note each, checked every few seconds ----
+  // waits: [{ id, at, file, label, remind } | { id, at, file, label, where, kind, name }], saved in
+  // localStorage. A request's wait completes it when the background is saved; a reminder just clears.
+  // Every open Photopea tab has this panel and they share the one saved list, so it is read again
+  // before each change and each check, and a wait one tab is completing (by, byAt) is left to it.
+  const WAITS_KEY = 'posterflow.backdropWaits';
+  const WAIT_CHECK_MS = 3000;
+  const WAIT_DAYS = 3;   // a wait gives up after this long, so none sits here forever
+  const waitsEl = document.querySelector('.waits');
+  const clock = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  // A call that never answers would leave a wait busy for good: give up on it after 20 s.
+  const within = (p, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(what + ' timed out after 20 s')), 20000))]);
+  const loadWaits = () => { try { const w = JSON.parse(localStorage.getItem(WAITS_KEY) || '[]'); return Array.isArray(w) ? w : []; } catch (_) { return []; } };
+  let waits = loadWaits();
+  const TAB = Math.random().toString(36).slice(2);   // this panel, to the other tabs
+  const HELD_MS = 60000;        // how long another tab's "completing it" stands without news
+  const heldElsewhere = (w) => !!w.by && w.by !== TAB && Date.now() - (w.byAt || 0) < HELD_MS;
+  const waitStatus = {};        // wait id -> its status line, set in place so the buttons never re-render under a click
+  const waitBusy = new Set();   // wait ids being completed right now
+  const waitFailed = new Set(); // wait ids whose failure this panel has already shown
+  const setWaitStatus = (id, text) => {
+    waitStatus[id] = text;
+    const el = Array.from(waitsEl.querySelectorAll('.waitstatus')).find((e) => e.getAttribute('data-wait') === id);
+    if (el) el.textContent = text;
+  };
+  const renderWaits = () => {   // per wait: its title and X, then its status line and Complete now
+    waitsEl.innerHTML = '';
+    const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+    waits.forEach((w) => {
+      const what = w.where === 'list-items' ? 'list item' : 'request';
+      const d = el('div', 'waitnote'), top = el('div', 'waitrow'), bottom = el('div', 'waitrow');
+      const t = el('div', 'waittext');
+      t.textContent = (w.remind ? 'Backdrop not saved yet: ' : 'Waiting for backdrop: ') + w.label;
+      const x = el('button', 'btn');
+      x.setAttribute('data-wait-stop', w.id); x.textContent = '✕';
+      x.title = w.remind ? 'Dismiss the reminder' : 'Stop waiting. The ' + what + ' stays open.';
+      x.addEventListener('click', () => { dropWait(w.id); if (!w.remind) note('Stopped waiting for the backdrop: ' + w.label + '. The ' + what + ' is still open.'); });
+      top.append(t, x);
+      const st = el('div', 'waitstatus');
+      st.setAttribute('data-wait', w.id); st.textContent = waitStatus[w.id] || 'checking every 3 s';
+      bottom.append(st);
+      if (!w.remind) {
+        const now = el('button', 'btn');
+        now.setAttribute('data-wait-now', w.id); now.title = 'Complete the ' + what + ' now, without a backdrop'; now.textContent = 'Complete now';
+        now.addEventListener('click', () => completeWait(w.id, 'completed without a backdrop', true));
+        bottom.append(now);
+      }
+      d.append(top, bottom);
+      waitsEl.appendChild(d);
+    });
+  };
+  const keepWaits = () => { try { localStorage.setItem(WAITS_KEY, JSON.stringify(waits)); } catch (_) {} };
+  const saveWaits = () => { keepWaits(); renderWaits(); };
+  // Take the saved list as it stands now; the notes are redrawn only when a wait came or went.
+  const syncWaits = () => {
+    const before = waits.map((w) => w.id).join('|');
+    waits = loadWaits();
+    if (waits.map((w) => w.id).join('|') !== before) renderWaits();
+  };
+  const addWait = (w) => { waits = loadWaits().filter((o) => o.id !== w.id).concat([w]); saveWaits(); };
+  const dropWait = (id) => { waits = loadWaits().filter((o) => o.id !== id); delete waitStatus[id]; waitFailed.delete(id); saveWaits(); };
+  window.addEventListener('storage', (e) => { if (e.key === WAITS_KEY) syncWaits(); });
+  // Complete one waiting request. One that is no longer open (completed or released elsewhere) just clears.
+  // manual = Complete now: it always answers, and a failure always shows. The timed check shows a failure once.
+  const completeWait = async (id, why, manual) => {
+    syncWaits();
+    const w = waits.find((o) => o.id === id);
+    if (!w) return;
+    if (w.remind) { dropWait(id); note('Backdrop saved: ' + w.label + '.'); return; }
+    if (waitBusy.has(id)) { if (manual) note('Already completing ' + w.label + '.'); return; }
+    if (heldElsewhere(w)) { if (manual) note('Another Photopea tab is completing ' + w.label + '.'); return; }
+    waitBusy.add(id);
+    w.by = TAB; w.byAt = Date.now(); keepWaits();   // the other tabs leave it to this one, also while it retries
+    setWaitStatus(id, (manual ? 'completing' : 'backdrop saved · completing') + '…');
+    try {
+      const c = await within(api('GET', COMMUNITY + 'claim?kind=' + w.kind + '&name=' + encodeURIComponent(w.name)), 'the request lookup');
+      if (c.status === 'none' || c.status === 'done' || (c.status === 'match' && c.id !== id)) { dropWait(id); note('Backdrop wait cleared: ' + w.label + ' is no longer open.'); return; }
+      const skip = claimSkip(c, w);
+      if (skip) throw new Error(skip);
+      await within(api('POST', COMMUNITY + w.where + '/' + id + '/complete'), 'the complete');
+      dropWait(id);
+      note('Completed ' + w.label + ' (' + why + ').');
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e).replace(/\.$/, '');
+      setWaitStatus(id, clock() + ' · complete failed: ' + msg + ' · retrying');
+      if (manual || !waitFailed.has(id)) { waitFailed.add(id); fail('Could not complete ' + w.label + ': ' + msg + '. Still waiting. It retries.'); }
+    } finally { waitBusy.delete(id); }
+  };
+  // Waits past WAIT_DAYS go. A request's wait says so in red, because the request is still open.
+  const expireWaits = () => {
+    const limit = Date.now() - WAIT_DAYS * 86400000;
+    waits.filter((w) => !(w.at > limit) && !waitBusy.has(w.id)).forEach((w) => {
+      dropWait(w.id);
+      if (w.remind) note('Backdrop reminder dropped after ' + WAIT_DAYS + ' days: ' + w.label + '.');
+      else fail('Stopped waiting for the backdrop after ' + WAIT_DAYS + ' days: ' + w.label + '. The ' + (w.where === 'list-items' ? 'list item' : 'request') + ' is still open.');
+    });
+  };
+  let waitChecking = false;
+  const checkWaits = async () => {
+    if (waitChecking) return;
+    waitChecking = true;
+    try {
+      syncWaits();
+      expireWaits();
+      for (const w of waits.slice()) {
+        if (waitBusy.has(w.id)) continue;
+        if (heldElsewhere(w)) { setWaitStatus(w.id, 'another Photopea tab is completing it'); continue; }
+        let saved;
+        try { saved = await within(backgroundSaved(w.file), 'the check'); }
+        catch (e) { setWaitStatus(w.id, clock() + ' · ' + (e && e.message ? e.message : e) + ' · retrying'); continue; }
+        if (saved) await completeWait(w.id, 'backdrop saved', false);
+        else if (!/failed/.test(waitStatus[w.id] || '')) setWaitStatus(w.id, 'checked ' + clock() + ' · not saved yet');
+      }
+    } finally { waitChecking = false; }
+  };
+  renderWaits();
+  setInterval(checkWaits, WAIT_CHECK_MS);
+
   const abandonFinish = () => { if (finishWaiting && !batchBusy) settle('batch', false, { reason: 'season batch cancelled' }); };
   const finishGuard = async (label) => {   // → ctx, or null after a note
-    if (finishBusy || anyBusy()) { note(label + ': busy (close Square Art or wait for the current step).'); return null; }
+    if (finishBusy || cmBusy || anyBusy()) { note(label + ': busy (close Square Art or wait for the current step).'); return null; }
     if (model.nodoc) { note(label + ': no document open.'); return null; }
     finishBusy = true;
     try {
       await refreshModel();
       const p = finWait('ctx', 15000); send(finCtxScript()); const ctx = must(await p);
       if (!ctx.poster) { note(label + ': not a poster PSD (no POSTER group at the top level). Nothing was changed.'); finishBusy = false; return null; }
+      finishDoc = ctx.print;
       return ctx;
-    } catch (e) { note(label + ': ' + (e && e.message ? e.message : e)); finishBusy = false; return null; }
+    } catch (e) { fail(label + ': ' + (e && e.message ? e.message : e)); finishBusy = false; return null; }
   };
 
+  // The end of every finish: the community steps start, then Square Art. Square Art never opens on another document.
+  const finishSquareArt = async (F, f) => {
+    finishCommunity(f);
+    if (!steps[f].squareArt) { F.report('done'); return; }
+    if (await F.switched('Square Art')) { F.report(); return; }
+    F.report('opening Square Art'); squareArtClick();
+  };
   const onFinishMovie = async () => {
     const label = 'MOVIE', S_ = steps.movie;
     const ctx = await finishGuard(label); if (!ctx) return;
-    const F = finishRun(label);
+    startFinishX('movie', ctx);
+    const F = finishRun(label, ctx.print);
     try {
       if (S_.clear) await F.step('cleared', stepClear);
       if (S_.main) await F.step('main', stepMain);
       if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
       if (S_.trim) await F.step('trim', stepTrim);
       if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return; }
-      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('movie', ['jpg', 'logoPng', 'squareArt'])); return; }
-      if (S_.jpg && !(await F.step('JPG', stepJpg))) { F.report(skippedTail('movie', ['logoPng', 'squareArt'])); return; }
-      if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('movie', ['squareArt'])); return; }
-      if (S_.squareArt) { F.report('opening Square Art'); squareArtClick(); }
-      else F.report('done');
-    } catch (e) { note('Error: ' + (e && e.message ? e.message : e)); }
+      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('movie', ['coverage', 'jpg', 'logoPng', 'upload', 'backdrop', 'complete', 'squareArt'])); return; }
+      if (S_.coverage && !(await F.step('coverage', () => stepCoverage(visibleTarget)))) { F.report(skippedTail('movie', ['jpg', 'logoPng', 'upload', 'backdrop', 'complete', 'squareArt'])); return; }
+      if (S_.jpg && !(await F.step('JPG', stepJpg))) { F.report(skippedTail('movie', ['logoPng', 'upload', 'backdrop', 'complete', 'squareArt'])); return; }
+      if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('movie', ['upload', 'backdrop', 'complete', 'squareArt'])); return; }
+      await finishSquareArt(F, 'movie');
+    } catch (e) { fail('Error: ' + (e && e.message ? e.message : e)); }
     finally { finishBusy = false; }
   };
   // ---- Right-click COLLECTION: the MOVIE finish with "c" in place of "main" ----
@@ -2036,60 +2426,129 @@
   const onFinishCollection = async () => {
     const label = 'COLLECTION', S_ = steps.collection;
     const ctx = await finishGuard(label); if (!ctx) return;
-    const F = finishRun(label);
+    startFinishX('collection', ctx);
+    const F = finishRun(label, ctx.print);
     try {
       if (S_.c) await F.step('c', stepCollectionTag);
       if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
       if (S_.trim) await F.step('trim', stepTrim);
       if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return; }
-      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('collection', ['jpg', 'logoPng', 'saveAgain', 'squareArt'])); return; }
-      if (S_.jpg && !(await F.step('JPG', stepCollectionJpg))) { F.report(skippedTail('collection', ['logoPng', 'saveAgain', 'squareArt'])); return; }
-      if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('collection', ['saveAgain', 'squareArt'])); return; }
+      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('collection', ['coverage', 'jpg', 'logoPng', 'saveAgain', 'upload', 'backdrop', 'complete', 'squareArt'])); return; }
+      if (S_.coverage && !(await F.step('coverage', () => stepCoverage((cover) => taggedTargets(cover, (v) => v.nm === 'c'))))) { F.report(skippedTail('collection', ['jpg', 'logoPng', 'saveAgain', 'upload', 'backdrop', 'complete', 'squareArt'])); return; }
+      if (S_.jpg && !(await F.step('JPG', stepCollectionJpg))) { F.report(skippedTail('collection', ['logoPng', 'saveAgain', 'upload', 'backdrop', 'complete', 'squareArt'])); return; }
+      if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('collection', ['saveAgain', 'upload', 'backdrop', 'complete', 'squareArt'])); return; }
       if (S_.saveAgain) await F.step('saved again', stepSave);   // the export toggled layers after the first save; this one spares a prompt on close
-      if (S_.squareArt) { F.report('opening Square Art'); squareArtClick(); }
-      else F.report('done');
-    } catch (e) { note('Error: ' + (e && e.message ? e.message : e)); }
+      await finishSquareArt(F, 'collection');
+    } catch (e) { fail('Error: ' + (e && e.message ? e.message : e)); }
     finally { finishBusy = false; }
   };
   const finishShowTail = async (F, ctx) => {
     const S_ = steps.show;
-    if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('show', ['showOnly', 'saveAgain', 'squareArt'])); return; }
+    if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('show', ['showOnly', 'saveAgain', 'upload', 'backdrop', 'complete', 'squareArt'])); return; }
     const shown = S_.showOnly ? await F.step('show only', () => stepShowOnly(ctx)) : true;
     if (S_.saveAgain) await F.step('saved again', stepSave);   // the first save holds the work; this one spares a prompt on close
-    if (!shown) { F.report(skippedTail('show', ['squareArt'])); return; }
-    if (S_.squareArt) { F.report('opening Square Art'); squareArtClick(); }
-    else F.report('done');
+    if (!shown) { F.report(skippedTail('show', ['upload', 'backdrop', 'complete', 'squareArt'])); return; }
+    await finishSquareArt(F, 'show');
+  };
+  // The SHOW finish's prep steps, then the save. false = stopped here and reported.
+  const SHOW_TAIL = ['logoPng', 'showOnly', 'saveAgain', 'upload', 'backdrop', 'complete', 'squareArt'];
+  const showPrep = async (F, ctx) => {
+    const S_ = steps.show;
+    if (S_.clear) await F.step('cleared', stepClear);
+    if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
+    if (S_.trim) await F.step('trim', stepTrim);
+    if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return false; }
+    if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('show', ['coverage', 'batch'].concat(SHOW_TAIL))); return false; }
+    return true;
+  };
+  // A SHOW finish waits here for Run in the range box: Run's batchFinish / batchAbort, or ✕ / a bolt click.
+  const waitForRun = async (F, stepName) => {
+    finishWaiting = true;
+    const r = await finWait('batch', 3600000);
+    finishWaiting = false;
+    return F.step(stepName, async () => { must(r); return { info: jpgs(r.count) }; });
   };
   const onFinishShow = async (mode) => {   // 'tags' = orange ⚡ (unattended), 'seasons' = blue ⚡ (waits for Run)
     const label = 'SHOW (' + (mode === 'seasons' ? 'blue' : 'orange') + ' ⚡)', S_ = steps.show;
     const ctx = await finishGuard(label); if (!ctx) return;
-    const F = finishRun(label);
-    const TAIL = ['logoPng', 'showOnly', 'saveAgain', 'squareArt'];
+    startFinishX('show', ctx);
+    const F = finishRun(label, ctx.print);
     try {
-      if (S_.clear) await F.step('cleared', stepClear);
-      if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
-      if (S_.trim) await F.step('trim', stepTrim);
-      if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return; }
-      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('show', ['batch'].concat(TAIL))); return; }
+      if (!(await showPrep(F, ctx))) return;
+      if (S_.batch && await F.switched('batch')) { F.report(skippedTail('show', SHOW_TAIL)); return; }
       if (S_.batch && mode === 'tags') {
-        if (S_.tagCheck) {
-          const probs = tagProblems(await scanDoc(), ctx.base);
-          if (probs.length) { F.report('STOPPED. Fix these tags, then right-click SHOW again:  ' + probs.join('   ·   ')); return; }
-        }
-        if (!(await F.step('tag batch', stepTagBatch))) { F.report(skippedTail('show', TAIL)); return; }
+        const probs = S_.tagCheck ? tagProblems(await scanDoc(), ctx.base) : [];
+        // Checked before the tag stop, so one report lists the blank canvas and the tag problems together.
+        const covered = !S_.coverage || await F.step('coverage', () => stepCoverage((cover) => taggedTargets(cover)));
+        if (probs.length) { F.report('STOPPED. Fix these tags, then right-click SHOW again:  ' + probs.join('   ·   ')); return; }
+        if (!covered) { F.report(skippedTail('show', ['batch'].concat(SHOW_TAIL))); return; }
+        // One poster (POSTER holds a single show / main layer): wait for the seasons it should also make.
+        if (soleShowFrom(await scanDoc(), ctx.base)) {
+          const init = await startOp('batchInit', () => startBatch('single'), () => !batchBar.classList.contains('hidden'), 15000);
+          if (!init.ok) { F.report(skippedTail('show', ['batch'].concat(SHOW_TAIL))); return; }
+          F.report((S_.save ? 'PSD saved. ' : '') + 'One poster: press Run for the main JPG and Season 1, or type more seasons');
+          if (!(await waitForRun(F, 'tag batch'))) { F.report(skippedTail('show', SHOW_TAIL)); return; }
+        } else if (!(await F.step('tag batch', stepTagBatch))) { F.report(skippedTail('show', SHOW_TAIL)); return; }
       } else if (S_.batch) {
+        if (S_.coverage && !(await F.step('coverage', () => stepCoverage(visibleTarget)))) { F.report(skippedTail('show', ['batch'].concat(SHOW_TAIL))); return; }
         const init = await startOp('batchInit', () => startBatch('seasons'), () => !batchBar.classList.contains('hidden'), 15000);
-        if (!init.ok) { F.report('no season layers to batch; ' + skippedTail('show', TAIL)); return; }
+        if (!init.ok) { F.report('no season layers to batch; ' + skippedTail('show', SHOW_TAIL)); return; }
         F.report((S_.save ? 'PSD saved. ' : '') + 'Type the seasons and press Run');
-        finishWaiting = true;
-        const r = await finWait('batch', 3600000);   // Run's batchFinish / batchAbort, or ✕ / a bolt click
-        finishWaiting = false;
-        const ran = await F.step('season batch', async () => { must(r); return { info: jpgs(r.count) }; });
-        if (!ran) { F.report(skippedTail('show', TAIL)); return; }
+        if (!(await waitForRun(F, 'season batch'))) { F.report(skippedTail('show', SHOW_TAIL)); return; }
       }
       await finishShowTail(F, ctx);
-    } catch (e) { note('Error: ' + (e && e.message ? e.message : e)); }
+    } catch (e) { fail('Error: ' + (e && e.message ? e.message : e)); }
     finally { finishBusy = false; finishWaiting = false; }
+  };
+
+  // ---- Right-click LIMITED SERIES: the main JPG and " - Season 1" with the limited series text ----
+  // A show layer and a cls layer export as tagged, like the orange SHOW finish. One poster (tagged
+  // show / main / cls, or untagged) makes both JPGs. A season layer stops it: a limited series has none.
+  // What to export: { stop: why } or { items, targets, probs } (items null = the tag batch as it stands).
+  const limitedSeriesPlan = async (ctx, tagCheck) => {
+    const init = await scanDoc(), baseNorm = normName(ctx.base), variants = init.variants || [];
+    const keysOf = (v) => parseTagName(v.nm, baseNorm).tags.map((t) => t.key);
+    const seasonal = variants.filter((v) => keysOf(v).some((k) => /^s\d/.test(k)));
+    if (seasonal.length) return { stop: 'a limited series has no season posters, but POSTER has ' + seasonal.map((v) => '"' + v.nm + '"').join(', ') + '. Rename or delete them, then right-click LIMITED SERIES again' };
+    const has = (k) => variants.some((v) => keysOf(v).indexOf(k) >= 0);
+    const cover = await readCover();
+    if (has('show') && has('cls')) return { items: null, targets: await taggedTargets(cover), probs: tagCheck ? tagProblems(init, ctx.base) : [] };
+    // One poster: the layer tagged show / cls, else the topmost visible POSTER layer.
+    const one = variants.find((v) => keysOf(v).some((k) => k === 'show' || k === 'cls'));
+    const idx = one ? one.p[one.p.length - 1] : cover.kids.findIndex((K) => K.v);
+    if (idx < 0 || !(cover.pi >= 0)) return { stop: 'no visible poster in POSTER; nothing exported' };
+    const at = [cover.pi, idx];
+    const others = cover.kids.map((_, i) => ({ nm: '', p: [cover.pi, i], v: false })).filter((o) => o.p[1] !== idx);   // hidden for both JPGs
+    const items = buildTagItems([{ nm: 'show', p: at, v: true }, { nm: 'cls', p: at, v: true }].concat(others), scanTexts(init), ctx.base).items;
+    return { items, targets: [{ label: cover.kids[idx].n, kid: cover.kids[idx] }], probs: [] };
+  };
+  // Run a finish's own export items through the tag batch: its start sets the export name and style,
+  // then its items are swapped for ours.
+  const stepItemsBatch = async (items) => {
+    await startOp('batchInit', () => startBatch('tags'), () => !batchBar.classList.contains('hidden'), 15000);
+    batchMode = 'tags'; batchConvention = true; batchItems = items; batchWarnings = []; batchInput.value = '';
+    const r = must(await startOp('batch', runBatch, () => batchBusy, 900000));
+    return { info: jpgs(r.count) };
+  };
+  const onFinishCls = async () => {
+    const label = 'LIMITED SERIES', S_ = steps.show;
+    const ctx = await finishGuard(label); if (!ctx) return;
+    startFinishX('show', ctx);
+    const F = finishRun(label, ctx.print);
+    try {
+      if (!(await showPrep(F, ctx))) return;
+      if (S_.batch && await F.switched('batch')) { F.report(skippedTail('show', SHOW_TAIL)); return; }
+      if (S_.batch) {
+        const plan = await limitedSeriesPlan(ctx, S_.tagCheck);
+        if (plan.stop) { F.report('STOPPED: ' + plan.stop); return; }
+        const covered = !S_.coverage || await F.step('coverage', () => stepCoverage(() => plan.targets));
+        if (plan.probs.length) { F.report('STOPPED. Fix these tags, then right-click LIMITED SERIES again:  ' + plan.probs.join('   ·   ')); return; }
+        if (!covered) { F.report(skippedTail('show', ['batch'].concat(SHOW_TAIL))); return; }
+        if (!(await F.step('tag batch', () => (plan.items ? stepItemsBatch(plan.items) : stepTagBatch())))) { F.report(skippedTail('show', SHOW_TAIL)); return; }
+      }
+      await finishShowTail(F, ctx);
+    } catch (e) { fail('Error: ' + (e && e.message ? e.message : e)); }
+    finally { finishBusy = false; }
   };
 
   // ---- incoming messages from Photopea -------------------------------------
@@ -2103,25 +2562,21 @@
     else if (d.startsWith('PFLCTX:'))   { const raw = d.slice(7); activeCtx = null; if (raw && raw.charAt(0) === '{') { try { activeCtx = JSON.parse(raw); } catch (_) {} } updateDocUI(); }
     else if (d.startsWith('PFLDET:'))   { detectedStyle = d.slice(7); updateDocUI(); }
     else if (d.startsWith('PFLSIG:'))   { lastActiveSig = d.slice(7); }   // baseline the watcher from the read we just did → the next poll's identical sig doesn't trigger a redundant re-fetch
+    else if (d.startsWith('PFLPRINT:')) { settle('print', true, { print: d.slice(9) }); }
+    else if (d.startsWith('PFLSWITCHED:')) { if (batchBusy) batchAbort('another document became active; the batch stopped after ' + jpgs(batchOk)); }
     else if (d.startsWith('BATCHINIT:')){ if (finWaits.scan) settle('scan', true, { json: d.slice(10) }); else { onBatchInit(d.slice(10)); settle('batchInit', !batchRow.classList.contains('hidden'), { reason: 'nothing to export' }); } }
+    else if (d.startsWith('PFLCOVER:')) { let o = null; try { o = JSON.parse(d.slice(9)); } catch (_) {} settle('cover', !!o, o ? { cover: o } : { reason: 'unreadable reply' }); }
     else if (d.startsWith('PFLGRAD:'))  { if (d.slice(8) === '1') note('The GRADIENT group had hidden layers — turned on and left visible in the PSD.'); }
     else if (d.startsWith('PFLBWARN:')) { note('Batch: ' + d.slice(9)); }
-    else if (d.startsWith('PFLCOLGEO:')) {
-      // Logo bounds arrived as plain numbers — compute dy HERE (in-script bounds math sign-flips),
-      // remember the undo data, and send the literal move+export script.
-      const raw = d.slice(10);
-      const bar = raw.indexOf('|');
+    else if (d.startsWith('PFLCOLMV:')) {
+      // The script moved the logo by dy and exports next: remember the undo for the cleanup.
+      const raw = d.slice(9), bar = raw.indexOf('|');
       const nums = raw.slice(0, bar).split(',').map(parseFloat);
       let cvv = []; try { cvv = JSON.parse(raw.slice(bar + 1)); } catch (_) {}
-      const top = nums[1], bottom = nums[3], H = nums[4];
-      const targetBottom = H - (181 / 1500) * H;
-      const allowedH = ((400 - 181) / 1500) * H;
-      if (bottom - top > allowedH) note('Batch: the logo is taller than fits above the collection ruler — placed at its original size, crossing the max height line.');
-      const dy = Math.round(targetBottom - bottom);
-      batchColMove = { dy: dy, cv: cvv };
-      send(collectionMoveScript(dy));
+      if (nums[1]) note('Batch: the logo is taller than fits above the collection ruler — placed at its original size, crossing the max height line.');
+      batchColMove = { dy: nums[0] || 0, cv: cvv };
     }
-    else if (d.startsWith('PFLCLEAN:')) { /* collection logo restored — ack only */ }
+    else if (d.startsWith('PFLCLEAN:')) { batchLateDone(); }   // the logo is back; nothing of the stopped item can arrive after this
     else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !posterExpBusy && !squareArtBusy) { lastActiveSig = sig; fetchLayers(); } }
     else if (d.startsWith('PFLOPENED:')) { pollBurst(1000, 3000); }   // the opener added a doc (same-tab mode): heal its name + re-read once it has loaded
     else if (d.startsWith('PFLSTALE:')) { fetchLayers(); note('The document changed under the panel — list refreshed, click again.'); settle('vis', false, { reason: 'the document changed under the panel' }); }
@@ -2158,7 +2613,7 @@
     else if (d.startsWith('PFLSQTEMP:')) {
       if (sqArmTimer) { clearTimeout(sqArmTimer); sqArmTimer = null; }
       const nm = d.slice(10);
-      if (!nm) { flashSquare('✗'); note('Square Art: Photopea didn\'t open the crop tab.'); }
+      if (!nm) { flashSquare('✗'); fail('Square Art: Photopea didn\'t open the crop tab.'); }
       else {
         sqTempName = nm;
         squareArtBusy = false; sqArmed = true; squareArtBtn.classList.add('crop');
@@ -2171,7 +2626,7 @@
     }
     else if (d.startsWith('PFLPEXLIST:')) {
       let o = null; try { o = JSON.parse(d.slice(11)); } catch (_) {}
-      if (!o || !o.items || !o.items.length) { flashPex('✗'); note('Poster export failed.'); }
+      if (!o || !o.items || !o.items.length) { flashPex('✗'); fail('Poster export failed.'); }
       else {
         pexCtx = pendingExport || {}; pendingExport = null;
         pexQueue = o.items.slice();
@@ -2185,13 +2640,134 @@
     else if (d.startsWith('PFLSQNOPOSTER:')) { flashSquare('✗'); note('No POSTER group in this document.'); }
     else if (d.startsWith('PFLSQEMPTY:')) { restorePosterVis(); flashSquare('✗'); note('The POSTER group has no visible variant.'); }
     else if (d.startsWith('PFLNOSAVE:')){ saving = false; saveBtn.textContent = '⚠'; setTimeout(() => { saveBtn.textContent = '💾'; }, 1800); note('"' + d.slice(10) + '" isn\'t the poster — use Ctrl+S to save it.'); settle('save', false, { reason: 'not a Posterflow document; use Ctrl+S' }); }
-    else if (d.startsWith('PFLERR:'))   { if (renameBusy) { renameBusy = false; note('Rename failed: ' + d.slice(7)); } else if (squareArtBusy && !sqArmed && sqPath === 'dup') { sqFallback('Photopea could not copy the layer (' + d.slice(7) + ')'); } else if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); note('Square Art failed: ' + d.slice(7)); } else if (posterExpBusy) { restorePexVis(); pexQueue = []; flashPex('✗'); note('Poster export failed: ' + d.slice(7)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); settleAll(false, d.slice(7)); } }
+    else if (d.startsWith('PFLERR:'))   { if (renameBusy) { renameBusy = false; fail('Rename failed: ' + d.slice(7)); } else if (squareArtBusy && !sqArmed && sqPath === 'dup') { sqFallback('Photopea could not copy the layer (' + d.slice(7) + ')'); } else if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); fail('Square Art failed: ' + d.slice(7)); } else if (posterExpBusy) { restorePexVis(); pexQueue = []; flashPex('✗'); fail('Poster export failed: ' + d.slice(7)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); fail('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); fail('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false); fail('Photopea error: ' + d.slice(7)); } else { fail('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); settleAll(false, d.slice(7)); } }
     // PFLVIS: ack handled optimistically in commit().
   });
 
   // ---- controls ------------------------------------------------------------
   saveBtn.addEventListener('click', saveDoc);
-  jpgBtn.addEventListener('click', exportJpg);
+  // A manual export (the JPG button, a ⚡ Run) checks its poster layers first. Blank canvas holds it back
+  // once: the same press again within HOLD_MS goes ahead. Anything that can't be checked exports as before.
+  const HOLD_MS = 10000;
+  // A question the next press answers: a blue note that goes after HOLD_MS.
+  const ask = (t) => {
+    const d = document.createElement('div');
+    d.className = 'msg ask'; d.textContent = t;
+    notesEl.insertBefore(d, notesEl.firstChild);
+    setTimeout(() => d.remove(), HOLD_MS);
+    return d;
+  };
+  // `show` writes the held press's note (a red one unless given).
+  const makeHold = (show) => {
+    let h = { key: '', until: 0, alert: null, data: null };
+    return {
+      // What a held press kept (true unless set() was given more) when this press repeats it in time, else
+      // false. Either way the old note goes and the hold is spent.
+      again(key) { const kept = h.key === key && Date.now() < h.until ? h.data : false; if (h.alert) h.alert.remove(); h = { key: '', until: 0, alert: null, data: null }; return kept; },
+      set(key, text, data) { h = { key, until: Date.now() + HOLD_MS, alert: (show || fail)(text), data: data || true }; },
+    };
+  };
+  const jpgHold = makeHold(), batchHold = makeHold();
+
+  // ---- Upload / Complete buttons: the open PSD's claimed request, two presses each ----
+  // The first press asks Posterflow and says what would happen; the same press again within HOLD_MS does
+  // it. Upload sends what Posterflow picked from its own export folders (the newest export of each
+  // poster the request asks for), as its own Upload button is set. The panel sends no files.
+  const uploadHold = makeHold(ask), completeHold = makeHold(ask);
+  const posters = (n) => n + ' poster' + (n === 1 ? '' : 's');
+  const flashBtn = (btn, mark, label) => { btn.textContent = mark; setTimeout(() => { btn.textContent = label; }, 1400); };
+  // Run one press of a community button: `second(kept)` when it repeats a held press, else `first(name)`.
+  const communityPress = async (label, btn, hold, first, second) => {
+    if (cmBusy || finishBusy || sqArmed || anyBusy()) { note(label + ': busy. Wait for the current step.'); return; }
+    if (model.nodoc) { note(label + ': no document open.'); return; }
+    cmBusy = true;
+    btn.textContent = '\u2026';
+    try {
+      const p = finWait('ctx', 15000); send(finCtxScript()); const name = must(await p).base;
+      const kept = hold.again(name);
+      if (kept) { note(label + ': ' + await second(kept) + '.'); flashBtn(btn, '\u2713', label); return; }
+      const said = await first(name);
+      if (said) note(label + ': ' + said + '.');
+      btn.textContent = label;
+    } catch (e) { flashBtn(btn, '\u2717', label); fail(label + ': ' + String(e && e.message ? e.message : e).replace(/\.$/, '') + '.'); }
+    finally { cmBusy = false; }
+  };
+  const onUpload = () => communityPress('Upload', uploadBtn, uploadHold, async (name) => {
+    const c = await api('GET', COMMUNITY + 'upload?name=' + encodeURIComponent(name));
+    const skip = claimSkip(c, { name });
+    if (skip) return skip;
+    if (c.upload.problem) return c.upload.problem;
+    if (!c.folders) return 'no export folder is set in Posterflow';
+    if (!c.files.length) return 'no export for ' + c.label + ' in the Posterflow export folders';
+    const list = c.files.map((f) => f.poster + ' (' + f.age + ')').join(', ');
+    uploadHold.set(name, 'Upload: ' + posters(c.files.length) + ' for ' + c.label + ': ' + list + '. Press Upload again to ' + c.upload.will + '.' + (c.upload.aside ? ' ' + c.upload.aside + '.' : ''),
+      { at: COMMUNITY + c.where + '/' + c.id });
+    return '';
+  }, async (kept) => (await api('POST', kept.at + '/upload')).did);
+  const onComplete = () => communityPress('Complete', completeBtn, completeHold, async (name) => {
+    const c = await api('GET', COMMUNITY + 'claim?name=' + encodeURIComponent(name));
+    const skip = claimSkip(c, { name });
+    if (skip) return skip;
+    completeHold.set(name, 'Complete: ' + c.label + '. Press Complete again to mark it complete.', { at: COMMUNITY + c.where + '/' + c.id, label: c.label });
+    return '';
+  }, async (kept) => {
+    await api('POST', kept.at + '/complete');
+    return kept.label + ' is marked complete';
+  });
+  uploadBtn.addEventListener('click', onUpload);
+  completeBtn.addEventListener('click', onComplete);
+  let jpgChecking = false, batchChecking = false;
+  const jpgClick = async () => {
+    if (model.nodoc) { exportJpg(); return; }
+    if (jpgChecking || jpgBusy || placeBusy || logoExpBusy || posterExpBusy || squareArtBusy) return;
+    jpgChecking = true; jpgBtn.textContent = '…';
+    let cover = null, blank = '';
+    try { cover = await readCover(5000); } catch (_) {}
+    const key = cover ? cover.name : '', again = jpgHold.again(key);
+    if (cover && cover.poster && !again) { const r = coverCheck(cover, visibleTarget(cover)); if (!r.skipped) blank = r.problems.join('; '); }
+    jpgChecking = false; jpgBtn.textContent = 'JPG';
+    if (!blank) { exportJpg(); return; }
+    jpgHold.set(key, 'JPG not exported. ' + blank + '. Press JPG again to export anyway.');
+    jpgBtn.textContent = '✗'; setTimeout(() => { if (!jpgBusy) jpgBtn.textContent = 'JPG'; }, 1400);
+  };
+  // Run checks what it is about to export: the visible poster (blue), or the tagged layers its filter keeps (orange).
+  const batchRunClick = async () => {
+    if (finishWaiting && finishDoc != null && !batchBusy) {   // Run only counts on the PSD the waiting finish is for
+      if (batchChecking) return;
+      batchChecking = true;
+      let now = null; try { now = await readPrint(); } catch (_) {}
+      batchChecking = false;
+      if (now !== finishDoc) { batchNote(now == null ? 'Photopea did not answer. Press Run again.' : 'This finish is waiting on another PSD. Switch back to it and press Run, or press ✕ to cancel.'); return; }
+    }
+    if (batchMode === 'single' && !model.nodoc) {
+      if (batchChecking || batchBusy) return;
+      const why = seasonRangeProblem(); if (why) { batchNote(why); return; }
+      batchChecking = true;
+      try { singleMain = soleShowFrom(await scanDoc(), batchBase); } catch (_) { singleMain = null; }
+      batchChecking = false;
+      if (!singleMain) { batchNote('POSTER no longer holds a single show poster. Press ✕, then right-click SHOW again.'); return; }
+    }
+    if (finishWaiting || model.nodoc) { runBatch(); return; }   // a finish waiting for Run has made its own check
+    if (batchChecking || batchBusy) return;
+    if (!batchConvention) { const why = seasonRangeProblem(); if (why) { batchNote(why); return; } }   // before the blank canvas check
+    batchChecking = true;
+    let cover = null, blank = '';
+    try { cover = await readCover(5000); } catch (_) {}
+    const key = (cover ? cover.name : '') + '|' + batchMode + '|' + String(batchInput.value || '').trim(), again = batchHold.again(key);
+    try {
+      if (cover && cover.poster && !again) {
+        const fk = batchConvention ? parseTagFilter(batchInput.value) : null, baseNorm = normName(batchBase || '');
+        const targets = batchConvention ? await taggedTargets(cover, (v) => !fk || parseTagName(v.nm, baseNorm).tags.some((t) => fk[t.key])) : visibleTarget(cover);
+        const r = coverCheck(cover, targets);
+        if (!r.skipped) blank = r.problems.join('; ');
+      }
+    } catch (_) {}
+    batchChecking = false;
+    if (!blank) { runBatch(); return; }
+    batchHold.set(key, 'Batch not started. ' + blank + '. Press Run again to export anyway.');
+    batchNote('Blank canvas found. Press Run again to export anyway.');
+  };
+  jpgBtn.addEventListener('click', jpgClick);
   logoBtn.addEventListener('click', startLogo);
   fitBtn.addEventListener('click', startFit);
   trimBtn.addEventListener('click', trimDoc);
@@ -2210,17 +2786,19 @@
   };
   batchBtn.addEventListener('click', () => boltClick('tags'));
   seasonsBtn.addEventListener('click', () => boltClick('seasons'));
-  document.querySelector('[data-act="batch-run"]').addEventListener('click', runBatch);
+  document.querySelector('[data-act="batch-run"]').addEventListener('click', batchRunClick);
   document.querySelector('[data-act="batch-help"]').addEventListener('click', () => {
     const rows = batchMode === 'tags'
       ? [['blank', 'run everything'], ['c', 'Collection'], ['cls', 'Limited Series'], ['main / show', 'main poster'],
          ['s3 or 3', 'one season'], ['0', 'Specials'], ['s1-8', 'a season range'], ['main, c', 'combine with commas']]
-      : [['blank', 'all seasons + Specials'], ['8', 'seasons 1-8'], ['3-6', 'that range'], ['0-5', 'includes Specials'], ['2015-2020', 'year layers']];
+      : batchMode === 'single'
+      ? [['blank', 'main + Season 1'], ['3', 'main + seasons 1-3'], ['3-6', 'main + that range'], ['0-5', 'main + Specials + 1-5'], ['0', 'main only']]
+      : [['8', 'seasons 1-8'], ['3-6', 'that range'], ['0-5', 'includes Specials'], ['2015-2020', 'year layers']];
     batchHelp.innerHTML = rows.map((r) => '<div><b>' + r[0] + '</b> — ' + r[1] + '</div>').join('');
     batchHelp.classList.toggle('hidden');
   });
   document.querySelector('[data-act="batch-cancel"]').addEventListener('click', () => { abandonFinish(); closeBatch(); });
-  batchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runBatch(); } });
+  batchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); batchRunClick(); } });
   window.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveDoc(); } });
 
   // Reflect the ACTIVE doc: MM2K templates have no LOGO group (text titles), so hide Place Logo for

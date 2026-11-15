@@ -1135,7 +1135,8 @@ function MakerTools() {
                       <InfoTip>
                         The same switch as <strong>Image Drop also adds to IDarr</strong> on the Requests page.
                         When on, posters uploaded or dropped on a request card also go to your IDarr quick
-                        add folder and IDarr runs, like dropping files on the IDarr sidebar icon.
+                        add folder and IDarr runs, like dropping files on the IDarr sidebar icon. The Upload
+                        button and upload step in the Photoshop and Photopea panels follow this switch too.
                       </InfoTip>
                     </div>
                     <label className="toggle-switch">
@@ -1153,7 +1154,8 @@ function MakerTools() {
                       <InfoTip>
                         When on, uploads go to the request&apos;s Discord thread. Turn it off to add posters to
                         IDarr only. It can only be off while <strong>Adds to IDarr</strong> is on, so an upload
-                        always does something; the choice is remembered while IDarr is off.
+                        always does something; the choice is remembered while IDarr is off. The panels&apos;
+                        Upload follows this switch too.
                       </InfoTip>
                     </div>
                     <label className="toggle-switch" title={requestUpload.enabled ? undefined : 'Turn on Adds to IDarr to post to IDarr only'}>

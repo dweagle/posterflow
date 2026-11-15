@@ -10,7 +10,8 @@ export interface Single { lab: 'SP' | 'C' | 'CLS' }
 export interface Change { p: number[]; v: boolean }
 export interface BatchItem { suffix: string; changes: Change[] }
 
-/** Parse the season-count/range input: "8" → seasons 1–8, "3-6" → that range, blank → all. */
+/** Parse the season-count/range input: "8" → seasons 1–8, "3-6" → that range. Blank or unreadable → no range
+ *  (start null); the panels ask for one instead of exporting every season the template has text for. */
 export function parseRange(str: string): { start: number | null; end: number | null } {
   const s = (str || '').trim()
   if (!s) return { start: null, end: null }

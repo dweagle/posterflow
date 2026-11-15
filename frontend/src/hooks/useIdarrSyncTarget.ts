@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
-import { getMakerIdarrConfig, type MakerIdarrSyncTarget } from '../api/client'
+import { getMakerIdarrConfig, saveSettings, type MakerIdarrSyncTarget } from '../api/client'
 
 export const IDARR_SYNC_TARGET_STORAGE_KEY = 'posterflow.idarr.selectedSyncTarget'
+// The pick last sent to the server, so each pick is sent once.
+const IDARR_SYNC_TARGET_SENT_KEY = 'posterflow.idarr.selectedSyncTarget.sent'
 
 type SyncTargetIdentity = Pick<MakerIdarrSyncTarget, 'personal_drive_id' | 'source_dir' | 'label' | 'scope_token'>
 type SyncTargetKind = Pick<MakerIdarrSyncTarget, 'is_asset_drive' | 'is_psd_drive'>
@@ -76,12 +78,33 @@ function publish(patch: Partial<Snapshot>) {
   listeners.forEach((listener) => listener())
 }
 
+// The server keeps the pick too: the editor panels' Upload adds to IDarr on the server, into this drive.
+function sendSyncTargetToServer(value: string | null): void {
+  if (!value) return
+  try {
+    if (localStorage.getItem(IDARR_SYNC_TARGET_SENT_KEY) === value) return
+  } catch {
+    // Storage unavailable: send it anyway.
+  }
+  void Promise.resolve()
+    .then(() => saveSettings({ idarr_selected_sync_target: value }))
+    .then(() => {
+      try {
+        localStorage.setItem(IDARR_SYNC_TARGET_SENT_KEY, value)
+      } catch {
+        // Sent; it will be sent again on the next load.
+      }
+    })
+    .catch(() => {})
+}
+
 export function writeStoredSyncTarget(value: string): void {
   try {
     localStorage.setItem(IDARR_SYNC_TARGET_STORAGE_KEY, value)
   } catch {
     // Storage unavailable; the in-memory selection still updates below.
   }
+  sendSyncTargetToServer(value)
   if (snapshot.storedValue !== value) publish({ storedValue: value })
 }
 
@@ -95,6 +118,7 @@ export function refreshIdarrSyncTargets(): Promise<void> {
     .then(() => getMakerIdarrConfig())
     .then((config) => {
       setIdarrSyncTargets(Array.isArray(config.sync_targets) ? config.sync_targets : [])
+      sendSyncTargetToServer(readStoredSyncTarget())   // a pick made before the server kept it
     })
     .catch(() => {
       publish({ loaded: true })

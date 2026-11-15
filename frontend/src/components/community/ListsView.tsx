@@ -14,6 +14,7 @@ import { anyHideFilter, isHiddenByMeta, isHiddenByStyle, loadHideFilters, needsT
 import { tmdbMetaKey, useTmdbMetaMap } from '../../hooks/useCardOverview'
 import MoveToRequestModal, { type MoveToRequestValues } from './MoveToRequestModal'
 import { useIdarrQuickAdd } from './useIdarrQuickAdd'
+import { notifyIdarrTargetedRun } from '../../utils/idarrTargetedRun'
 import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import Modal from '../../components/Modal'
 import Toolbar from '../../components/Toolbar'
@@ -75,10 +76,10 @@ function toRequestPayload(item: CommunityListItem, token: string, values: MoveTo
 export default function ListsView() {
   const hiddenStyles = useHiddenPosterStyles()
   const { showToast } = useToast()
-  const { isConnected, isMaker, isOwner, discordUserId, token, login, updateListItem } = useDiscordAuth()
+  const { isConnected, isMaker, isOwner, discordUserId, token, login, updateListItem, uploadForClaim } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
   const { refreshCommunityRequestCount } = useAppEvents()
-  const { enabled: idarrEnabled, setEnabled: setIdarrEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
+  const { action: uploadAction, enabled: idarrEnabled, setEnabled: setIdarrEnabled, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
 
   const [items, setItems] = useState<CommunityListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -377,26 +378,34 @@ export default function ListsView() {
     }
   }, [moveTarget, token, login, updateListItem, showToast, refreshCommunityRequestCount])
 
+  // Upload posters for a list item through Posterflow's server: the same action as a request's
+  // Upload and the editor panels' Upload. A list item has no Discord thread, so it goes to IDarr.
   // False means nothing reached IDarr (no poster drive configured, or the add failed).
-  const addToIdarr = useCallback(async (files: File[]): Promise<boolean> => {
-    const added = await doIdarrUpload(files)
-    if (!added) showToast('IDarr add failed. Check the IDarr drive.', 'error')
-    return added
-  }, [doIdarrUpload, showToast])
+  const addToIdarr = useCallback(async (itemId: string, files: File[]): Promise<boolean> => {
+    try {
+      const result = await uploadForClaim('list-items', itemId, files, { action: uploadAction, drive: idarrTarget || null })
+      if (result.idarr_job) void notifyIdarrTargetedRun(result.idarr_job.id, result.idarr_job.sync_after, result.idarr_job.index)
+      if (result.warnings.length) showToast(result.warnings.join('. '), 'error')
+      return result.idarr > 0
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'IDarr add failed. Check the IDarr drive.', 'error')
+      return false
+    }
+  }, [uploadForClaim, uploadAction, idarrTarget, showToast])
 
-  const handleDrop = useCallback((e: React.DragEvent, _itemId: string) => {
+  const handleDrop = useCallback((e: React.DragEvent, itemId: string) => {
     e.preventDefault()
     setDragOverId(null)
     const files = Array.from(e.dataTransfer.files)
     if (!files.length) return
-    if (idarrEnabled) void addToIdarr(files)
+    if (idarrEnabled) void addToIdarr(itemId, files)
   }, [idarrEnabled, addToIdarr])
 
   // Click-to-upload equivalent of the IDarr drop: open a file picker and push the
   // chosen poster(s) to the maker's IDarr pipeline (same path as a drag-drop).
   const doIdarrUploadForItem = useCallback(async (itemId: string, files: File[]) => {
     setUploadStates((prev) => new Map(prev).set(itemId, 'uploading'))
-    const added = await addToIdarr(files)
+    const added = await addToIdarr(itemId, files)
     setUploadStates((prev) => {
       const next = new Map(prev)
       if (added) next.set(itemId, 'done')

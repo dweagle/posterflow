@@ -1,15 +1,11 @@
 import { useEffect, useCallback, useSyncExternalStore } from 'react'
-import { getMakerIdarrConfig, getSettings, saveSettings } from '../../api/client'
-import { quickAddFilesToIdarr } from '../../utils/idarrQuickAdd'
-import { useIdarrSyncTarget, resolvePosterSyncTargetIndex, readStoredSyncTarget } from '../../hooks/useIdarrSyncTarget'
+import { getSettings, saveSettings } from '../../api/client'
+import { useIdarrSyncTarget } from '../../hooks/useIdarrSyncTarget'
 
 /** What the request card's Upload button (and a drop on the card) does with the files. */
 export type CommunityUploadAction = 'discord' | 'discord_idarr' | 'idarr'
 /** The two actions that involve IDarr; the Requests page toggle switches between one of these and 'discord'. */
 export type IdarrUploadAction = Exclude<CommunityUploadAction, 'discord'>
-
-export const uploadActionPostsToDiscord = (action: CommunityUploadAction): boolean => action !== 'idarr'
-export const uploadActionAddsToIdarr = (action: CommunityUploadAction): boolean => action !== 'discord'
 
 /** Tooltip for the card's Upload button. */
 export function uploadActionHint(action: CommunityUploadAction): string {
@@ -31,6 +27,10 @@ export function uploadDoneLabel(action: CommunityUploadAction, count: number): s
   if (action === 'idarr') return count > 1 ? `Added ${count} to IDarr!` : 'Added to IDarr!'
   return count > 1 ? `Posted ${count}!` : 'Posted!'
 }
+
+/** Card state label after an upload, from what the server says it did: posted to Discord, else added to IDarr. */
+export const uploadResultLabel = (result: { posted: number; idarr: number }): string =>
+  result.posted ? uploadDoneLabel('discord', result.posted) : uploadDoneLabel('idarr', result.idarr)
 
 /** Stored preferences: the IDarr on/off toggle and which IDarr action applies while it is on. */
 export interface UploadPreferences {
@@ -89,12 +89,11 @@ function subscribe(listener: () => void) {
 const getPrefs = () => prefs
 
 /**
- * Shared "Image Drop also adds to IDarr" behaviour for the community cards.
- * Used by both the Requests and Lists tabs so the maker's local IDarr pipeline
- * works identically whichever tab a poster is dropped on. `action` is what an upload
- * does right now (Discord, Discord + IDarr, or IDarr only; the IDarr flavour is chosen in
- * the PSD settings modal). Also exposes the IDarr poster drives + the selected one, so
- * makers can pick the destination drive without leaving the page.
+ * The community cards' upload settings, shared by the Requests and Lists tabs: `action` is what an
+ * upload does right now (Discord, Discord + IDarr, or IDarr only; the IDarr flavour is chosen in
+ * the PSD settings modal), plus the IDarr poster drives and the selected one, so makers can pick
+ * the destination drive without leaving the page. The upload itself runs on Posterflow's server
+ * (useDiscordAuth's uploadForClaim), which is sent these as they stand.
  */
 export function useIdarrQuickAdd() {
   const current = useSyncExternalStore(subscribe, getPrefs, getPrefs)
@@ -109,27 +108,10 @@ export function useIdarrQuickAdd() {
     void saveSettings({ idarr_quick_add_community: String(next) })
   }, [])
 
-  /** Push files through the maker's IDarr quick-add. Resolves false when nothing was added. */
-  const doIdarrUpload = useCallback(async (files: File[]): Promise<boolean> => {
-    try {
-      const config = await getMakerIdarrConfig()
-      const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
-      if (!syncTargets.length) return false
-
-      const resolvedIndex = resolvePosterSyncTargetIndex(syncTargets, readStoredSyncTarget())
-      if (resolvedIndex < 0) return false
-      await quickAddFilesToIdarr(resolvedIndex, files, config)
-      return true
-    } catch {
-      return false
-    }
-  }, [])
-
   return {
     action: effectiveUploadAction(current),
     enabled: current.enabled,
     setEnabled,
-    doIdarrUpload,
     targetOptions,
     selectedTargetValue,
     setSelectedTarget,

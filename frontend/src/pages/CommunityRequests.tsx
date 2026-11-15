@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
 import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp, Link2, ChevronsUp } from 'lucide-react'
-import { getCommunityRequests, type CommunityRequest, type RequestMatch } from '../api/community'
+import { getCommunityRequests, type CommunityRequest, type ExportRef, type RequestMatch } from '../api/community'
 import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, posterCheckKey, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
@@ -15,7 +15,8 @@ import { hasCollectionMoviesNote, hasRequestFlag, ORIGINAL_LANGUAGE_NOTE } from 
 import CollectionMoviesPanel from '../components/community/CollectionMoviesPanel'
 import ListsView from '../components/community/ListsView'
 import { useCommunityClaimStatus } from '../hooks/useCommunityClaimStatus'
-import { useIdarrQuickAdd, uploadActionAddsToIdarr, uploadActionPostsToDiscord, uploadActionHint, uploadDoneLabel } from '../components/community/useIdarrQuickAdd'
+import { useIdarrQuickAdd, uploadActionHint, uploadResultLabel } from '../components/community/useIdarrQuickAdd'
+import { notifyIdarrTargetedRun } from '../utils/idarrTargetedRun'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
 import RequestUploadPickerModal from '../components/community/RequestUploadPickerModal'
 import MatchRequestModal from '../components/community/MatchRequestModal'
@@ -56,12 +57,6 @@ const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
   { key: 'collection', label: 'Collections' },
 ]
 
-// Stable fingerprint of a dropped file set, used to skip a duplicate IDarr add
-// when the same files are re-submitted (e.g. via the Retry button).
-function filesSignature(files: File[]): string {
-  return files.map((f) => `${f.name}:${f.size}:${f.lastModified}`).sort().join('|')
-}
-
 function getSeasonLabel(req: CommunityRequest): string | null {
   if (req.season_number != null) return `S${req.season_number}`
   if (req.media_type === 'season' && req.notes?.startsWith('Seasons: ')) {
@@ -77,7 +72,7 @@ function getSeasonLabel(req: CommunityRequest): string | null {
 export default function CommunityRequests() {
   const hiddenStyles = useHiddenPosterStyles()
   const { showToast } = useToast()
-  const { isConnected, isMaker, isOwner, isMod, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus, matchRequest, upgradeRequest } = useDiscordAuth()
+  const { isConnected, isMaker, isOwner, isMod, username, discordUserId, connecting, connectError, login, logout, uploadForClaim, updateRequestStatus, matchRequest, upgradeRequest } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
   const { refreshCommunityRequestCount } = useAppEvents()
   // Latest fetchRequests, so a failed claim can refresh the (possibly stale) list.
@@ -127,11 +122,8 @@ export default function CommunityRequests() {
   const [pageTab, setPageTab] = useState<PageTab>('requests')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
-  // requestId → signature of the file set already handed to IDarr, so a Retry
-  // of the same files doesn't add them to IDarr twice. Cleared when the card resets.
-  const idarrSentRef = useRef<Map<string, string>>(new Map())
   // Shared "Image Drop also adds to IDarr" behaviour (also used by the Lists tab).
-  const { action: uploadAction, enabled: idarrQuickAddEnabled, setEnabled: setIdarrQuickAddEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
+  const { action: uploadAction, enabled: idarrQuickAddEnabled, setEnabled: setIdarrQuickAddEnabled, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
 
   useEffect(() => {
     getSettings().then((settings) => {
@@ -193,63 +185,22 @@ export default function CommunityRequests() {
     else openFileDialog(requestId)
   }, [exportPickerAvailable, openFileDialog])
 
-  const DISCORD_MAX_FILES = 10
-
-  // Post one batch to Discord, auto-retrying transient failures (rate limits,
-  // network blips) with a short backoff before surfacing the error to the user.
-  const uploadBatchWithRetry = useCallback(async (requestId: string, batch: File[]) => {
-    const MAX_ATTEMPTS = 3
-    for (let attempt = 1; ; attempt++) {
-      try {
-        await uploadPoster(requestId, batch)
-        return
-      } catch (err) {
-        if (attempt >= MAX_ATTEMPTS) throw err
-        await new Promise((resolve) => setTimeout(resolve, 1500 * attempt))
-      }
-    }
-  }, [uploadPoster])
-
-  const doUpload = useCallback(async (requestId: string, files: File[]) => {
+  // Upload posters for a request: files from this computer (a drop, the file dialog) or exports the
+  // server already has (ticked in the picker). Posterflow's server does it, the same action the
+  // editor panels' Upload runs: to Discord, to IDarr, or both, as the switches here stand. They go
+  // ten posters a request, one Discord message each (the button counts them: "Uploading 2/3"). The
+  // same posters sent again after a failure go on from the part that failed: nothing is posted or
+  // added to IDarr twice.
+  const doUpload = useCallback(async (requestId: string, files: File[] | ExportRef[]) => {
     setUploadStates((prev) => new Map(prev).set(requestId, 'uploading'))
-    const toDiscord = uploadActionPostsToDiscord(uploadAction)
-
-    // IDarr is the maker's own local pipeline, independent of Discord. Kick it
-    // off once, up front, so the dropped files are added even if the Discord
-    // post later fails or is only partially posted. Skip it when the same files
-    // were already sent (a Retry after a failed Discord post) to avoid duplicates.
-    let idarrResult: Promise<boolean> | null = null
-    if (uploadActionAddsToIdarr(uploadAction)) {
-      const signature = filesSignature(files)
-      if (idarrSentRef.current.get(requestId) !== signature) {
-        idarrSentRef.current.set(requestId, signature)
-        idarrResult = doIdarrUpload(files)
-      }
-    }
-
     try {
-      if (toDiscord) {
-        // Send in batches of DISCORD_MAX_FILES (Discord limit per message).
-        // Wait 1.5 s between batches to avoid Discord channel rate limits.
-        const totalBatches = Math.ceil(files.length / DISCORD_MAX_FILES)
-        for (let i = 0; i < files.length; i += DISCORD_MAX_FILES) {
-          if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1500))
-          if (totalBatches > 1) {
-            const batchNum = Math.floor(i / DISCORD_MAX_FILES) + 1
-            setUploadStates((prev) => new Map(prev).set(requestId, `uploading-${batchNum}/${totalBatches}`))
-          }
-          await uploadBatchWithRetry(requestId, files.slice(i, i + DISCORD_MAX_FILES))
-        }
-      } else if (idarrResult && !(await idarrResult)) {
-        // IDarr-only: the add IS the upload, so its failure is the card's failure.
-        idarrSentRef.current.delete(requestId)
-        throw new Error('IDarr add failed. Check the IDarr scope.')
-      }
-      setUploadStates((prev) => new Map(prev).set(requestId, uploadDoneLabel(uploadAction, files.length)))
-      // Reset after a delay so the button can be used again. Clearing the IDarr
-      // guard lets a later, deliberate re-upload of the same files add them again.
+      const result = await uploadForClaim('requests', requestId, files, { action: uploadAction, drive: idarrTarget || null },
+        (p) => setUploadStates((prev) => new Map(prev).set(requestId, `uploading-${p.message}/${p.of}`)))
+      if (result.idarr_job) void notifyIdarrTargetedRun(result.idarr_job.id, result.idarr_job.sync_after, result.idarr_job.index)
+      if (result.warnings.length) showToast(result.warnings.join('. '), 'error')
+      setUploadStates((prev) => new Map(prev).set(requestId, uploadResultLabel(result)))
+      // Reset after a delay so the button can be used again.
       setTimeout(() => {
-        idarrSentRef.current.delete(requestId)
         setUploadStates((prev) => {
           const next = new Map(prev)
           next.delete(requestId)
@@ -261,7 +212,7 @@ export default function CommunityRequests() {
         new Map(prev).set(requestId, err instanceof Error ? err.message : 'Upload failed')
       )
     }
-  }, [uploadBatchWithRetry, uploadAction, doIdarrUpload])
+  }, [uploadForClaim, uploadAction, idarrTarget, showToast])
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const allFiles = Array.from(e.target.files ?? [])
@@ -971,7 +922,7 @@ export default function CommunityRequests() {
         request={pickerRequest}
         action={uploadAction}
         onClose={() => setPickerRequestId(null)}
-        onPost={(files) => { setPickerRequestId(null); doUpload(pickerRequest.id, files) }}
+        onPost={(picks) => { setPickerRequestId(null); doUpload(pickerRequest.id, picks) }}
         onPickFromComputer={() => { setPickerRequestId(null); openFileDialog(pickerRequest.id) }}
       />
     )}

@@ -346,6 +346,48 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
   ok(last.y === 1436 - 958, 'after an edge correction, the remembered square is the corrected one');
 }
 
+// ---- coverage: the box a poster must fill ----
+{
+  const box = G.coverageBox(1000, 1375);
+  ok(box.left === 25 && box.top === 25 && box.right === 975 && box.bottom === 1375, 'coverage box on CL2K is 25..975 x 25..1375');
+  ok(G.coverageBox(1000, 1415.65625).bottom === 1415, 'coverage box bottom is the whole pixel row above a fractional guide');
+  // Whatever Fit Poster produces must pass the check, for any source shape and guide.
+  let allFit = true;
+  [[2000, 3000], [1000, 1500], [1920, 1080], [3840, 2160], [1000, 1000], [680, 1000], [951, 1400], [3000, 2000], [1333, 2000], [7, 5000], [5000, 7]].forEach(([sw, sh]) => {
+    [1375, 1415.65625, 1475].forEach((bottom) => {
+      const f = G.computePosterFitGeometry(sw, sh, 1000, bottom);
+      const gaps = G.coverageGaps({ left: f.left, top: f.top, right: f.left + f.width, bottom: f.top + f.height }, G.coverageBox(1000, bottom));
+      if (gaps.length) { allFit = false; console.error('    Fit Poster ' + sw + 'x' + sh + ' @' + bottom + ' leaves', JSON.stringify(gaps)); }
+    });
+  });
+  ok(allFit, 'every Fit Poster result covers the coverage box');
+  const g1 = G.coverageGaps({ left: 25, top: 25, right: 975, bottom: 1335 }, box);
+  ok(g1.length === 1 && g1[0].edge === 'bottom' && g1[0].px === 40, 'a poster 40 px short of the guide is one bottom gap');
+  const g2 = G.coverageGaps({ left: 35, top: 20, right: 985, bottom: 1300 }, box);
+  ok(g2.map((g) => g.edge + g.px).join() === 'bottom75,left10', 'gaps list the short edges only, worst first (got ' + g2.map((g) => g.edge + g.px) + ')');
+  ok(G.coverageGaps({ left: 25.4, top: 25, right: 974.6, bottom: 1375 }, box).length === 0, 'less than a pixel short is not a gap');
+  ok(G.coverageGapText(G.coverageGaps({ left: 100, top: 25, right: 1050, bottom: 1450 }, box)) === '~75 px at the left edge', 'a poster pushed right reads as a gap at the left edge, with no mention of the bottom');
+  ok(G.coverageGapText(g2) === '~75 px above the bottom guide, ~10 px at the left edge', 'gap text names each edge (got ' + G.coverageGapText(g2) + ')');
+  ok(G.coverageGaps({ left: -100, top: -50, right: 1200, bottom: 1700 }, box).length === 0, 'an overhanging poster has no gaps');
+  // 3x2 RGBA, alpha: 255 230 229 / 0 255 255
+  const px = Uint8Array.from([9, 9, 9, 255, 9, 9, 9, 230, 9, 9, 9, 229, 9, 9, 9, 0, 9, 9, 9, 255, 9, 9, 9, 255]);
+  const b = G.blankPixels(px, 3, 2, 4);
+  ok(b.count === 2 && b.x0 === 0 && b.x1 === 2 && b.y0 === 0 && b.y1 === 1, 'blankPixels counts alpha below 230 and reports the extent (got ' + JSON.stringify(b) + ')');
+  ok(G.blankPixels(Uint8Array.from([1, 2, 3, 255, 1, 2, 3, 240]), 2, 1, 4).count === 0, 'soft but mostly opaque pixels are not blank');
+  ok(G.blankPixels(Uint8Array.from([50, 100, 50, 240]), 2, 1, 2).count === 1, 'alpha is the last component whatever the color mode');
+
+  // Send back: how much of an edit tab is see-through decides poster or cut-out logo
+  const rgba = (alphas) => Uint8Array.from(alphas.reduce((a, v) => a.concat([9, 9, 9, v]), []));
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  ok(near(G.seeThroughShare(rgba([255, 255, 255, 255]), 2, 2, 4, true, 100, 50, 100, 50), 0), 'a solid tab is 0% see-through');
+  ok(near(G.seeThroughShare(rgba([255, 0, 255, 0]), 2, 2, 4, true, 100, 50, 100, 50), 0.5), 'half the pixels clear is 50%, whatever scale Photoshop answers at');
+  ok(near(G.seeThroughShare(rgba([255, 229, 230, 255]), 2, 2, 4, true, 100, 50, 100, 50), 0.25), 'alpha below 230 is see-through, the same line the coverage check draws');
+  ok(near(G.seeThroughShare(rgba([255, 255, 255, 255]), 2, 2, 4, true, 50, 50, 100, 50), 0.5), 'pixels that fill only half the canvas leave the other half see-through');
+  ok(near(G.seeThroughShare(null, 2, 2, 3, false, 100, 50, 100, 50), 0), 'a layer with no alpha channel is solid');
+  ok(G.seeThroughShare(rgba([255, 255]), 2, 1, 4, true, 120, 60, 100, 50) === 0, 'never below zero');
+  ok(G.LOGO_SHARE === 0.02, 'a tab 2% see-through or more is a cut-out logo');
+}
+
 // ---- strip: export metadata scrub ----
 {
   const S = require('../strip');
@@ -376,6 +418,10 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
   for (let i = 8; i + 12 <= pout.length;) { const len = ((pout[i] << 24) | (pout[i + 1] << 16) | (pout[i + 2] << 8) | pout[i + 3]) >>> 0; types.push(String.fromCharCode(pout[i + 4], pout[i + 5], pout[i + 6], pout[i + 7])); i += 12 + len; }
   ok(types.join(',') === 'IHDR,pHYs,IDAT,IEND', 'png: text/exif chunks dropped, the rest kept in order (got ' + types + ')');
   ok(S.stripPng(Uint8Array.from([1, 2, 3]).buffer).byteLength === 3, 'png: non-PNG bytes returned untouched');
+  ok(S.scrubBytes('Poster.JPG', jpg.buffer).byteLength === out.length, 'scrubBytes: a .jpg name scrubs as JPEG');
+  ok(S.scrubBytes('Logo.PNG', png.buffer).byteLength === pout.length, 'scrubBytes: a .png name scrubs as PNG');
+  const bad = Symbol('bad');   // makes the byte walker throw
+  ok(S.scrubBytes('Poster.jpg', bad) === bad, 'scrubBytes: input the scrub throws on comes back untouched');
 }
 
 // ---- the three panels report the same version ----
@@ -386,6 +432,17 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
     const m = fs.readFileSync(path.join(__dirname, '..', '..', f), 'utf8').match(/PANEL_VERSION = '([^']+)'/);
     ok(!!m && m[1] === ps, f + ' PANEL_VERSION ' + (m ? m[1] : '(missing)') + ' should match the Photoshop manifest ' + ps);
   });
+}
+
+// The menu commands the manifest lists are the ones the panel answers.
+{
+  const fs = require('fs'), path = require('path');
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'manifest.json'), 'utf8'));
+  const listed = manifest.entrypoints.filter((e) => e.type === 'command').map((e) => e.id).sort();
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const answered = ((main.match(/entrypoints\.setup\(\{ commands: \{([^\n]*)\} \}\)/) || [])[1] || '').match(/(\w+): \{ run:/g) || [];
+  ok(listed.join() === 'editInTab,sendBack' && answered.map((a) => a.split(':')[0]).sort().join() === listed.join(), 'manifest commands ' + listed + ' match the ones main.js answers: ' + answered);
+  ok(manifest.host.data && manifest.host.data.enableMenuRecording === true, 'menu recording is on, so the commands can be recorded in an Action');
 }
 
 console.log((fail === 0 ? 'PASS' : 'FAIL') + ' — ' + pass + ' checks passed, ' + fail + ' failed');

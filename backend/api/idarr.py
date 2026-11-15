@@ -923,16 +923,9 @@ def save_maker_idarr_config(config: MakerIdarrConfig, db: Session = Depends(get_
         raise HTTPException(status_code=500, detail="Failed to save IDarr configuration")
 
 
-@router.post("/upload")
-async def upload_maker_idarr_files(
-    sync_target_index: int = Form(...),
-    files: list[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-) -> Dict[str, Any]:
-    """Upload poster-maker files into the selected IDarr sync target source folder."""
-    if not files:
-        raise HTTPException(status_code=400, detail="No files provided")
-
+def idarr_upload_target(db: Session, sync_target_index: int) -> tuple[Path, bool]:
+    """A sync target's source folder (created if missing) and whether it is an assets drive.
+    400 when IDarr is not configured or the target cannot take files."""
     config_setting = get_setting(db, SETTING_MAKER_IDARR_CONFIG)
     if not config_setting or not config_setting.value:
         raise HTTPException(status_code=400, detail="IDarr is not configured. Save settings first.")
@@ -963,7 +956,6 @@ async def upload_maker_idarr_files(
         raise HTTPException(status_code=400, detail="Selected sync target is missing source_dir.")
 
     source_dir = Path(source_dir_value)
-    is_asset_drive = bool(selected_target.get("is_asset_drive", False))
     try:
         source_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:
@@ -976,68 +968,63 @@ async def upload_maker_idarr_files(
             status_code=400,
             detail=f"Cannot create or access source folder '{source_dir_value}'. Ensure it is an absolute path and the container has write permission.",
         )
+    return source_dir, bool(selected_target.get("is_asset_drive", False))
 
-    uploaded: list[str] = []
-    skipped: list[str] = []
 
-    for upload in files:
-        filename = Path(str(upload.filename or "")).name.strip()
-        if not filename:
-            skipped.append("unnamed-file")
-            continue
+def store_idarr_upload(source_dir: Path, is_asset_drive: bool, filename: str, payload: bytes | None) -> bool:
+    """Write one file into a sync target's source folder. A file already there under that name is
+    moved to the duplicates folder first. False when it was skipped (not an image, unread, over 50 MB, or a write failed)."""
+    suffix = Path(filename).suffix.lower()
+    if payload is None or suffix not in IDARR_UPLOAD_IMAGE_EXTENSIONS:
+        return False
+    if len(payload) > 50 * 1024 * 1024:
+        log_warning(LogTags.API, f"IDarr upload skipped (exceeds 50 MB): {filename}")
+        return False
 
-        suffix = Path(filename).suffix.lower()
-        if suffix not in IDARR_UPLOAD_IMAGE_EXTENSIONS:
-            skipped.append(filename)
-            continue
-
-        # For asset drives, route to logos/, backgrounds/ or squareart/ based on the filename
-        if is_asset_drive:
-            name_lower = filename.lower()
-            if "logo" in name_lower:
-                dest_dir = source_dir / "logos"
-            elif "background" in name_lower:
-                dest_dir = source_dir / "backgrounds"
-            elif "squareart" in name_lower:
-                dest_dir = source_dir / "squareart"
-            else:
-                dest_dir = source_dir / "logos"
-            try:
-                dest_dir.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
+    # For asset drives, route to logos/, backgrounds/ or squareart/ based on the filename
+    if is_asset_drive:
+        name_lower = filename.lower()
+        if "logo" in name_lower:
+            dest_dir = source_dir / "logos"
+        elif "background" in name_lower:
+            dest_dir = source_dir / "backgrounds"
+        elif "squareart" in name_lower:
+            dest_dir = source_dir / "squareart"
         else:
-            dest_dir = source_dir
-
-        destination = dest_dir / filename
-        if destination.exists():
-            duplicates_dir = app_settings.config_dir / "idarr" / "duplicates"
-            try:
-                duplicates_dir.mkdir(parents=True, exist_ok=True)
-                archived_name = filename
-                archived_path = duplicates_dir / archived_name
-                if archived_path.exists():
-                    archived_name = f"{destination.stem}_{int(time.time())}{suffix}"
-                    archived_path = duplicates_dir / archived_name
-                shutil.move(str(destination), str(archived_path))
-                log_warning(LogTags.API, f"IDarr upload archived existing file to duplicates: {filename}")
-            except Exception as exc:
-                skipped.append(filename)
-                log_error(LogTags.API, f"IDarr upload skipped (could not archive existing '{filename}'): {exc}\n{traceback.format_exc()}")
-                continue
-
+            dest_dir = source_dir / "logos"
         try:
-            payload = await upload.read()
-            if len(payload) > 50 * 1024 * 1024:
-                skipped.append(filename)
-                log_warning(LogTags.API, f"IDarr upload skipped (exceeds 50 MB): {filename}")
-                continue
-            destination.write_bytes(payload)
-            uploaded.append(destination.name)
-        except Exception as exc:
-            log_error(LogTags.API, f"Failed to save uploaded IDarr file '{filename}': {exc}\n{traceback.format_exc()}")
-            skipped.append(filename)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    else:
+        dest_dir = source_dir
 
+    destination = dest_dir / filename
+    if destination.exists():
+        duplicates_dir = app_settings.config_dir / "idarr" / "duplicates"
+        try:
+            duplicates_dir.mkdir(parents=True, exist_ok=True)
+            archived_name = filename
+            archived_path = duplicates_dir / archived_name
+            if archived_path.exists():
+                archived_name = f"{destination.stem}_{int(time.time())}{suffix}"
+                archived_path = duplicates_dir / archived_name
+            shutil.move(str(destination), str(archived_path))
+            log_warning(LogTags.API, f"IDarr upload archived existing file to duplicates: {filename}")
+        except Exception as exc:
+            log_error(LogTags.API, f"IDarr upload skipped (could not archive existing '{filename}'): {exc}\n{traceback.format_exc()}")
+            return False
+
+    try:
+        destination.write_bytes(payload)
+    except Exception as exc:
+        log_error(LogTags.API, f"Failed to save uploaded IDarr file '{filename}': {exc}\n{traceback.format_exc()}")
+        return False
+    return True
+
+
+def _idarr_uploads_stored(sync_target_index: int, source_dir: Path, uploaded: list[str], skipped: list[str]) -> Dict[str, Any]:
+    """What the quick add's file step answers: the names stored and skipped. 400 when nothing was stored."""
     if not uploaded:
         raise HTTPException(status_code=400, detail="No valid image files were uploaded")
 
@@ -1057,6 +1044,42 @@ async def upload_maker_idarr_files(
         "uploaded": uploaded,
         "skipped": skipped,
     }
+
+
+def store_idarr_uploads(db: Session, sync_target_index: int, files: list[tuple[str, bytes | None]]) -> Dict[str, Any]:
+    """The quick add's file step for (name, bytes) pairs: into the sync target's source folder. A pair
+    with no bytes is a file that was not read. 400 as idarr_upload_target, or when nothing was stored."""
+    source_dir, is_asset_drive = idarr_upload_target(db, sync_target_index)
+    uploaded: list[str] = []
+    skipped: list[str] = []
+    for filename, payload in files:
+        (uploaded if store_idarr_upload(source_dir, is_asset_drive, filename, payload) else skipped).append(filename)
+    return _idarr_uploads_stored(sync_target_index, source_dir, uploaded, skipped)
+
+
+@router.post("/upload")
+async def upload_maker_idarr_files(
+    sync_target_index: int = Form(...),
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Upload poster-maker files into the selected IDarr sync target source folder."""
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+    source_dir, is_asset_drive = idarr_upload_target(db, sync_target_index)
+
+    uploaded: list[str] = []
+    skipped: list[str] = []
+    for upload in files:   # read and written one at a time: a large drop is never all in memory
+        filename = Path(str(upload.filename or "")).name.strip() or "unnamed-file"
+        payload = None
+        if Path(filename).suffix.lower() in IDARR_UPLOAD_IMAGE_EXTENSIONS:
+            try:
+                payload = await upload.read()
+            except Exception as exc:
+                log_error(LogTags.API, f"Failed to save uploaded IDarr file '{filename}': {exc}\n{traceback.format_exc()}")
+        (uploaded if store_idarr_upload(source_dir, is_asset_drive, filename, payload) else skipped).append(filename)
+    return _idarr_uploads_stored(sync_target_index, source_dir, uploaded, skipped)
 
 
 @router.get("/last-run")
