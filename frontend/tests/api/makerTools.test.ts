@@ -104,3 +104,37 @@ describe('posterCheckKey (availability map key, mirrors the server)', () => {
     expect(posterCheckKey({})).toBeNull()
   })
 })
+
+describe('PSD calls on a password-protected instance', () => {
+  it('send the Bearer token on export, upload, Photoshop queue and plugin download', async () => {
+    const http = await import('../../src/api/http')
+    const client = http.default
+    const originalAdapter = client.defaults.adapter
+    const seen: Record<string, unknown> = {}
+    client.defaults.adapter = async (config) => {
+      seen[`${config.method} ${config.url}`] = config.headers?.Authorization
+      return { data: new Blob(['x']), status: 200, statusText: 'OK', headers: {}, config }
+    }
+    localStorage.setItem(http.AUTH_TOKEN_STORAGE_KEY, 'pw')
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      const api = await import('../../src/api/makerTools')
+      await api.exportToPsd({ title: 'Show', year: '2020', poster_paths: [], backdrop_paths: [], logo_paths: [], use_existing: true }, 'Show', '2020')
+      await api.uploadPsdToExportFolder(new File(['x'], 'Show (2020).psd'), 'Show (2020).psd')
+      await api.enqueuePhotoshopOpen('Show (2020).psd', 'CL2K', 'Show (2020)')
+      vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: () => undefined })
+      await api.downloadPhotoshopPlugin()
+      expect(seen).toEqual({
+        'post /api/maker-tools/tmdb/psd-export': 'Bearer pw',
+        'put /api/maker-tools/psd-exports/Show%20(2020).psd': 'Bearer pw',
+        'post /api/maker-tools/photoshop-queue': 'Bearer pw',
+        'get /api/maker-tools/photoshop-plugin.ccx': 'Bearer pw',
+      })
+    } finally {
+      client.defaults.adapter = originalAdapter
+      localStorage.removeItem(http.AUTH_TOKEN_STORAGE_KEY)
+      click.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+})

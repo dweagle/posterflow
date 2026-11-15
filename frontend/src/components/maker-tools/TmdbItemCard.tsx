@@ -58,6 +58,7 @@ import {
   geminiFileUrl,
   withKeptImages,
 } from '../../api/client'
+import { downloadFile } from '../../api/http'
 import { useToast } from '../Toast'
 import { useAppleTvStorefront } from '../../hooks/useAppleTvStorefront'
 import PosterDriveSearchModal from '../PosterDriveSearchModal'
@@ -418,19 +419,10 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // (Title (Year) {ids}[ - Season N][ - logo|background].ext), matching the rest of the app.
   const handleGalleryDownload = useCallback(async (filePath: string, role: 'poster' | 'backdrop' | 'logo' = 'poster', season?: number | null) => {
     try {
-      const resp = await fetch(isGeminiRef(filePath) ? geminiFileUrl(filePath, true) : getArtworkTaggedDownloadUrl(filePath, role, item, season))
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const cd = resp.headers.get('Content-Disposition') || ''
-      const m = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(cd)
-      const filename = m ? decodeURIComponent(m[1] || m[2]) : (filePath.split('/').filter(Boolean).pop() ?? 'artwork.jpg')
-      const objectUrl = URL.createObjectURL(await resp.blob())
-      const a = document.createElement('a')
-      a.href = objectUrl
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(objectUrl)
+      await downloadFile(
+        isGeminiRef(filePath) ? geminiFileUrl(filePath, true) : getArtworkTaggedDownloadUrl(filePath, role, item, season),
+        { fallbackName: filePath.split('/').filter(Boolean).pop() ?? 'artwork.jpg' },
+      )
     } catch {
       showToast('Failed to download image', 'error')
     }

@@ -110,4 +110,30 @@ export const deleteData = async <T>(url: string, config?: AxiosRequestConfig): P
   return response.data
 }
 
+const dispositionFilename = (header: unknown): string | undefined => {
+  const m = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(typeof header === 'string' ? header : '')
+  if (!m) return undefined
+  const raw = (m[1] || m[2]).trim()
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+// Fetch a file through the client, so the app password goes with it, and save it.
+// `name` forces the saved name; otherwise the server's name is used, then `fallbackName`.
+export const downloadFile = async (url: string, opts: { name?: string; fallbackName?: string } = {}): Promise<void> => {
+  const resp = await client.get<Blob>(url, { responseType: 'blob' })
+  const filename = opts.name ?? dispositionFilename(resp.headers?.['content-disposition']) ?? opts.fallbackName ?? 'download'
+  const objectUrl = URL.createObjectURL(resp.data)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
 export default client

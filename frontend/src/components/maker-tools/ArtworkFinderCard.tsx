@@ -19,6 +19,7 @@ import {
   type ImageSource,
   type TmdbSearchResult,
 } from '../../api/client'
+import { downloadFile } from '../../api/http'
 import { useToast } from '../Toast'
 import SquareCropModal from './SquareCropModal'
 import LocalArtworkPickerModal from './LocalArtworkPickerModal'
@@ -155,16 +156,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
 
   const downloadImage = useCallback(async (url: string, filename: string) => {
     try {
-      const resp = await fetch(url)
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const objectUrl = URL.createObjectURL(await resp.blob())
-      const a = document.createElement('a')
-      a.href = objectUrl
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(objectUrl)
+      await downloadFile(url, { name: filename })
     } catch {
       showToast('Failed to download image', 'error')
     }

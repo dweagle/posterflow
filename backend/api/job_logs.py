@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from core.config import settings
 from core.logging import log_warning, log_error, LogTags
+from core.auth import authorize_websocket
 from core.websocket import shutdown_event, watch_disconnect
 from fastapi.responses import FileResponse
 import asyncio
@@ -184,6 +185,8 @@ async def websocket_job_log_live(websocket: WebSocket, job_type: str) -> None:
         return
 
     await websocket.accept()
+    if not await authorize_websocket(websocket):
+        return
 
     disconnected, watcher = watch_disconnect(websocket)
 

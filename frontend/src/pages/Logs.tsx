@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import LogPane, { type LogPaneHandle } from '../components/LogPane'
 import { getLogs, getLogHistory, searchLogs, clearLogs, LogEntry, getJobLogs, getJobLogContent, downloadJobLog, connectJobLogLiveWS, JobLogs as JobLogsData, JobLogFile } from '../api/client'
+import { openSocket, WS_UNAUTHORIZED } from '../api/socket'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Trash2, RefreshCw, Download, FileText, ChevronDown, ChevronUp, Monitor, Briefcase, Radio, Search, X } from 'lucide-react'
@@ -284,7 +285,7 @@ function Logs() {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.hostname}:${window.location.port}/api/logs/ws`
-    const ws = new WebSocket(wsUrl)
+    const ws = openSocket(wsUrl)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -353,8 +354,8 @@ function Logs() {
       // ref (and consider reconnecting) if this socket is still the current one.
       if (wsRef.current !== ws) return
       wsRef.current = null
-      // Only reconnect if auto-refresh is still enabled, on system tab, and component is mounted
-      if (autoRefresh && activeTab === 'system' && event.code !== 1000 && isMountedRef.current) {
+      // Only reconnect if auto-refresh is still enabled, on system tab, not refused for the password, and mounted
+      if (autoRefresh && activeTab === 'system' && event.code !== 1000 && event.code !== WS_UNAUTHORIZED && isMountedRef.current) {
         reconnectTimeoutRef.current = setTimeout(connectLogWebSocket, 2000)
       }
     }
@@ -437,9 +438,9 @@ function Logs() {
   }
 
   const handleDownload = (jobType: string, filename: string) => {
-    const url = downloadJobLog(jobType, filename)
-    window.open(url, '_blank')
-    showToast('Download started', 'success')
+    downloadJobLog(jobType, filename)
+      .then(() => showToast('Download started', 'success'))
+      .catch(() => showToast('Failed to download log', 'error'))
   }
 
   const stopLiveTail = () => {

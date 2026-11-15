@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from core.logging import log_warning, log_error, log_user_action, LogTags
 from core.log_stream import hub
+from core.auth import authorize_websocket
 from core.websocket import WebSocketConnectionManager, shutdown_event, watch_disconnect
 from database import get_db
 from models.setting import upsert_setting
@@ -202,6 +203,8 @@ async def websocket_logs(websocket: WebSocket) -> None:
     for the initial backlog.
     """
     await websocket.accept()
+    if not await authorize_websocket(websocket):
+        return
     _ws.active_connections.append(websocket)
     _ws.check_warning()
 

@@ -121,7 +121,7 @@ describe('PlexUpload', () => {
       total_edition_refs: 0,
       entries: [],
     })
-    mockDownloadPlexUploadCacheExport.mockReturnValue('/api/poster-manager/plex-upload/upload-cache/export')
+    mockDownloadPlexUploadCacheExport.mockResolvedValue(undefined)
     mockGetPlexUploadInstanceMap.mockResolvedValue({ map: {} })
     mockSavePlexUploadInstanceMap.mockResolvedValue({ message: 'saved', map: {} })
     mockGetSettings.mockResolvedValue({})

@@ -1,4 +1,4 @@
-import { API_URL, getData, postData } from './http'
+import { downloadFile, getData, postData } from './http'
 
 export interface PlexUploadRunOptions {
   dry_run?: boolean
@@ -366,6 +366,6 @@ export const clearPlexUploadCache = async (
   return postData('/api/posterflow/plex-upload/upload-cache/clear', payload)
 }
 
-export const downloadPlexUploadCacheExport = (): string => {
-  return `${API_URL}/api/posterflow/plex-upload/upload-cache/export`
+export const downloadPlexUploadCacheExport = (): Promise<void> => {
+  return downloadFile('/api/posterflow/plex-upload/upload-cache/export', { fallbackName: 'plex_upload_cache_export.json' })
 }

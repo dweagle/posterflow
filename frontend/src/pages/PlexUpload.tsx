@@ -1040,10 +1040,14 @@ function PlexUpload() {
     }
   }
 
-  const exportUploadCache = () => {
-    const url = downloadPlexUploadCacheExport()
-    window.open(url, '_blank')
-    showToast('Upload cache export started', 'success')
+  const exportUploadCache = async () => {
+    try {
+      await downloadPlexUploadCacheExport()
+      showToast('Upload cache export started', 'success')
+    } catch (error) {
+      console.error('Failed to export upload cache:', error)
+      showToast('Failed to export upload cache', 'error')
+    }
   }
 
   const openCacheBrowser = () => {

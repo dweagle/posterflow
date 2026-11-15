@@ -1,4 +1,4 @@
-import { API_URL, deleteData, getData, postData, putData } from './http'
+import client, { API_URL, deleteData, getData, postData, putData } from './http'
 // Inlined as a data URI (Vite ?inline) so Photopea renders it without a network fetch.
 // A remote-URL icon at our origin is passive mixed content on an http LAN instance — Chrome
 // auto-upgrades it to https, the upgrade fails (no TLS), and the button shows with no image.
@@ -832,9 +832,8 @@ export const exportToPsd = async (
   titleForFilename: string,
   yearForFilename: string,
 ): Promise<PsdExportResult> => {
-  const { default: axios } = await import('axios')
   try {
-    const resp = await axios.post('/api/maker-tools/tmdb/psd-export', payload, {
+    const resp = await client.post('/api/maker-tools/tmdb/psd-export', payload, {
       responseType: 'blob',
     })
 
@@ -930,8 +929,7 @@ const ensurePpListener = (): void => {
  * saved via a temporary anchor — a plain link couldn't carry the Bearer header).
  */
 export const downloadPhotoshopPlugin = async (): Promise<void> => {
-  const { default: axios } = await import('axios')
-  const resp = await axios.get('/api/maker-tools/photoshop-plugin.ccx', { responseType: 'blob' })
+  const resp = await client.get('/api/maker-tools/photoshop-plugin.ccx', { responseType: 'blob' })
   const url = URL.createObjectURL(resp.data as Blob)
   const a = document.createElement('a')
   a.href = url
@@ -947,8 +945,7 @@ export const downloadPhotoshopPlugin = async (): Promise<void> => {
  * /photoshop-queue every few seconds and downloads + opens claimed items itself.
  */
 export const enqueuePhotoshopOpen = async (filename: string, style: string, name: string): Promise<void> => {
-  const { default: axios } = await import('axios')
-  await axios.post('/api/maker-tools/photoshop-queue', { filename, style, name })
+  await client.post('/api/maker-tools/photoshop-queue', { filename, style, name })
 }
 
 export const openPhotopeaWithPsd = (
@@ -1056,8 +1053,7 @@ export const checkTmdbPosterAvailability = async (
  * The file is saved under the given `filename` (must match `{title} ({year}).psd`).
  */
 export const uploadPsdToExportFolder = async (file: File, filename: string): Promise<void> => {
-  const { default: axios } = await import('axios')
-  await axios.put(`/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`, file, {
+  await client.put(`/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`, file, {
     headers: { 'Content-Type': 'application/octet-stream' },
   })
 }

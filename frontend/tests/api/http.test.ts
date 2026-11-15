@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AxiosAdapter } from 'axios'
-import client, { isNewerVersion, NEW_VERSION_EVENT } from '../../src/api/http'
+import client, { AUTH_TOKEN_STORAGE_KEY, downloadFile, isNewerVersion, NEW_VERSION_EVENT } from '../../src/api/http'
 
 describe('isNewerVersion', () => {
   it('is true only when the candidate is strictly newer', () => {
@@ -96,5 +96,59 @@ describe('X-App-Version response interceptor', () => {
     await client.get('/api/anything')
     stop()
     expect(seen).toEqual([newer])
+  })
+})
+
+describe('downloadFile', () => {
+  const originalAdapter = client.defaults.adapter
+  let saved: { name: string; auth: unknown }[] = []
+  let click: ReturnType<typeof vi.spyOn>
+
+  const serve = (disposition?: string) => {
+    const adapter: AxiosAdapter = async (config) => {
+      saved.push({ name: '', auth: config.headers?.Authorization })
+      return { data: new Blob(['x']), status: 200, statusText: 'OK', headers: disposition ? { 'content-disposition': disposition } : {}, config }
+    }
+    client.defaults.adapter = adapter
+  }
+
+  beforeEach(() => {
+    saved = []
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'pw')
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: () => undefined })
+    click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved[saved.length - 1].name = this.download
+    })
+  })
+
+  afterEach(() => {
+    client.defaults.adapter = originalAdapter
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    click.mockRestore()
+    vi.unstubAllGlobals()
+  })
+
+  it('sends the app password and saves under the server name', async () => {
+    serve("attachment; filename*=UTF-8''Show%20%282020%29%20-%20logo.png")
+    await downloadFile('/api/artwork-finder/tmdb-download?path=/a.png', { fallbackName: 'a.png' })
+    expect(saved).toEqual([{ name: 'Show (2020) - logo.png', auth: 'Bearer pw' }])
+  })
+
+  it('lets a forced name win over the server name', async () => {
+    serve('attachment; filename="server.log"')
+    await downloadFile('/api/job-logs/workflow/run.log/download', { name: 'run.log' })
+    expect(saved[0].name).toBe('run.log')
+  })
+
+  it('falls back when the server names nothing', async () => {
+    serve()
+    await downloadFile('/api/posterflow/plex-upload/upload-cache/export', { fallbackName: 'plex_upload_cache_export.json' })
+    expect(saved[0].name).toBe('plex_upload_cache_export.json')
+  })
+
+  it('rejects on a refused request, so the caller can say so', async () => {
+    client.defaults.adapter = async (config) => Promise.reject(Object.assign(new Error('401'), { config, response: { status: 401 } }))
+    await expect(downloadFile('/api/job-logs/workflow/run.log/download')).rejects.toThrow('401')
+    expect(click).not.toHaveBeenCalled()
   })
 })

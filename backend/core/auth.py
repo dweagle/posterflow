@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.websockets import WebSocket
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models.setting import get_setting, upsert_setting
@@ -43,6 +44,8 @@ _EXEMPT_PREFIXES: tuple[str, ...] = (
     "/api/stats/artwork/",
     "/api/idarr/pending-matches/source-image",
     "/api/artwork-finder/local-image",
+    "/api/artwork-finder/gracenote-image-proxy",
+    "/api/maker-tools/gemini-image/file",
     "/api/posterflow/plex-upload/source-image",
     "/api/posterflow/plex-upload/plex-thumb",
     "/api/posterflow/drive-image",
@@ -270,6 +273,24 @@ def invalidate_auth_cache() -> None:
     _cache.invalidate()
 
 
+async def _load_password_cache() -> None:
+    # refresh from DB if stale, off the event loop like any other DB read
+    if not _cache.is_fresh():
+        async with _refresh_lock:
+            if not _cache.is_fresh():
+                await run_in_threadpool(_refresh_password_cache)
+
+
+async def _token_accepted(token: str) -> bool:
+    # PBKDF2 is deliberately slow; it runs in the threadpool and only until the token is known good
+    if _cache.token_verified(token):
+        return True
+    if not await run_in_threadpool(verify_password, token, _cache.salt_val, _cache.hash_val):
+        return False
+    _cache.token_ok = _cache.token_digest(token)
+    return True
+
+
 class AppAuthMiddleware(BaseHTTPMiddleware):
     """Starlette middleware that enforces the app password when one is configured."""
 
@@ -294,11 +315,7 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
             if request.method == method and path.startswith(prefix):
                 return await call_next(request)
 
-        # Load cached password (refresh from DB if stale), off the event loop like any other DB read
-        if not _cache.is_fresh():
-            async with _refresh_lock:
-                if not _cache.is_fresh():
-                    await run_in_threadpool(_refresh_password_cache)
+        await _load_password_cache()
 
         # If no password is configured, allow everything through
         if not _cache.hash_val:
@@ -310,12 +327,55 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
             log_warning(LogTags.API, f"Unauthorized API request – missing Bearer token ({path})")
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
-        token = auth_header[7:]
-        # PBKDF2 is deliberately slow; it runs in the threadpool and only until the token is known good
-        if not _cache.token_verified(token):
-            if not await run_in_threadpool(verify_password, token, _cache.salt_val, _cache.hash_val):
-                log_warning(LogTags.API, f"Unauthorized API request – invalid token ({path})")
-                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
-            _cache.token_ok = _cache.token_digest(token)
+        if not await _token_accepted(auth_header[7:]):
+            log_warning(LogTags.API, f"Unauthorized API request – invalid token ({path})")
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
         return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Websockets
+# ---------------------------------------------------------------------------
+# The middleware only sees HTTP, so each websocket handler calls authorize_websocket right
+# after accepting. With a password set, the client's first message must be
+# {"type": "auth", "token": <password>}.
+
+WS_UNAUTHORIZED = 4401    # close code the frontend reads as "show the lock screen"
+_WS_AUTH_TIMEOUT = 10.0   # seconds a client gets to send its auth message
+_WS_WARN_INTERVAL = 60.0  # a stale tab retries every few seconds; log each socket once a minute
+_ws_last_warned: dict[str, float] = {}
+
+
+def _warn_ws_unauthorized(path: str, reason: str) -> None:
+    now = time.monotonic()
+    last = _ws_last_warned.get(path)
+    if last is not None and (now - last) < _WS_WARN_INTERVAL:
+        return
+    _ws_last_warned[path] = now
+    log_warning(LogTags.API, f"Unauthorized websocket – {reason} ({path})")
+
+
+async def authorize_websocket(websocket: WebSocket) -> bool:
+    """True when the socket may stream. Closes it and returns False on a missing or wrong password."""
+    await _load_password_cache()
+    if not _cache.hash_val:
+        return True
+
+    token = ""
+    try:
+        message = await asyncio.wait_for(websocket.receive_json(), timeout=_WS_AUTH_TIMEOUT)
+        if isinstance(message, dict) and message.get("type") == "auth" and isinstance(message.get("token"), str):
+            token = message["token"]
+    except Exception:
+        pass  # timed out, disconnected or not JSON: no token
+
+    if token and await _token_accepted(token):
+        return True
+
+    _warn_ws_unauthorized(websocket.url.path, "invalid token" if token else "missing token")
+    try:
+        await websocket.close(code=WS_UNAUTHORIZED)
+    except Exception:
+        pass
+    return False

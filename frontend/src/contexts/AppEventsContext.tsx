@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
+import { openSocket, WS_UNAUTHORIZED } from '../api/socket'
 import { getUnmatchedStats, getMakerIdarrPendingCount, getMakerMonitorNeededCount, getCommunityRequestCount, getNewDrives, getWebSocketUrl, EMPTY_NEW_DRIVES, Job, NewDrives, UnmatchedStats } from '../api/client'
 
 interface JobUpdate {
@@ -102,7 +103,7 @@ export function AppEventsProvider({ children }: { children: ReactNode }) {
     }
 
     const wsUrl = getWebSocketUrl()
-    const ws = new WebSocket(wsUrl)
+    const ws = openSocket(wsUrl)
     wsRef.current = ws
 
     // Drives join the community list when the backend (re)starts, so a reconnect is the
@@ -167,8 +168,8 @@ export function AppEventsProvider({ children }: { children: ReactNode }) {
       }
 
       wsRef.current = null
-      // Only reconnect if not a clean close (code 1000) and component is still mounted
-      if (event.code !== 1000 && isMountedRef.current) {
+      // Only reconnect if not a clean close (code 1000), not refused for the password, and still mounted
+      if (event.code !== 1000 && event.code !== WS_UNAUTHORIZED && isMountedRef.current) {
         reconnectTimeoutRef.current = setTimeout(connectWebSocket, 2000)
       }
     }

@@ -318,6 +318,28 @@ def test_stats_image_routes_exempt_from_password(client):
         _cache.loaded_at = 0.0
 
 
+def test_gallery_image_routes_exempt_from_password(client):
+    """Kept Gemini tiles and Plex square art / logos are gallery <img> tags, which can't send the
+    Bearer header, so both routes are auth-exempt (the ref pattern and the plex.tv host allowlist
+    are their guards). With a password enforced they must reach the endpoint, never a 401, while
+    their siblings stay behind the password."""
+    salt_hex, hash_hex = hash_password("testpass")
+    _cache.hash_val = hash_hex
+    _cache.salt_val = salt_hex
+    _cache.loaded_at = time.monotonic()
+    try:
+        ref = "gemini:tmdb-999999/poster-000000000000.jpg"
+        assert client.get("/api/maker-tools/gemini-image/file", params={"ref": ref}).status_code == 404
+        not_plex = {"url": "https://example.com/a.jpg"}
+        assert client.get("/api/artwork-finder/gracenote-image-proxy", params=not_plex).status_code == 400
+        assert client.get("/api/maker-tools/gemini-image/kept", params={"tmdb_id": 1}).status_code == 401
+        assert client.get("/api/artwork-finder/fanart-image-proxy", params=not_plex).status_code == 401
+    finally:
+        _cache.hash_val = ""
+        _cache.salt_val = ""
+        _cache.loaded_at = 0.0
+
+
 # ---------------------------------------------------------------------------
 # Token memo: PBKDF2 runs once per token, bound to the hash it was checked against
 # ---------------------------------------------------------------------------

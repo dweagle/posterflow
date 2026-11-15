@@ -56,6 +56,10 @@ class MockWebSocket {
       this.onclose({ code: 1000 } as CloseEvent)
     }
   }
+
+  addEventListener() {}
+
+  send() {}
 }
 
 describe('Logs', () => {
@@ -84,7 +88,7 @@ describe('Logs', () => {
       unmatched_assets: [],
     })
     mockGetJobLogContent.mockResolvedValue({ content: 'workflow content', filename: 'workflow.log' })
-    mockDownloadJobLog.mockReturnValue('https://example.test/log-download')
+    mockDownloadJobLog.mockResolvedValue(undefined)
   })
 
   it('loads system logs when auto-refresh is disabled', async () => {
@@ -114,6 +118,32 @@ describe('Logs', () => {
       expect(mockClearLogs).toHaveBeenCalledTimes(1)
     })
     expect(mockShowToast).toHaveBeenCalledWith('Logs cleared successfully')
+  })
+
+  it('downloads a job log in the page instead of opening a tab', async () => {
+    const user = userEvent.setup()
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    try {
+      render(<Logs />)
+
+      await user.click(screen.getByRole('tab', { name: 'Job Logs' }))
+      await screen.findByText('workflow.log')
+      await user.click(screen.getByTitle('Download log'))
+
+      await waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith('Download started', 'success')
+      })
+      expect(mockDownloadJobLog).toHaveBeenCalledWith('workflow', 'workflow.log')
+      expect(open).not.toHaveBeenCalled()
+
+      mockDownloadJobLog.mockRejectedValue(new Error('401'))
+      await user.click(screen.getByTitle('Download log'))
+      await waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith('Failed to download log', 'error')
+      })
+    } finally {
+      open.mockRestore()
+    }
   })
 
   it('loads job log file content from the job logs tab', async () => {

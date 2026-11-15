@@ -13,6 +13,7 @@ from pathlib import Path
 from websockets.exceptions import ConnectionClosed
 from uvicorn.protocols.utils import ClientDisconnected
 from core.config import settings
+from core.auth import authorize_websocket
 from core.websocket import WebSocketConnectionManager, shutdown_event, watch_disconnect
 from database import get_db, SessionLocal
 from models.job import (
@@ -125,6 +126,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     conn_id = _ws.next_conn_id()
     
     await websocket.accept()
+    if not await authorize_websocket(websocket):
+        return
     _ws.active_connections.append(websocket)
 
     _ws.check_warning()

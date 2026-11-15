@@ -1,4 +1,5 @@
-import { API_URL, getData, postData } from './http'
+import { downloadFile, getData, postData } from './http'
+import { openSocket } from './socket'
 
 export interface Job {
   id: number
@@ -91,12 +92,12 @@ export const getJobLogContent = async (jobType: string, filename: string): Promi
   return getData(`/api/job-logs/${jobType}/${filename}`)
 }
 
-export const downloadJobLog = (jobType: string, filename: string): string => {
-  return `${API_URL}/api/job-logs/${jobType}/${filename}/download`
+export const downloadJobLog = (jobType: string, filename: string): Promise<void> => {
+  return downloadFile(`/api/job-logs/${jobType}/${filename}/download`, { name: filename })
 }
 
 export const connectJobLogLiveWS = (jobType: string): WebSocket => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const wsUrl = `${protocol}//${window.location.hostname}:${window.location.port}/api/job-logs/${jobType}/live`
-  return new WebSocket(wsUrl)
+  return openSocket(wsUrl)
 }
