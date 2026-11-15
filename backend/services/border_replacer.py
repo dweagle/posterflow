@@ -617,7 +617,7 @@ def style_band_width(style_opts: Optional[Dict[str, Any]], default: int) -> int:
     return own if own > 0 else default
 
 
-def build_border_run_settings(db: Session, run_type: str = "manual") -> Dict[str, Any]:
+def build_border_run_settings(db: Session, run_type: str = "manual", plex_rules: bool = True) -> Dict[str, Any]:
     """Read every border-replacer setting into process_posters() keyword arguments.
 
     This is the SINGLE source of truth so every caller — the standalone/workflow job,
@@ -625,6 +625,7 @@ def build_border_run_settings(db: Session, run_type: str = "manual") -> Dict[str
     Returns everything except source_dir/destination_dir/dry_run/mode/progress_callback
     (those are caller-specific). `run_type` gates the Plex label/genre/collection rules
     (one of "workflow" | "webhook" | "manual" | "autorun" | "scheduled").
+    `plex_rules=False` skips the media server queries for callers that only read the settings.
     """
     from models.setting import get_setting_value
     from services.plex_border_rules import build_plex_matcher
@@ -689,7 +690,7 @@ def build_border_run_settings(db: Session, run_type: str = "manual") -> Dict[str
         "season_border_width": season_width,
         "style_opts": build_style_opts(db),
         "season_style_opts": build_style_opts(db, prefix="season_") if season_mode == "custom" else None,
-        "plex_matcher": build_plex_matcher(db, run_type),
+        "plex_matcher": build_plex_matcher(db, run_type) if plex_rules else None,
     }
 
 

@@ -235,7 +235,7 @@ def _apply_saved_borders(db: Session, base):
         style_band_width,
     )
 
-    rs = build_border_run_settings(db, run_type="manual")
+    rs = build_border_run_settings(db, run_type="manual", plex_rules=False)  # the sample poster matches no rule
     width = int(rs["border_width"] or 26)
     if rs["remove_borders"]:
         return _strip_existing_border(base, width, exclude=False).resize((1000, 1500)).convert("RGB")

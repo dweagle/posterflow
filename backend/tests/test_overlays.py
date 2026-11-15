@@ -1664,6 +1664,19 @@ def test_overlays_api_preview_with_saved_borders(client, test_db, isolated_overl
     assert corner("plain") == (90, 90, 90)
 
 
+def test_overlays_api_preview_never_queries_the_media_server_for_border_rules(client, test_db, isolated_overlay_files, monkeypatch):
+    import api.poster_manager as pm
+    import services.plex_border_rules as rules
+
+    monkeypatch.setattr(pm, "_load_preview_base", lambda _db: Image.new("RGB", (1000, 1500), (90, 90, 90)))
+    queried = []
+    monkeypatch.setattr(rules, "build_plex_matcher", lambda *a, **k: queried.append(a))
+    test_db.add(Setting(key="border_replacer_colors", value=json.dumps(["#00FF00"])))
+    test_db.commit()
+    assert client.post("/api/overlays/preview", json={"type": "status", "variant": "ended", "base": "bordered"}).status_code == 200
+    assert queried == []
+
+
 def test_workflow_has_no_overlays_step(client, test_db):
     """Badges ride on Asset Upload now; a saved config that still names the old step is ignored."""
     assert "overlays" not in client.get("/api/posterflow/flow/config").json()
