@@ -6,6 +6,26 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-11-15
+### Added
+- Photopea/Photoshop Plugins: Thank you Bostafari for your work on this! Upload and Complete buttons. A finish can upload its posters and complete the request by itself, and plugin uploads go wherever the app's Upload button is set to send them. (Photoshop plugin 1.3.4 - reinstall the .ccx to pick it up.)
+  - Photoshop: Edit in tab opens a poster or logo in its own tab, Send back returns it, and Save BG saves the edit tab as the title's background. Edit in tab and Send back can be given F-keys.
+  - Right-click LIMITED SERIES to finish a limited series. Right-click SHOW with one poster asks which seasons to make.
+  - Warns about a blank canvas before exporting. Errors show in red and stay until dismissed.
+
+### Changed
+- Asset Upload: all settings are on the first tab, and Manual Uploads holds the run buttons and their options.
+
+### Fixed
+- Security: app password no longer breaks PSD exports, downloads and images
+- Asset Upload: a media server that is removed and added back keeps its Library Targeting, so its posters keep uploading.
+- Asset Upload: Single Poster Upload sends artwork when Upload artwork is on.
+- Webhooks: a Sonarr webhook handles a show in one pass when its poster/overlay needs a refresh, improved logging for shows.
+- Webhooks: the Discord notice for a missing poster gives the real reason
+- Plugins: the blue bolt no longer exports every season when left blank, and a finish stops if you switch to another document.
+- Overlays: opening the Overlays page no longer fills the logs with border rule lines.
+- Match Report: no longer says to rename a folder that belongs to a different movie or show with the same title.
+
 ## [0.19.1] - 2026-11-13
 ### Added
 - Overlays: Audio has a "Same line as Resolution" switch. With both overlays on the Lettering style, the audio is drawn at the end of the Resolution badge after a dot, as one line (4K · DOLBY VISION · DTS:X).
