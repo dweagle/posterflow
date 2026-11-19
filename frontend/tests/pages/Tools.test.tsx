@@ -313,6 +313,7 @@ describe('Tools page', () => {
     expect(mockUpdateToolProfile.mock.calls[0][2].settings).toMatchObject({ max_renames: 5, scan_to_limit: true })
     // A limit back at 0 sets the option aside again.
     await user.clear(limit)
+    await user.tab()  // an empty box counts as 0 once you leave it
     expect(scan.checked).toBe(false)
     expect(scan.disabled).toBe(true)
     expect(count.disabled).toBe(false)

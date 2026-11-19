@@ -5,6 +5,7 @@ import Toolbar from '../components/Toolbar'
 import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
 import SaveActions from '../components/SaveActions'
+import NumberField from '../components/poster-manager/NumberField'
 import RenameTagModal, { type RenameTagKind } from '../components/tools/RenameTagModal'
 import ArrPickModal, { type ArrPickKind } from '../components/tools/ArrPickModal'
 import TitleFilterModal from '../components/tools/TitleFilterModal'
@@ -667,14 +668,14 @@ function Tools() {
                           </label>
                           <label className="tools-field">
                             <span>Items per run <InfoTip text={RENAME_FIELD_HELP.count} /></span>
-                            <input type="number" min={0} max={1000} value={s.count} aria-label={named('Items per run')} disabled={scanning}
+                            <NumberField min={0} max={1000} value={s.count} fallback={0} ariaLabel={named('Items per run')} disabled={scanning}
                               title={scanning ? 'Scan until the rename limit is on: each run checks as many items as it takes' : undefined}
-                              onChange={(e) => set('count', Math.max(0, Math.min(1000, Number(e.target.value) || 0)))} />
+                              onChange={(n) => set('count', n)} />
                           </label>
                           <label className="tools-field">
                             <span>Rename limit <InfoTip text={RENAME_FIELD_HELP.max_renames} /></span>
-                            <input type="number" min={0} max={1000} value={s.max_renames} aria-label={named('Rename limit')}
-                              onChange={(e) => set('max_renames', Math.max(0, Math.min(1000, Number(e.target.value) || 0)))} />
+                            <NumberField min={0} max={1000} value={s.max_renames} fallback={0} ariaLabel={named('Rename limit')}
+                              onChange={(n) => set('max_renames', n)} />
                           </label>
                           <div className="tools-field">
                             <span>Cycle tag <InfoTip text={RENAME_FIELD_HELP.tag_name} /></span>
@@ -850,13 +851,13 @@ function Tools() {
                           </label>
                           <label className="tools-field">
                             <span>Items per run <InfoTip text={UPGRADE_FIELD_HELP.count} /></span>
-                            <input type="number" min={1} max={500} value={s.count} aria-label={named('Items per run')}
-                              onChange={(e) => set('count', Math.max(1, Math.min(500, Number(e.target.value) || 1)))} />
+                            <NumberField min={1} max={500} value={s.count} fallback={1} ariaLabel={named('Items per run')}
+                              onChange={(n) => set('count', n)} />
                           </label>
                           <label className="tools-field">
                             <span>Grab limit <InfoTip text={UPGRADE_FIELD_HELP.max_grabs} /></span>
-                            <input type="number" min={0} max={500} value={s.max_grabs} aria-label={named('Grab limit')}
-                              onChange={(e) => set('max_grabs', Math.max(0, Math.min(500, Number(e.target.value) || 0)))} />
+                            <NumberField min={0} max={500} value={s.max_grabs} fallback={0} ariaLabel={named('Grab limit')}
+                              onChange={(n) => set('max_grabs', n)} />
                           </label>
                           {!sonarr && (
                             <label className="tools-field">
@@ -879,9 +880,9 @@ function Tools() {
                           {sonarr && (
                             <label className="tools-field">
                               <span>Threshold % <InfoTip text={UPGRADE_FIELD_HELP.season_threshold} /></span>
-                              <input type="number" min={0} max={100} value={s.season_threshold} aria-label={named('Season threshold')} disabled={!everything || s.search_unit !== 'seasons'}
+                              <NumberField min={0} max={100} value={s.season_threshold} fallback={0} ariaLabel={named('Season threshold')} disabled={!everything || s.search_unit !== 'seasons'}
                                 title={everything && s.search_unit === 'seasons' ? undefined : 'Applies to Everything searched by Monitored seasons'}
-                                onChange={(e) => set('season_threshold', Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
+                                onChange={(n) => set('season_threshold', n)} />
                             </label>
                           )}
                           {/* Radarr has one setting where Sonarr has two: an empty row keeps its blocks as tall, so the cards line up. */}
@@ -907,8 +908,8 @@ function Tools() {
                           </div>
                           <label className="tools-field">
                             <span>Minimum age <InfoTip text={UPGRADE_FIELD_HELP.min_age_days} /></span>
-                            <input type="number" min={0} max={3650} value={s.min_age_days} aria-label={named('Minimum age in days')}
-                              onChange={(e) => set('min_age_days', Math.max(0, Math.min(3650, Number(e.target.value) || 0)))} />
+                            <NumberField min={0} max={3650} value={s.min_age_days} fallback={0} ariaLabel={named('Minimum age in days')}
+                              onChange={(n) => set('min_age_days', n)} />
                           </label>
                         </div>
                         {/* The tags and the title filter: beside the search settings and above the switches in a wide card, under the search settings in a narrow one. */}
