@@ -6,6 +6,23 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-11-19
+### Added
+- Overlays: a Credits Scenes overlay badges movies that have a scene during or after the credits, using TMDB.
+  - Separate badges for post credits (PCS), mid credits (MCS) and both (M+P), each with its own switch.
+  - Styles: the yellow Stinger icon, or lettered badges in yellow or transparent, with or without a border.
+  - Text style: type your own wording and pick a text color for each scene.
+  - Any bundled badge can be replaced with your own image.
+
+### Changed
+- Dependencies: updated backend and frontend packages.
+
+### Fixed
+- Asset Upload: a slow or unreachable Plex or Jellyfin no longer fails the whole job. The other servers still get their posters.
+  - The silent server is tried again three times, 30 seconds apart, in webhooks, full runs and single uploads.
+  - The job's final message and the notification name the server that did not answer.
+- Tools: number boxes can be cleared and retyped without snapping to 0.
+
 ## [0.19.2] - 2026-11-15
 ### Added
 - Photopea/Photoshop Plugins: Thank you Bostafari for your work on this! Upload and Complete buttons. A finish can upload its posters and complete the request by itself, and plugin uploads go wherever the app's Upload button is set to send them. (Photoshop plugin 1.3.4 - reinstall the .ccx to pick it up.)
