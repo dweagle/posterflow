@@ -142,7 +142,7 @@ def test_build_index_warns_about_a_library_whose_items_carry_no_ids(test_db, mon
     service = PlexUploadService(test_db)
     client = service._connect_media_server_client({"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"})
     client.movie.provider_ids = {}
-    monkeypatch.setattr(service, "_connect_media_server_client", lambda instance: client)
+    monkeypatch.setattr(service, "_connect_media_server_client", lambda instance, **_kw: client)
 
     _, totals = service._build_plex_index([{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}], J_MOVIES)
 
@@ -372,12 +372,190 @@ class _FakeEmptyJellyfinClient(_FakeJellyfinClient):
         return []
 
 
+_BOTH_SERVERS = [
+    {"name": "P", "url": "http://p", "api_key": "t", "type": "plex"},
+    {"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"},
+]
+
+
+def _plex_that_stalls(monkeypatch, silent_asks):
+    """A Plex that connects but times out listing its libraries for the first `silent_asks`
+    asks, then lists Heat. Returns the list of asks made, and a clock the test can move."""
+    import plexapi.server as plexapi_server
+    import requests
+    import services.plex_upload as pu
+    from plex_upload_fakes import _FakePlexSection, _SimplePlex
+
+    asks = []
+    section = _FakePlexSection(section_type="movie", title="Movies", guid_results=[_SimplePlex("movie", "Heat", key="7")])
+
+    class _Library:
+        def sections(self):
+            asks.append(1)
+            if len(asks) <= silent_asks:
+                raise requests.exceptions.ReadTimeout("Read timed out. (read timeout=30)")
+            return [section]
+
+    class _Server:
+        library = _Library()
+
+    clock = [1000.0]
+    monkeypatch.setattr(plexapi_server, "PlexServer", lambda url, token: _Server())
+    monkeypatch.setattr(pu.time, "monotonic", lambda: clock[0])
+    return asks, clock
+
+
+def test_a_webhook_search_goes_on_without_a_server_that_does_not_answer(test_db, monkeypatch):
+    """Plex connects but times out listing its libraries: Jellyfin is still searched and indexed,
+    and Plex is named as a server the job waits for instead of failing the search."""
+    import services.plex_upload as pu
+
+    _patch_jellyfin(monkeypatch)
+    asks, _clock = _plex_that_stalls(monkeypatch, silent_asks=99)
+    errors = []
+    monkeypatch.setattr(pu, "log_error", lambda tag, msg, **kw: errors.append(msg))
+    service = PlexUploadService(test_db)
+
+    index, totals = service._build_plex_index_targeted(
+        _BOTH_SERVERS, {**P_MOVIES, **J_MOVIES}, tmdb_id=949, title="Heat", year=1995, media_type="movie"
+    )
+
+    assert [t["instance"] for t in totals] == ["J"]
+    assert [m.item_id for m in index["movies"]["id:tmdb:949"]] == ["m1"]
+    assert service.webhook_pending_servers() == service.unanswered_servers() == ["Plex 'P'"]
+    assert service.webhook_pending_instances() == ["P"]
+    assert len(asks) == 1
+    assert len(errors) == 1 and errors[0].startswith("Plex 'P' did not answer when asked for its libraries")
+
+
+def test_a_silent_server_is_asked_again_only_after_the_wait_and_three_times_at_most(test_db, monkeypatch):
+    """A webhook job searches every few seconds. A server that does not answer is left alone
+    until the wait has passed, and after the third ask the job stops waiting for it."""
+    import services.plex_upload as pu
+
+    _patch_jellyfin(monkeypatch)
+    asks, clock = _plex_that_stalls(monkeypatch, silent_asks=99)
+    errors = []
+    monkeypatch.setattr(pu, "log_error", lambda tag, msg, **kw: errors.append(msg))
+    service = PlexUploadService(test_db)
+
+    def search():
+        service._build_plex_index_targeted(
+            _BOTH_SERVERS, {**P_MOVIES, **J_MOVIES}, tmdb_id=949, title="Heat", year=1995, media_type="movie"
+        )
+
+    search()
+    clock[0] += 5
+    search()
+    assert len(asks) == 1  # too soon: not asked again
+    assert service.webhook_pending_servers() == ["Plex 'P'"]
+
+    clock[0] += PlexUploadService.SERVER_ASK_WAIT_SECONDS
+    search()
+    assert len(asks) == 2 and service.webhook_pending_servers() == ["Plex 'P'"]
+
+    clock[0] += PlexUploadService.SERVER_ASK_WAIT_SECONDS
+    search()
+    assert len(asks) == 3
+    assert service.webhook_pending_servers() == []  # asked three times: the job stops waiting
+    assert service.unanswered_servers() == ["Plex 'P'"]  # and still names it
+
+    clock[0] += 10 * PlexUploadService.SERVER_ASK_WAIT_SECONDS
+    search()
+    _, full_totals = service._build_plex_index(_BOTH_SERVERS, {**P_MOVIES, **J_MOVIES})  # the job's last-resort full index
+    assert len(asks) == 3
+    assert [t["instance"] for t in full_totals] == ["J"] and service.unanswered_servers() == ["Plex 'P'"]
+    assert len(errors) == 1  # said once, not on every search
+
+
+def test_a_server_that_answers_on_a_later_ask_is_searched_then(test_db, monkeypatch):
+    _patch_jellyfin(monkeypatch)
+    asks, clock = _plex_that_stalls(monkeypatch, silent_asks=1)
+    service = PlexUploadService(test_db)
+    selected = {**P_MOVIES, **J_MOVIES}
+
+    service._build_plex_index_targeted(_BOTH_SERVERS, selected, tmdb_id=949, title="Heat", year=1995, media_type="movie")
+    assert service.webhook_pending_servers() == ["Plex 'P'"]
+
+    clock[0] += PlexUploadService.SERVER_ASK_WAIT_SECONDS
+    _, totals = service._build_plex_index_targeted(
+        [_BOTH_SERVERS[0]], selected, tmdb_id=949, title="Heat", year=1995, media_type="movie"
+    )
+
+    assert [t["instance"] for t in totals] == ["P"]
+    assert service.webhook_pending_servers() == service.unanswered_servers() == []
+
+
+def test_a_full_run_asks_a_silent_server_again_before_going_on_without_it(test_db, monkeypatch):
+    import services.plex_upload as pu
+
+    _patch_jellyfin(monkeypatch)
+    asks, _clock = _plex_that_stalls(monkeypatch, silent_asks=99)
+    waits, warnings, errors = [], [], []
+    monkeypatch.setattr(pu.time, "sleep", lambda seconds: waits.append(seconds))
+    monkeypatch.setattr(pu, "log_warning", lambda tag, msg, **kw: warnings.append(msg))
+    monkeypatch.setattr(pu, "log_error", lambda tag, msg, **kw: errors.append(msg))
+    service = PlexUploadService(test_db)
+
+    _, totals = service._build_plex_index(_BOTH_SERVERS, {**P_MOVIES, **J_MOVIES})
+
+    assert [t["instance"] for t in totals] == ["J"]
+    assert len(asks) == 3 and waits == [30, 30]
+    assert [w for w in warnings if "Asking again in 30s" in w][0].endswith("(attempt 1 of 3)")
+    assert len(errors) == 1 and errors[0].endswith("Skipped for this run after 3 attempts")
+    assert service.unanswered_servers() == ["Plex 'P'"]
+
+
+def test_a_full_run_indexes_a_server_that_answers_on_the_second_ask(test_db, monkeypatch):
+    import services.plex_upload as pu
+
+    _patch_jellyfin(monkeypatch)
+    asks, _clock = _plex_that_stalls(monkeypatch, silent_asks=1)
+    monkeypatch.setattr(pu.time, "sleep", lambda seconds: None)
+    service = PlexUploadService(test_db)
+
+    _, totals = service._build_plex_index(_BOTH_SERVERS, {**P_MOVIES, **J_MOVIES})
+
+    assert sorted(t["instance"] for t in totals) == ["J", "P"]
+    assert len(asks) == 2
+    assert service.unanswered_servers() == []
+
+
+class _FakeSilentJellyfinClient(_FakeJellyfinClient):
+    """A Jellyfin that connects but gives no answer to the library list request."""
+
+    def require_libraries(self):
+        raise ConnectionError("no answer to the library list request")
+
+
+def test_a_jellyfin_that_does_not_list_its_libraries_is_waited_for_like_plex(test_db, monkeypatch):
+    import plexapi.server as plexapi_server
+    import services.plex_upload as pu
+    import util.media_server.jellyfin as jf_mod
+    from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted, _SimplePlex
+
+    section = _FakePlexSection(section_type="movie", title="Movies", guid_results=[_SimplePlex("movie", "Heat", key="7")])
+    monkeypatch.setattr(plexapi_server, "PlexServer", lambda url, token: _FakePlexServerForTargeted([section]))
+    monkeypatch.setattr(jf_mod, "JellyfinClient", _FakeSilentJellyfinClient)
+    errors = []
+    monkeypatch.setattr(pu, "log_error", lambda tag, msg, **kw: errors.append(msg))
+    service = PlexUploadService(test_db)
+
+    _, totals = service._build_plex_index_targeted(
+        _BOTH_SERVERS, {**P_MOVIES, **J_MOVIES}, tmdb_id=949, title="Heat", year=1995, media_type="movie"
+    )
+
+    assert [t["instance"] for t in totals] == ["P"]
+    assert service.webhook_pending_servers() == service.unanswered_servers() == ["Jellyfin 'J'"]
+    assert errors == ["Jellyfin 'J' did not answer when asked for its libraries: no answer to the library list request"]
+
+
 def test_index_skips_a_server_with_no_library_selected(test_db, monkeypatch):
     _patch_jellyfin(monkeypatch)
     service = PlexUploadService(test_db)
     connected = []
     connect = service._connect_media_server_client
-    monkeypatch.setattr(service, "_connect_media_server_client", lambda instance: connected.append(instance["name"]) or connect(instance))
+    monkeypatch.setattr(service, "_connect_media_server_client", lambda instance, **kw: connected.append(instance["name"]) or connect(instance, **kw))
     instances = [{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}]
 
     assert service._build_plex_index(instances, {})[1] == []

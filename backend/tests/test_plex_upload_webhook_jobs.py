@@ -1229,6 +1229,116 @@ def test_webhook_completes_and_names_the_server_that_never_scanned_the_item(test
     assert "Jellyfin (Movies) not scanned yet" in refreshed.message
 
 
+def test_webhook_waits_for_a_server_that_did_not_answer_and_finishes_once_it_does(test_db, monkeypatch):
+    """Jellyfin uploads on attempt 1 while Plex does not answer: the job asks Plex again
+    instead of failing, and finishes clean once Plex answers."""
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    context_calls: list = []
+    infos: list = []
+    monkeypatch.setattr(upload_module, "log_info", lambda tag, message, **kw: infos.append(message))
+
+    class _Fake(_PendingServerFakeService):
+        def prepare_webhook_context(self, **_kwargs):
+            context_calls.append(1)
+            return None
+
+        def _silent(self):
+            return ["Plex 'P'"] if len(context_calls) < 2 else []
+
+        webhook_pending_servers = unanswered_servers = _silent
+
+        def run_single_upload(self, **_kwargs):
+            return _single_upload_result(uploaded=1)
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 3, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed"
+    assert "did not answer" not in refreshed.message
+    assert "Waiting up to 1s for Plex 'P' to answer (attempt 1 of 3)" in infos
+
+
+def test_webhook_completes_and_names_the_server_that_never_answered(test_db, monkeypatch):
+    """The service stops waiting for a silent server after its asks are used up; the job then
+    completes on what the other server took and names the silent one."""
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    run_calls: list = []
+    errors: list = []
+    monkeypatch.setattr(upload_module, "log_error", lambda tag, message, **kw: errors.append(message))
+
+    class _Fake(_PendingServerFakeService):
+        def webhook_pending_servers(self):
+            return ["Plex 'P'"] if len(run_calls) < 2 else []
+
+        def unanswered_servers(self):
+            return ["Plex 'P'"]
+
+        def run_single_upload(self, **_kwargs):
+            run_calls.append(1)
+            return _single_upload_result(uploaded=1 if len(run_calls) == 1 else 0)
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 5, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed"
+    assert len(run_calls) == 2
+    assert "1 uploaded" in refreshed.message
+    assert refreshed.message.endswith("; Plex 'P' did not answer")
+    assert "not scanned yet" not in refreshed.message
+    assert any(e.startswith("Plex 'P' did not answer, so nothing was sent there for Verity (2026)") for e in errors)
+
+
+def test_webhook_fails_naming_the_server_when_no_server_answered(test_db, monkeypatch):
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    failed: list = []
+    errors: list = []
+    monkeypatch.setattr(upload_module, "send_notification", lambda *a, **k: None)
+    monkeypatch.setattr(upload_module, "send_major_error_notification", lambda *a, **k: None)
+    monkeypatch.setattr(upload_module, "_mark_job_failed", lambda db, **kw: failed.append(kw["error_message"]))
+    monkeypatch.setattr(upload_module, "log_error", lambda tag, message, **kw: errors.append(message))
+
+    class _Fake(_PendingServerFakeService):
+        def unanswered_servers(self):
+            return ["Plex 'P'"]
+
+        def run_single_upload(self, **_kwargs):
+            return {"success": True, "stats": {"scanned": 1, "matched": 0, "uploaded": 0}}
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 2, 1)
+
+    assert failed == ["No server match found after 2 attempt(s) for movie: Verity; Plex 'P' did not answer"]
+    assert "Webhook failed after retries: Plex 'P' did not answer, and no other server had Verity (2026)" in errors
+
+
+def test_webhook_wait_text_tells_scanning_loading_and_silent_servers_apart():
+    from modules.upload import _webhook_wait_text
+
+    class _Service:
+        def webhook_loading_servers(self):
+            return ["Plex 'L' / Movies"]
+
+        def unanswered_servers(self):
+            return ["Plex 'P'"]
+
+    pending = ["Jellyfin 'J' / Movies", "Plex 'L' / Movies", "Plex 'P'"]
+    assert _webhook_wait_text(_Service(), pending, "Heat (1995)") == (
+        "Jellyfin 'J' / Movies to scan Heat (1995) and Plex 'L' / Movies to finish loading it and Plex 'P' to answer"
+    )
+    assert _webhook_wait_text(_Service(), ["Plex 'P'"], "Heat (1995)") == "Plex 'P' to answer"
+
+
 def test_webhook_cache_gate_does_not_skip_while_a_server_is_pending(test_db, monkeypatch):
     """A re-fired webhook with Plex already cached still runs when Jellyfin has no item yet."""
     import modules.upload as upload_module

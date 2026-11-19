@@ -44,6 +44,10 @@ class MediaServerClient(ABC):
     def get_libraries(self) -> List[MediaServerLibrary]:
         ...
 
+    def require_libraries(self) -> List[MediaServerLibrary]:
+        """The libraries, raising when the server did not answer for them."""
+        return self.get_libraries()
+
     @abstractmethod
     def get_library_items(
         self, library_key: str, item_types: Optional[List[str]] = None

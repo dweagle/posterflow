@@ -96,6 +96,22 @@ def test_get_libraries_maps_types(monkeypatch):
     assert [(l.key, l.type) for l in libs] == [("lib1", "movie"), ("lib2", "show"), ("lib3", "music")]
 
 
+def test_require_libraries_raises_when_the_server_gives_no_answer(monkeypatch):
+    """get_libraries reads a failed request as no libraries; require_libraries tells the two apart."""
+    import pytest
+
+    monkeypatch.setattr(jf.time, "sleep", lambda _seconds: None)
+    client, _ = make_client(monkeypatch, {"/Library/VirtualFolders": FakeResponse(status_code=503)})
+    assert client.get_libraries() == []
+    with pytest.raises(ConnectionError):
+        client.require_libraries()
+
+
+def test_require_libraries_accepts_a_server_with_no_libraries(monkeypatch):
+    client, _ = make_client(monkeypatch, {"/Library/VirtualFolders": []})
+    assert client.require_libraries() == []
+
+
 def test_items_pagination(monkeypatch):
     rows = [{"Id": f"i{n}", "Type": "Movie", "Name": f"M{n}", "OriginalTitle": f"O{n}"} for n in range(3)]
 

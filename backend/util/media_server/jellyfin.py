@@ -106,6 +106,7 @@ class JellyfinClient(MediaServerClient):
         )
 
         self._libraries_cache: Optional[List[MediaServerLibrary]] = None
+        self._libraries_unanswered = False  # the last library list request got no answer
         self._user_id_cache: Optional[str] = None
 
         info = self.get_server_info()
@@ -162,6 +163,7 @@ class JellyfinClient(MediaServerClient):
         if self._libraries_cache is not None:
             return self._libraries_cache
         data = self._request("GET", "/Library/VirtualFolders")
+        self._libraries_unanswered = data is None
         libraries: List[MediaServerLibrary] = []
         for folder in data or []:
             collection_type = str(folder.get("CollectionType") or "").lower()
@@ -175,6 +177,12 @@ class JellyfinClient(MediaServerClient):
             )
         if libraries:
             self._libraries_cache = libraries
+        return libraries
+
+    def require_libraries(self) -> List[MediaServerLibrary]:
+        libraries = self.get_libraries()
+        if self._libraries_unanswered:
+            raise ConnectionError("no answer to the library list request")
         return libraries
 
     def _library_title(self, local_id: str) -> Optional[str]:

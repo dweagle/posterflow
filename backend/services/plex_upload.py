@@ -178,6 +178,9 @@ class PlexUploadService:
     ERROR_INVALID_LIBRARY_CONFIG = "Invalid media server library configuration. Configure in Settings → Media tab."
     ERROR_INDEX_BUILD_FAILED = "Unable to build media server index from configured instances/libraries."
     MESSAGE_NO_POSTER_ASSETS = "No poster assets found to upload."
+    # A server that does not answer is asked this many times, this far apart, before a run goes on without it
+    SERVER_ASK_ATTEMPTS = 3
+    SERVER_ASK_WAIT_SECONDS = 30
     REASON_COLLECTION_SHADOWED = "collection_shadowed"
     # Assets of a full run handled at once. Their upload logic takes turns; what overlaps is
     # the wait on the media server and the drawing of a badge.
@@ -214,6 +217,8 @@ class PlexUploadService:
         self._targeted_said: Dict[Tuple[str, ...], str] = {}  # last search line logged per subject, so a repeat is not logged again
         self._targeted_pending_instance_names: List[str] = []  # scoped servers the targeted index found nothing on
         self._targeted_found_in: List[str] = []  # "Plex 'name' / Movies" where the targeted index found the item
+        self._unanswered_servers: Dict[str, str] = {}  # instance name → "Plex 'name'" of servers the last index build got no answer from
+        self._server_asks: Dict[str, Tuple[int, float]] = {}  # instance name → (asks in a row that got no answer, when the last one ended)
         # Arr media folder basename (lowercased) -> instances it belongs to; filled by the availability build
         self._arr_folder_instances: Dict[str, Set[str]] = {}
         self._instance_allowance_cache: Dict[str, Optional[Dict[str, Set[str]]]] = {}
@@ -295,6 +300,10 @@ class PlexUploadService:
     def webhook_loading_servers(self) -> List[str]:
         """The pending servers that have the item but are still loading its details."""
         return list(self._targeted_loading_servers)
+
+    def unanswered_servers(self) -> List[str]:
+        """Servers the last index build got no answer from, as "Plex 'name'"."""
+        return list(self._unanswered_servers.values())
 
     def set_arr_instance_scope(self, arr_instance: Optional[str]) -> None:
         """Limit the ARR availability lookup to a single firing instance (webhook path).
@@ -797,6 +806,7 @@ class PlexUploadService:
             # Full runs log artwork from the job layer; run_single_upload has no summary.
         self._log_routing_summary()
         stats["year_discrepancies"] = list(self._year_discrepancies)
+        stats["servers_skipped"] = self.unanswered_servers()
 
         self._persist_upload_cache()
 
@@ -916,6 +926,7 @@ class PlexUploadService:
             )
             self._log_artwork_summary(stats, dry_run=dry_run)
         stats["year_discrepancies"] = list(self._year_discrepancies)
+        stats["servers_skipped"] = self.unanswered_servers()
 
         self._persist_upload_cache()
 
@@ -1878,15 +1889,55 @@ class PlexUploadService:
             "artwork_type": artwork_type,
         }
 
-    def _connect_media_server_client(self, instance: Dict[str, str]) -> Optional[MediaServerClient]:
+    def _connect_media_server_client(self, instance: Dict[str, str], *, attempts: int = 1) -> Optional[MediaServerClient]:
+        """A client for a server that answered for its libraries, else None. A server that does
+        not answer is asked SERVER_ASK_ATTEMPTS times, SERVER_ASK_WAIT_SECONDS apart: inside this
+        call when `attempts` says so (full runs), else across the searches of a job (webhooks,
+        which search every few seconds and go on with the other servers in between)."""
+        name = instance["name"]
+        label = server_label(instance_type(instance), name)
+        asked, last_at = self._server_asks.get(name, (0, 0.0))
+        too_soon = attempts == 1 and time.monotonic() - last_at < self.SERVER_ASK_WAIT_SECONDS
+        if asked and (asked >= self.SERVER_ASK_ATTEMPTS or too_soon):
+            self._unanswered_servers[name] = label
+            return None
+        problem = ""
+        for attempt in range(1, attempts + 1):
+            client, problem = self._ask_media_server(instance)
+            if client is not None:
+                self._server_asks.pop(name, None)
+                self._unanswered_servers.pop(name, None)
+                self._targeted_said.pop(("answer", name), None)
+                self._record_server_identity(client)
+                return client
+            if attempt < attempts:
+                log_warning(
+                    LogTags.UPLOADER,
+                    f"{problem}. Asking again in {self.SERVER_ASK_WAIT_SECONDS}s (attempt {attempt} of {attempts})",
+                )
+                time.sleep(self.SERVER_ASK_WAIT_SECONDS)
+        self._server_asks[name] = (asked + 1 if attempts == 1 else self.SERVER_ASK_ATTEMPTS, time.monotonic())
+        self._unanswered_servers[name] = label
+        if self._is_news(("answer", name), problem):
+            log_error(LogTags.UPLOADER, problem + (f". Skipped for this run after {attempts} attempts" if attempts > 1 else ""))
+        return None
+
+    def _still_asking(self, instance_name: str) -> bool:
+        """A server that did not answer has asks left in this job."""
+        return self._server_asks.get(instance_name, (0, 0.0))[0] < self.SERVER_ASK_ATTEMPTS
+
+    @staticmethod
+    def _ask_media_server(instance: Dict[str, str]) -> Tuple[Optional[MediaServerClient], str]:
+        """(client, "") for a server that connects and lists its libraries, else (None, what went wrong)."""
         try:
             client = create_media_server_client(instance, raise_on_error=True)
-            self._record_server_identity(client)
-            return client
         except Exception as e:
-            server_label = server_type_label(instance_type(instance))
-            log_error(LogTags.UPLOADER, f"Failed to connect to {server_label} instance '{instance['name']}': {e}")
-            return None
+            return None, f"Failed to connect to {server_type_label(instance_type(instance))} instance '{instance['name']}': {e}"
+        try:
+            client.require_libraries()
+        except Exception as e:
+            return None, f"{server_label(instance_type(instance), instance['name'])} did not answer when asked for its libraries: {e}"
+        return client, ""
 
     def _record_server_identity(self, client: MediaServerClient) -> None:
         """Persist server_id → instance name/type so cache entries can show which server
@@ -1928,6 +1979,7 @@ class PlexUploadService:
             "collections": {},
         }
         library_totals: List[Dict[str, Any]] = []
+        self._unanswered_servers = {}
 
         for instance in plex_instances:
             instance_name = instance["name"]
@@ -1935,7 +1987,7 @@ class PlexUploadService:
             if not allowed:
                 log_info(LogTags.UPLOADER, f"{server_label(instance_type(instance), instance_name)} has no library selected for this upload; skipped")
                 continue
-            client = self._connect_media_server_client(instance)
+            client = self._connect_media_server_client(instance, attempts=self.SERVER_ASK_ATTEMPTS)
             if client is None:
                 continue
 
@@ -2013,6 +2065,7 @@ class PlexUploadService:
         title: Optional[str] = None,
         year: Optional[int] = None,
         media_type: Optional[str] = None,
+        server_attempts: int = 1,
     ) -> Tuple[Dict[str, Dict[str, List[Any]]], List[Dict[str, Any]]]:
         """Build a minimal Plex index scoped to a single title/ID.
 
@@ -2054,6 +2107,7 @@ class PlexUploadService:
         hit_instances: Set[str] = set()
         # Server → libraries that hold the item while the server still loads its details
         loading_in: Dict[str, List[str]] = {}
+        self._unanswered_servers = {}
 
         for instance in plex_instances:
             instance_name = instance["name"]
@@ -2066,7 +2120,8 @@ class PlexUploadService:
                         instance=instance_name,
                     )
                 continue
-            client = self._connect_media_server_client(instance)
+            # A server that does not answer stays expected to hold the item, like one that has not scanned it
+            client = self._connect_media_server_client(instance, attempts=server_attempts)
             if client is None:
                 continue
 
@@ -2230,24 +2285,30 @@ class PlexUploadService:
 
         self._targeted_found_in = list(found_in)
         # A server loading the item is waited for even beside a library that already has it
+        unanswered = self._unanswered_servers
         pending_instances = [
             instance for instance in plex_instances
-            if instance["name"] in loading_in or (instance["name"] in searched and instance["name"] not in hit_instances)
+            if (instance["name"] in unanswered and self._still_asking(instance["name"])) or instance["name"] in loading_in
+            or (instance["name"] in searched and instance["name"] not in hit_instances)
         ]
         self._targeted_pending_instance_names = [instance["name"] for instance in pending_instances]
         pending_labels = {
-            instance["name"]: f"{server_label(instance_type(instance), instance['name'])} / "
-                              f"{', '.join(loading_in.get(instance['name']) or searched[instance['name']])}"
+            instance["name"]: unanswered.get(instance["name"]) or (
+                f"{server_label(instance_type(instance), instance['name'])} / "
+                f"{', '.join(loading_in.get(instance['name']) or searched[instance['name']])}"
+            )
             for instance in pending_instances
         }
         self._targeted_pending_servers = list(pending_labels.values())
         self._targeted_loading_servers = [label for name, label in pending_labels.items() if name in loading_in]
         if found_any and not quiet:
             item_label = f"{title} ({year})" if title and isinstance(year, int) else str(title or "item")
-            not_scanned = [label for label in self._targeted_pending_servers if label not in self._targeted_loading_servers]
+            not_scanned = [
+                label for name, label in pending_labels.items() if name not in loading_in and name not in unanswered
+            ]
             pending_note = (f"; not on {', '.join(not_scanned)} yet" if not_scanned else "") + (
                 f"; {', '.join(self._targeted_loading_servers)} still loading it" if self._targeted_loading_servers else ""
-            )
+            ) + (f"; {', '.join(unanswered.values())} did not answer" if unanswered else "")
             log_info(
                 LogTags.UPLOADER,
                 f"Found {item_label} on {', '.join(found_in)}{pending_note}",
@@ -2272,10 +2333,12 @@ class PlexUploadService:
         allow_full_fallback: bool = True,
         arr_instance: Optional[str] = None,
         only_instances: Optional[Sequence[str]] = None,
+        ask_again: bool = False,
     ) -> Optional[str]:
         """Build and cache a targeted Plex index for a webhook job. ``only_instances`` limits
         the search to those servers (a retry for servers that had not scanned the item yet;
-        the others were settled by the earlier attempt).
+        the others were settled by the earlier attempt). ``ask_again`` is for a job with no
+        retry loop of its own: a server that does not answer is asked again inside this call.
 
         Must be called before ``is_single_target_fully_cached``,
         ``is_series_show_poster_cached``, and ``run_single_upload`` so that all
@@ -2322,6 +2385,7 @@ class PlexUploadService:
             title=title,
             year=year,
             media_type=media_type,
+            server_attempts=self.SERVER_ASK_ATTEMPTS if ask_again else 1,
         )
 
         # Fall back to full index when targeted search found nothing (legacy agents).

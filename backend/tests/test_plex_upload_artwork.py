@@ -434,6 +434,25 @@ def _run_upload_job(test_db, monkeypatch, stats):
     return test_db.query(Job).filter(Job.id == job.id).first(), logs
 
 
+def test_full_upload_job_names_a_server_that_did_not_answer(test_db, monkeypatch):
+    import modules.upload as upload_module
+
+    warnings = []
+    monkeypatch.setattr(upload_module, "log_warning", lambda tag, message, **kw: warnings.append(message))
+
+    job, _logs = _run_upload_job(test_db, monkeypatch, {**_full_stats(), "servers_skipped": ["Plex 'main'"]})
+
+    assert job.status == "completed"
+    assert job.message.endswith("; Plex 'main' did not answer")
+    assert any(w.startswith("This run went on without Plex 'main'") for w in warnings)
+
+
+def test_full_upload_job_says_nothing_about_servers_when_all_answered(test_db, monkeypatch):
+    job, _logs = _run_upload_job(test_db, monkeypatch, {**_full_stats(), "servers_skipped": []})
+
+    assert "did not answer" not in job.message
+
+
 def _full_stats(**artwork):
     art = {
         "scanned": 0, "matched": 0, "uploaded": 0, "would_upload": 0, "skipped": 0, "errors": 0,

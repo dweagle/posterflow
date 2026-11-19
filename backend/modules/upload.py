@@ -2138,6 +2138,12 @@ def _instance_fields(by_instance: Any, *, dry_run: bool) -> list:
     return fields
 
 
+def _did_not_answer_fields(servers: Any) -> list:
+    """One field naming the media servers a run went on without; nothing when every server answered."""
+    names = ", ".join(str(server) for server in servers) if isinstance(servers, list) else ""
+    return [{"name": "⚠️ Did Not Answer", "value": names, "inline": False}] if names else []
+
+
 def build_plex_upload_embed(stats: Dict[str, Any], *, dry_run: bool) -> Dict[str, Any]:
     """description/fields/color for the Plex upload embed, shared by the standalone job
     and the workflow step so both report the same run the same way."""
@@ -2169,6 +2175,8 @@ def build_plex_upload_embed(stats: Dict[str, Any], *, dry_run: bool) -> Dict[str
             ],
         )
     fields += _instance_fields(stats.get("by_instance"), dry_run=dry_run)
+    skipped_fields = _did_not_answer_fields(stats.get("servers_skipped"))
+    fields += skipped_fields
     fields.append({"name": "Mode", "value": mode_label, "inline": True})
 
     year_discrepancy_text = _format_year_discrepancy_text(stats.get("year_discrepancies", []) or [])
@@ -2186,7 +2194,7 @@ def build_plex_upload_embed(stats: Dict[str, Any], *, dry_run: bool) -> Dict[str
             dry_run=dry_run,
         ),
         "fields": fields,
-        "color": 0xFFB74D if year_discrepancy_text else 0x4CAF50,
+        "color": 0xFFB74D if year_discrepancy_text or skipped_fields else 0x4CAF50,
     }
 
 
@@ -2341,6 +2349,7 @@ def run_plex_upload_background_job(
                         if artwork_scanned
                         else ""
                     )
+                    + _did_not_answer_note(stats.get("servers_skipped"))
                 ),
             ),
             completed_at=datetime.now(timezone.utc),
@@ -2423,6 +2432,13 @@ def run_plex_upload_background_job(
                     f"- {instance_name} / {library_name} ({section_type}) | items={items}, collections={collections}"
                     + (f", no ids={int(row.get('no_ids', 0))}" if int(row.get("no_ids", 0) or 0) else ""),
                 )
+
+        if stats.get("servers_skipped"):
+            log_warning(
+                LogTags.UPLOADER,
+                f"This run went on without {', '.join(stats['servers_skipped'])}, which did not answer; "
+                "the next run sends what that server is missing",
+            )
 
         embed = build_plex_upload_embed(stats, dry_run=dry_run)
         # The workflow suppresses this notification and rebuilds the embed from these.
@@ -2718,15 +2734,34 @@ def _webhook_loading_servers(service: Any) -> list[str]:
     return [str(entry) for entry in loading or [] if str(entry or "").strip()]
 
 
+def _unanswered_servers(service: Any) -> list[str]:
+    """Servers the last index build got no answer from, as "Plex 'name'"; [] for services that don't track it."""
+    getter = getattr(service, "unanswered_servers", None)
+    try:
+        unanswered = getter() if callable(getter) else []
+    except Exception:
+        return []
+    return [str(entry) for entry in unanswered or [] if str(entry or "").strip()]
+
+
+def _did_not_answer_note(servers: Any) -> str:
+    """"; Plex 'name' did not answer" for a job's closing message; "" when every server answered."""
+    names = ", ".join(str(server) for server in servers) if isinstance(servers, list) else ""
+    return f"; {names} did not answer" if names else ""
+
+
 def _webhook_wait_text(service: Any, pending_servers: list[str], item: str) -> str:
-    """What a waiting line says the pending servers still owe: scanning the item in, or loading its details."""
+    """What a waiting line says the pending servers still owe: scanning the item in, loading its details, or an answer."""
     loading = [server for server in _webhook_loading_servers(service) if server in pending_servers]
-    scanning = [server for server in pending_servers if server not in loading]
+    unanswered = [server for server in _unanswered_servers(service) if server in pending_servers]
+    scanning = [server for server in pending_servers if server not in loading and server not in unanswered]
     parts = []
     if scanning:
         parts.append(f"{', '.join(scanning)} to scan {item}")
     if loading:
         parts.append(f"{', '.join(loading)} to finish loading {'it' if scanning else item}")
+    if unanswered:
+        parts.append(f"{', '.join(unanswered)} to answer")
     return " and ".join(parts)
 
 
@@ -2825,12 +2860,16 @@ def _webhook_completion_message(
     missing_targets: list[str],
     pending_servers: list[str] | None = None,
     loading_servers: list[str] | None = None,
+    unanswered_servers: list[str] | None = None,
 ) -> str:
     missing = ", ".join(missing_targets)
-    not_scanned = [server for server in pending_servers or [] if server not in (loading_servers or [])]
+    not_scanned = [
+        server for server in pending_servers or []
+        if server not in (loading_servers or []) and server not in (unanswered_servers or [])
+    ]
     pending = (f"; {', '.join(not_scanned)} not scanned yet" if not_scanned else "") + (
         f"; {', '.join(loading_servers)} still loading it" if loading_servers else ""
-    )
+    ) + _did_not_answer_note(unanswered_servers)
     if uploaded_count > 0:
         note = f"; no local poster for {missing}" if missing else ""
         return format_complete_message("Webhook upload", f"{title} — {match_detail}{note}{pending}")
@@ -3740,6 +3779,9 @@ def run_plex_webhook_background_job(
                         f"Waiting up to {delay_seconds}s for {', '.join(loading_servers)} to finish loading {title}{year_label} "
                         f"(attempt {attempt} of {attempts})"
                     ) if loading_servers else (
+                        f"Waiting up to {delay_seconds}s for {_webhook_wait_text(service, pending_servers, f'{title}{year_label}')} "
+                        f"(attempt {attempt} of {attempts})"
+                    ) if pending_servers and _unanswered_servers(service) else (
                         f"No media server has {title}{year_label} yet"
                         + (f" ({no_match_reasons})" if no_match_reasons else "")
                         + f"; looking again within {delay_seconds}s (attempt {attempt} of {attempts})"
@@ -3760,6 +3802,7 @@ def run_plex_webhook_background_job(
             result = last_uploading_result
         pending_servers = _webhook_pending_servers(service)
         loading_servers = [server for server in _webhook_loading_servers(service) if server in pending_servers]
+        unanswered_servers = _unanswered_servers(service)
 
         stats = result.get("stats", {})
         uploaded_count = int(stats.get("uploaded", 0))
@@ -3784,6 +3827,17 @@ def run_plex_webhook_background_job(
                     preflight_connectivity_failed=True,
                     matching_skipped=True,
                 )
+            elif unanswered_servers:
+                log_error(
+                    LogTags.UPLOADER,
+                    f"Webhook failed after retries: {', '.join(unanswered_servers)} did not answer, "
+                    f"and no other server had {title}{year_label}",
+                    attempts=attempts,
+                    media_type=media_type,
+                    title=title,
+                    season_number=season_number,
+                    unanswered_servers=unanswered_servers,
+                )
             else:
                 no_match_reasons = format_unmatched_reasons(stats.get("unmatched_reasons"))
                 log_warning(
@@ -3801,6 +3855,7 @@ def run_plex_webhook_background_job(
                 )
             raise Exception(
                 f"No server match found after {attempts} attempt(s) for {media_type}: {title}"
+                + _did_not_answer_note(unanswered_servers)
             )
 
         update_job_state(
@@ -3811,11 +3866,23 @@ def run_plex_webhook_background_job(
             message=_webhook_completion_message(
                 title, match_detail, uploaded_count, missing_targets,
                 pending_servers=pending_servers, loading_servers=loading_servers,
+                unanswered_servers=unanswered_servers,
             ),
             completed_at=datetime.now(timezone.utc),
         )
 
-        not_scanned = [server for server in pending_servers if server not in loading_servers]
+        if unanswered_servers:
+            log_error(
+                LogTags.UPLOADER,
+                f"{', '.join(unanswered_servers)} did not answer, so nothing was sent there for {title}{year_label}; "
+                "the next full upload run sends it once that server is back",
+                media_type=media_type,
+                title=title,
+                season_number=season_number,
+                attempts=attempts,
+                unanswered_servers=unanswered_servers,
+            )
+        not_scanned = [server for server in pending_servers if server not in loading_servers and server not in unanswered_servers]
         if not_scanned:
             log_warning(
                 LogTags.UPLOADER,
@@ -3907,6 +3974,7 @@ def run_plex_webhook_background_job(
                     ],
                 )
             discord_fields += _instance_fields(stats.get("by_instance"), dry_run=False)
+            discord_fields += _did_not_answer_fields(unanswered_servers)
             if year_discrepancy_text:
                 discord_fields.append(
                     {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}
@@ -3918,7 +3986,7 @@ def run_plex_webhook_background_job(
                 title="Asset Upload",
                 description=f"Uploaded {pretty_media}: {title}{season_text}",
                 fields=discord_fields,
-                color=0xFFB74D if year_discrepancy_text else 0x4CAF50,
+                color=0xFFB74D if year_discrepancy_text or unanswered_servers else 0x4CAF50,
             )
 
         log_section_end(LogTags.UPLOADER, "Webhook Upload Complete")
@@ -4033,6 +4101,7 @@ def run_plex_single_manual_background_job(
             year=payload.get("year"),
             media_type=media_type,
             allow_full_fallback=True,
+            ask_again=True,  # no retry loop in this job: a server that does not answer is asked again inside the search
         )
         if targeted_context_error:
             log_warning(
@@ -4122,7 +4191,7 @@ def run_plex_single_manual_background_job(
             progress=100,
             message=format_complete_message(
                 "Manual single upload",
-                f"{title} — {match_detail}{preupload_details}",
+                f"{title} — {match_detail}{preupload_details}{_did_not_answer_note(stats.get('servers_skipped'))}",
             ),
             completed_at=datetime.now(timezone.utc),
         )

@@ -591,6 +591,18 @@ def test_plex_upload_embed_reports_both_halves_without_unmatched():
     assert embed["description"] == "5 poster(s) and 65 artwork file(s) uploaded (live)"
 
 
+def test_plex_upload_embed_names_a_server_that_did_not_answer():
+    from modules.upload import build_plex_upload_embed
+
+    clean = build_plex_upload_embed(_upload_stats(), dry_run=False)
+    assert not any("Did Not Answer" in f["name"] for f in clean["fields"]) and clean["color"] == 0x4CAF50
+
+    embed = build_plex_upload_embed({**_upload_stats(), "servers_skipped": ["Plex 'main'"]}, dry_run=False)
+    field = next(f for f in embed["fields"] if "Did Not Answer" in f["name"])
+    assert field["value"] == "Plex 'main'"
+    assert embed["color"] == 0xFFB74D
+
+
 def test_plex_upload_embed_tells_the_servers_apart():
     """A run over Plex and Jellyfin says what each got, after the totals and before the mode."""
     from modules.upload import build_plex_upload_embed
