@@ -203,13 +203,17 @@ class OverlayType:
     # Which poster kinds this overlay can decorate (TARGET_MOVIE / TARGET_SHOW / TARGET_SEASON).
     targets: tuple = (TARGET_MOVIE, TARGET_SHOW)
     # What this overlay needs the engine to fetch: "tmdb" (and "providers" for the watch
-    # providers), "media" (the item's media files: resolution, HDR, audio). Override
-    # needs_for() when that depends on the options (e.g. a rating source the user picks).
+    # providers, "keywords" for a movie's keywords), "media" (the item's media files:
+    # resolution, HDR, audio). Override needs_for() when that depends on the options (e.g.
+    # a rating source the user picks).
     needs: tuple = ()
     # Shared placement fields the page hides because the type sets them per state
     # (e.g. a status overlay colors every badge itself, so a shared back_color is noise).
     # "text" / "backdrop" hide those whole panels (an image badge has no text to style).
     hidden_placement: tuple = ()
+    # {panel or key: {option: value or values}}: hidden the same way, but only while the options
+    # hold those values (a type that draws text in one style and images in the others).
+    hidden_placement_when: Dict[str, Dict[str, Any]] = {}
     # {when: {option: value or values}, note}: while the options hold those values another overlay
     # places the badge, so the page greys out the Position and Backdrop cards and shows the note.
     placement_lock: Dict[str, Any] = {}
@@ -233,6 +237,10 @@ class OverlayType:
     def image_items(self) -> List[tuple]:
         """(key, label) of every image file of this type (see `images`)."""
         return []
+
+    def image_items_in(self, image_set: str) -> List[tuple]:
+        """The files of one set, for a type whose sets do not all hold the same ones."""
+        return self.image_items()
 
     def image_source(self, key: str, image_set: str) -> str:
         """Where a badge's file in a set comes from (see ImageLibrary.source). A type that joins
@@ -279,6 +287,7 @@ class OverlayType:
             "targets": list(self.targets),
             "needs": list(self.needs),
             "hidden_placement": list(self.hidden_placement),
+            "hidden_placement_when": self.hidden_placement_when or None,
             "placement_lock": self.placement_lock or None,
             "schema": self.schema(),
             "variants": self.variants(opts),

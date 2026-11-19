@@ -256,7 +256,10 @@ type OptionFieldsProps = {
   // sections after them are the second row's cards, which share one fixed height. Unset = all first-row.
   cardsFirst?: number
   // render 'fields': draw only the first-row cards, only the second-row cards, or both.
-  part?: 'all' | 'own' | 'merged'
+  // 'text' = just the fields that lead the Text card (`in_text_card`), with no card of their own.
+  part?: 'all' | 'own' | 'merged' | 'text'
+  // The Text card is on the page: fields marked `in_text_card` are drawn there, not in their section.
+  textCardShown?: boolean
 }
 
 // Group fields by their `section` hint, keeping first-appearance order ('' = no heading).
@@ -336,15 +339,18 @@ function StateCell({ field, values, onChange, id, ariaLabel, dimmed, unavailable
 
 // Renders an overlay type's option schema. Every overlay type ships its own schema from the
 // backend, so a new type needs no frontend code unless it wants a custom panel.
-function OptionFields({ schema, options, onChange, idPrefix = 'ov', typeKey = '', render = 'all', backdropEnabled = true, defaults, onAssetsChanged, exclude = [], cardsFirst, part = 'all' }: OptionFieldsProps) {
+function OptionFields({ schema, options, onChange, idPrefix = 'ov', typeKey = '', render = 'all', backdropEnabled = true, defaults, onAssetsChanged, exclude = [], cardsFirst, part = 'all', textCardShown = false }: OptionFieldsProps) {
   const lockReason = (field: OverlayField) => (!backdropEnabled && field.key.startsWith('back_') ? 'Backdrop is off (Backdrop panel)' : undefined)
   const set = (key: string, value: unknown) => onChange({ ...options, [key]: value })
   const shown = (field: OverlayField) =>
     !field.show_when || optionsMatch(field.show_when, options)
   const simple = render === 'states' ? [] : schema.filter((f) => f.kind !== 'states' && !exclude.includes(f.key) && shown(f))
+  // A table column with a show_when comes and goes like a plain field.
   const groups = render === 'fields' ? [] : schema.filter((f) => f.kind === 'states')
+    .map((g) => ({ ...g, items: (g.items ?? []).map((item) => ({ ...item, fields: item.fields.filter(shown) })) }))
   const dependencyOff = (field: OverlayField) => Boolean(field.depends_on) && options[field.depends_on as string] !== true
-  const sections = bySection(simple)
+  const leads = (field: OverlayField) => textCardShown && field.in_text_card === true
+  const sections = bySection(simple.filter((f) => !leads(f)))
   // Rows with a priority stand in priority order, highest first. Not under the user's fingers,
   // though: while a field in a table has focus its order is held, and the rows move once focus
   // leaves the table. Group key → the item keys in the held order.
@@ -358,6 +364,15 @@ function OptionFields({ schema, options, onChange, idPrefix = 'ov', typeKey = ''
       ))}
     </div>
   )
+  if (part === 'text') {
+    return (
+      <>
+        {simple.filter(leads).map((field) => (
+          <SingleField key={field.key} field={field} values={options} onChange={set} idPrefix={idPrefix} typeKey={typeKey} onAssetsChanged={onAssetsChanged} />
+        ))}
+      </>
+    )
+  }
   return (
     <>
       {own.map((section) => (

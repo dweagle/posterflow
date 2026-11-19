@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import NumberField from '../poster-manager/NumberField'
 import { ColorField, InfoLabel, Toggle } from './OptionFields'
 import ListPicker from './ListPicker'
@@ -22,11 +23,14 @@ type Props = {
   // Set while another overlay places the badge: the Position and Backdrop cards are greyed out
   // and the Position card shows this note.
   lockedNote?: string
+  // Fields of the overlay type drawn in the Text card's top row, on their own: the text
+  // fields below keep the places they have on every other type.
+  lead?: ReactNode
 }
 
 // Kometa-style placement: where the badge sits (align + offset in 1000x1500 poster space),
 // how the text looks, and the backdrop behind it. Shared by every overlay type.
-function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'all', lockedNote }: Props) {
+function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'all', lockedNote, lead }: Props) {
   const draw = (name: 'position' | 'text' | 'backdrop') => part === 'all' || part === name || (part === 'style' && name !== 'position')
   const show = (key: keyof OverlayPlacement) => !hidden.includes(key)
   const panel = (name: 'text' | 'backdrop') => !hidden.includes(name)
@@ -91,6 +95,7 @@ function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'al
       <div className="overlay-panel">
         <h3>Text</h3>
         <div className="overlay-panel-grid">
+          {lead && <div className="overlay-panel-lead">{lead}</div>}
           <div className="field-group">
             <InfoLabel htmlFor="pl-font" label="Font" help="Bundled fonts plus any .ttf/.otf you drop into config/artwork/fonts." />
             <ListPicker
@@ -123,9 +128,10 @@ function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'al
           {num('font_size', 'Size', 8, 400, 'Text height in px of a 1000×1500 poster; scales with the real poster.')}
           {num('letter_spacing', 'Letter spacing', 0, 100, 'Extra space between letters, in px.')}
           <div className="field-group">
-            <InfoLabel htmlFor="pl-font_color" label="Default text color" help="Used by every status unless a status sets its own text color below." />
+            <InfoLabel htmlFor="pl-font_color" label="Default text color" help="Used unless a row in the table below sets its own text color." />
             <ColorField id="pl-font_color" value={placement.font_color} alpha onChange={(v) => onChange({ font_color: v })} />
           </div>
+          {show('stroke_width') && (
           <div className="overlay-field-pair">
             {num('stroke_width', 'Outline width', 0, 20, 'Stroke drawn around the letters; 0 = none.')}
             <div className={`field-group ${placement.stroke_width > 0 ? '' : 'disabled'}`}>
@@ -139,6 +145,7 @@ function PlacementControls({ placement, fonts, onChange, hidden = [], part = 'al
               />
             </div>
           </div>
+          )}
         </div>
         <small className="overlay-panel-hint">Drop .ttf/.otf files into config/artwork/fonts to add your own.</small>
       </div>

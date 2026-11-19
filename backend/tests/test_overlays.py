@@ -1562,7 +1562,7 @@ def test_server_engine_uses_the_overlay_that_names_the_items_library(test_db, is
 
 def test_overlays_api_types_and_config_roundtrip(client, test_db, isolated_overlay_files):
     types = client.get("/api/overlays/types").json()["types"]
-    assert [t["key"] for t in types] == ["status", "rating", "content_rating", "streaming", "resolution", "audio", "edition"]
+    assert [t["key"] for t in types] == ["status", "rating", "content_rating", "streaming", "resolution", "audio", "edition", "mediastinger"]
     cfg = client.get("/api/overlays/config").json()
     assert cfg["config"]["enabled"] is False and cfg["has_tmdb_key"] is False and cfg["badged_count"] == 0
     body = {"enabled": True, "all_libraries": False, "libraries": ["srv:1"],
@@ -2084,7 +2084,7 @@ def test_every_type_ends_its_cards_with_the_seasons_toggle():
             continue
         assert fields[-1]["key"] == "apply_to_seasons" and fields[-1]["section"] == "Seasons" and fields[-1]["kind"] == "toggle", otype.key
         assert [f["key"] for f in fields if f.get("section") == "Seasons"] == ["apply_to_seasons"], otype.key
-    assert seen == {"edition"}
+    assert seen == {"edition", "mediastinger"}
 
 
 # ── Content rating ───────────────────────────────────────────────────────────
@@ -3138,3 +3138,237 @@ def test_soft_band_eases_out_toward_its_end():
     # The soft curve: 141 left at 100 px, 68 at 200 px, 12 at 300 px.
     assert [abs(dark(soft, y) - want) <= 6 for y, want in ((100, 141), (200, 68), (300, 12))] == [True, True, True]
     assert dark(soft, 300) < dark(linear, 300) - 4                                        # softer toward the end than the straight line
+
+
+# ── Credits scenes (a scene during or after the credits, from TMDB's keywords) ─────
+
+def test_metadata_keeps_movie_keywords_when_asked_and_refetches_records_without_them(test_db, isolated_overlay_files, monkeypatch):
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        appended = (params or {}).get("append_to_response")
+        calls.append((url, appended))
+        if url.endswith("/movie/1"):
+            data = {"title": "Film", "status": "Released", "release_date": "2001-01-01"}
+            if "keywords" in (appended or "").split(","):
+                data["keywords"] = {"keywords": [{"id": 179430, "name": "AfterCreditsStinger"}, {"id": 9715, "name": "superhero"}, {"id": 1}]}
+            if "watch/providers" in (appended or "").split(","):
+                data["watch/providers"] = {"results": {"US": {"flatrate": [{"provider_id": 8}]}}}
+            return _Resp(data)
+        if url.endswith("/tv/2"):
+            return _Resp({"name": "Show", "status": "Ended", "first_air_date": "2001-01-01"})
+        return _Resp({}, 404)
+
+    t0 = time.time()
+    movie, show = _ctx("movie", "Film", 2001, tmdb=1, tvdb=None), _ctx("show", "Show", 2001, tmdb=2, tvdb=None)
+    plain = MetadataProvider("key", now=t0, db=test_db)
+    monkeypatch.setattr(plain._session, "get", fake_get)
+    assert "keywords" not in plain.for_item(movie)["tmdb"] and calls[-1] == ("https://api.themoviedb.org/3/movie/1", None)
+    plain.flush()
+
+    wanting = MetadataProvider("key", now=t0 + 60, db=test_db, keywords=True)
+    monkeypatch.setattr(wanting._session, "get", fake_get)
+    meta = wanting.for_item(movie)  # the settled record is fresh, but it has no keywords: fetched again, once
+    assert calls[-1] == ("https://api.themoviedb.org/3/movie/1", "keywords") and meta["tmdb"]["keywords"] == ["aftercreditsstinger", "superhero"]
+    wanting.for_item(movie)
+    assert len(calls) == 2
+    assert "keywords" not in wanting.for_item(show)["tmdb"] and calls[-1] == ("https://api.themoviedb.org/3/tv/2", None)  # a show is not asked for its keywords
+    wanting.for_item(show)
+    assert len(calls) == 3  # and its record without them is good as it is
+    wanting.flush()
+
+    both = MetadataProvider("key", now=t0 + 120, db=test_db, providers=True, keywords=True)
+    monkeypatch.setattr(both._session, "get", fake_get)
+    record = both.for_item(movie)["tmdb"]
+    assert calls[-1] == ("https://api.themoviedb.org/3/movie/1", "watch/providers,keywords")
+    assert record["keywords"] == ["aftercreditsstinger", "superhero"] and record["providers"] == {"US": {"flatrate": [8]}}
+
+
+def test_server_engine_asks_for_keywords_only_when_the_credits_scenes_overlay_is_active(test_db, isolated_overlay_files):
+    stinger = normalize_config({"enabled": True, "types": {"mediastinger": {"enabled": True}}})
+    engine = ServerOverlayEngine(test_db, stinger, instances=[], library_configs=[])
+    assert [t.key for t, _ in engine.active] == ["mediastinger"] and engine._needs_tmdb is True
+    assert engine.metadata.want_keywords is True and engine.metadata.want_providers is False
+    status_only = normalize_config({"enabled": True, "types": {"status": {"enabled": True}}})
+    assert ServerOverlayEngine(test_db, status_only, instances=[], library_configs=[]).metadata.want_keywords is False
+
+
+def test_credits_scenes_type_tells_post_mid_and_both_apart(client, monkeypatch, tmp_path):
+    from services.overlays import images
+    from services.overlays.types import mediastinger
+
+    cs = get_type("mediastinger")
+    desc = cs.describe()
+    assert (desc["label"], desc["order"], desc["needs"], desc["hidden_placement"], desc["targets"]) == ("Credits Scenes", 70, ["tmdb", "keywords"], ["stroke_width", "stroke_color"], ["movie"])  # no letter outline on this type
+    # The Text card is hidden while a style draws an image; only this type hides a card by its options.
+    assert desc["hidden_placement_when"] == {"text": {"badge_style": ["icon", "color", "color_plain", "white", "white_plain"]}}
+    assert all(t.describe()["hidden_placement_when"] is None for key, t in all_types().items() if key != "mediastinger")
+    p = desc["default_placement"]
+    assert (p["horizontal_align"], p["horizontal_offset"], p["vertical_align"], p["vertical_offset"]) == ("left", 35, "top", 35)
+    assert (p["back_enabled"], p["back_style"], p["back_color"], p["back_padding"], p["back_radius"], p["back_min_width"]) == (True, "solid", "#00000099", 9, 30, 105)  # the icon's dark box
+    opts = cs.default_options()
+    assert opts == {"badge_style": "icon", "badge_scale": 100, "badge_width": 130,
+                    "scenes": {"post": {"enabled": True, "text": "PCS", "font_color": ""}, "mid": {"enabled": True, "text": "MCS", "font_color": ""},
+                               "both": {"enabled": True, "text": "M+P", "font_color": ""}}}
+    style, scale, width, uploads, table = cs.schema()
+    assert [f["key"] for f in cs.schema()] == ["badge_style", "badge_scale", "badge_width", "custom_badges", "scenes"]
+    assert [(o["value"], o["label"]) for o in style["options"]] == [("icon", "S icon"), ("color", "Color"), ("color_plain", "Color, no border"),
+                                                                  ("white", "Transparent"), ("white_plain", "Transparent, no border"), ("text", "Text")]
+    assert style["in_text_card"] is True and not any(f.get("in_text_card") for f in (scale, width, uploads))  # the Style picker leads the Text card while it shows
+    # One size field at a time: the icon in percent, the lettered badges by width like the content-rating badges.
+    assert scale["show_when"] == {"badge_style": ["icon"]} and width["show_when"] == {"badge_style": ["color", "color_plain", "white", "white_plain"]}
+    assert (uploads["kind"], uploads["set_option"], uploads["section"], uploads["noun"]) == ("images", "badge_style", "Custom badges", "badge")
+    assert uploads["show_when"] == {"badge_style": ["icon", "color", "color_plain", "white", "white_plain"]}  # the Text style has no files
+    # The switches: one row per scene, with its wording and its own text color as columns that only the Text style shows.
+    assert (table["kind"], table["item_label"], [(i["key"], i["label"]) for i in table["items"]]) == (
+        "states", "Scene", [("post", "Post credits"), ("mid", "Mid credits"), ("both", "Mid and post credits")])
+    assert all([(f["kind"], f["key"], f["show_when"]) for f in i["fields"]] == [("text", "text", {"badge_style": "text"}), ("color", "font_color", {"badge_style": "text"})]
+               for i in table["items"])
+    assert all(i["fields"][1]["optional"] is True and i["fields"][1]["alpha"] is True for i in table["items"])  # blank = the Text card's color
+    # The icon style has one file for every scene; the lettered styles one per scene.
+    scene_items = [("post", "Post credits"), ("mid", "Mid credits"), ("both", "Mid and post credits")]
+    assert cs.image_items_in("icon") == [("stinger", "S icon")] and all(cs.image_items_in(s) == scene_items for s in ("color", "color_plain", "white", "white_plain"))
+    assert cs.image_items() == [("stinger", "S icon")] + scene_items
+    # The preview list follows the style: the one icon, or the scenes that are on.
+    lettered = ["color", "color_plain", "white", "white_plain"]
+    assert cs.variants(opts) == [{"key": "stinger", "label": "S icon", "option": "badge_style", "labels": {"icon": "S icon"}}] + [
+        {"key": k, "label": l, "group": "scenes", "item": k, "option": "badge_style", "labels": {s: l for s in lettered + ["text"]}} for k, l in scene_items]
+
+    # The bundled files: the icon as it came, once, and PCS / MCS / M+P in four styles on the content-rating badges' 119 x 60.
+    lib = mediastinger.IMAGES
+    assert (lib.default_set, lib.cropped, [s for s, _l in lib.sets]) == ("icon", True, ["icon", "color", "color_plain", "white", "white_plain"])
+    scenes = [k for k, _l in scene_items]
+    for image_set, _label in lib.sets:
+        assert {f.stem for f in (lib.bundled_dir / image_set).glob("*.png")} == {k for k, _l in cs.image_items_in(image_set)}, image_set
+    art = {(s, k): Image.open(lib.bundled_dir / s / f"{k}.png").convert("RGBA") for s in lettered for k in scenes}
+    yellow, white = (255, 225, 1, 255), (255, 255, 255, 255)
+    with Image.open(lib.bundled_dir / "icon" / "stinger.png") as icon:
+        assert icon.size == (85, 88) and max(icon.convert("RGBA").getcolors(1 << 16))[1] == yellow  # the fill below is the icon's own yellow
+    inks = {}
+    for k in scenes:
+        color, plain, line, bare = (art[(s, k)] for s in ("color", "color_plain", "white", "white_plain"))
+        assert all(img.size == (119, 60) for img in (color, plain, line, bare)), k
+        near = lambda px, want: all(abs(a - b) <= 3 for a, b in zip(px, want))
+        # The fill inside a 3 px white line: a little heavier than the rating badges' 2 px.
+        assert near(color.getpixel((59, 0)), white) and color.getpixel((59, 2))[2] >= 200 and color.getpixel((59, 3))[2] <= 60 and near(color.getpixel((7, 30)), yellow), k
+        assert near(plain.getpixel((59, 0)), yellow) and near(plain.getpixel((7, 30)), yellow), k  # the fill alone
+        # A 4 px white line with no fill (the rating badges have 3 px).
+        assert near(line.getpixel((59, 1)), white) and line.getpixel((59, 3))[3] >= 200 and line.getpixel((59, 4))[3] <= 60 and line.getpixel((7, 30))[3] <= 3, k
+        box = bare.getchannel("A").getbbox()
+        assert 8 <= box[0] < box[2] <= 111 and (box[1], box[3]) == (11, 48), k             # the lettering alone, clear of where the line runs
+        assert all({img.getchannel(c).getextrema() for c in "RGB"} == {(255, 255)} for img in (line, bare)), k
+        # One lettering in all four: black on the yellow, white where there is no fill.
+        inked = [(x, y) for y in range(60) for x in range(119) if bare.getpixel((x, y))[3] == 255]
+        assert len(inked) > 400 and all(max(img.getpixel(xy)[:3]) <= 5 for img in (color, plain) for xy in inked), k
+        assert all(line.getpixel(xy)[3] >= 250 for xy in inked), k
+        inks[k] = frozenset(inked)
+    assert len(set(inks.values())) == 3  # PCS, MCS and M+P are three different letterings
+
+    # TMDB names the two scenes apart; a movie with both gets the third badge.
+    movie = _ctx("movie", "Film", 2021)
+    meta = lambda *kw: {"tmdb": {"keywords": list(kw)}}
+    post, mid, both, neither = meta("aftercreditsstinger", "superhero"), meta("duringcreditsstinger"), meta("aftercreditsstinger", "duringcreditsstinger"), meta("superhero")
+    assert [cs.resolve(movie, opts, m).key for m in (post, mid, both)] == ["post", "mid", "both"] and cs.resolve(movie, opts, neither) is None
+    assert cs.resolve(movie, opts, {}) is None and cs.resolve(movie, opts, {"tmdb": {"status": "Released"}}) is None  # no record, or one without keywords
+    assert cs.resolve(_ctx("show", "Show", 2020), opts, both) is None  # movies only
+    # The switches: a scene that is off is not badged; a movie with both falls to its post credits badge, then its mid credits one.
+    off = lambda *keys: {**opts, "scenes": {k: {"enabled": k not in keys} for k in scenes}}
+    assert cs.resolve(movie, off("post"), post) is None and cs.resolve(movie, off("mid"), mid) is None
+    assert cs.resolve(movie, off("post"), mid).key == "mid" and cs.resolve(movie, off("mid"), post).key == "post"
+    assert cs.resolve(movie, off("both"), both).key == "post" and cs.resolve(movie, off("both", "post"), both).key == "mid"
+    assert cs.resolve(movie, off("post"), both).key == "both" and cs.resolve(movie, off("both", "post", "mid"), both) is None
+
+    badge = cs.resolve(movie, opts, post)
+    assert (badge.text, badge.image_height, badge.image_width) == ("Post credits", 88, 0) and badge.image.endswith("/mediastinger/icon/stinger.png")
+    assert badge.signature == f"post|Post credits|||stinger.png@{badge.image_stamp}|0|h=88"
+    assert {cs.resolve(movie, opts, m).image for m in (post, mid, both)} == {badge.image}  # the icon style draws its one file for every scene
+    assert cs.resolve(movie, {**opts, "badge_scale": 50}, post).image_height == 44
+    boxed = cs.resolve(movie, {**opts, "badge_style": "color"}, both)
+    assert (boxed.text, boxed.image_width, boxed.image_height) == ("Mid and post credits", 130, 0) and boxed.image.endswith("/mediastinger/color/both.png")
+    assert boxed.signature == f"both|Mid and post credits|||both.png@{boxed.image_stamp}|130"
+    assert len({cs.resolve_variant(k, {**opts, "badge_style": s}).signature for s in ("color", "color_plain", "white", "white_plain") for k in scenes}) == 12
+    assert cs.resolve_variant("junk", opts).key == "post" and cs.resolve_variant("stinger", opts).image == badge.image
+    assert cs.resolve_variant("stinger", {**opts, "badge_style": "color"}).image.endswith("/mediastinger/color/post.png")  # another type's preview asks for the first state
+    # At the same width a lettered badge is exactly as big as a content-rating badge.
+    place = {**DEFAULT_PLACEMENT, "back_enabled": False}
+    cr = get_type("content_rating")
+    assert measure_badge(boxed, place)[2:] == measure_badge(cr.resolve_variant("movie:r", cr.default_options()), place)[2:]
+    n = cs.normalize_options({"badge_style": "neon", "badge_scale": "9999", "badge_width": "x",
+                              "scenes": {"mid": {"enabled": "false", "text": "  MID  ", "font_color": " #FFE101 "}, "post": {"text": ""}, "both": "junk", "extra": {"enabled": True}}})
+    assert n == {"badge_style": "icon", "badge_scale": 400, "badge_width": 130,
+                 "scenes": {"post": {"enabled": True, "text": "", "font_color": ""}, "mid": {"enabled": False, "text": "MID", "font_color": "#FFE101"},
+                            "both": {"enabled": True, "text": "M+P", "font_color": ""}}}
+    assert cs.normalize_options({"badge_style": "white_plain", "badge_width": 5})["badge_width"] == 20
+    assert cs.normalize_options({"badge_style": "text", "scenes": {"post": {"text": "x" * 90}}})["scenes"]["post"]["text"] == "x" * 60
+
+    # The Text style: the scene's own wording as a text badge, styled by the placement like any other.
+    worded = {**opts, "badge_style": "text", "scenes": {**opts["scenes"], "mid": {"enabled": True, "text": "MID CREDITS"}, "both": {"enabled": True, "text": ""}}}
+    texted = cs.resolve(movie, worded, post)
+    assert (texted.key, texted.text, texted.image, texted.image_width, texted.image_height) == ("post", "PCS", None, 0, 0) and texted.signature == "post|PCS||"
+    assert texted.font_color is None  # no color of its own: the Text card's
+    # A scene may set its own text color; the others keep the Text card's.
+    tinted = {**worded, "scenes": {**worded["scenes"], "post": {"enabled": True, "text": "PCS", "font_color": "#FFE101FF"}}}
+    yellow_text = cs.resolve(movie, tinted, post)
+    assert yellow_text.font_color == "#FFE101FF" and yellow_text.signature == "post|PCS||#FFE101FF" and cs.resolve(movie, tinted, mid).font_color is None
+    colored, _rect = render_badge(Image.new("RGB", (1000, 1500), (90, 90, 90)), yellow_text, {**normalize_placement(p), "back_enabled": False, "font_size": 200})
+    plain_text, _rect = render_badge(Image.new("RGB", (1000, 1500), (90, 90, 90)), texted, {**normalize_placement(p), "back_enabled": False, "font_size": 200})
+    seen = lambda img: {px for px in img.crop((0, 0, 500, 300)).get_flattened_data()}
+    assert (255, 225, 1) in seen(colored) and (255, 255, 255) not in seen(colored) and (255, 255, 255) in seen(plain_text)
+    assert cs.resolve(movie, worded, mid).text == "MID CREDITS" and cs.resolve(movie, worded, mid).signature != cs.resolve(movie, {**opts, "badge_style": "text"}, mid).signature
+    assert cs.resolve(movie, worded, both) is None and cs.resolve_variant("both", worded) is None  # a scene with no text draws nothing
+    assert cs.resolve_variant("stinger", worded).text == "PCS" and cs.resolve_variant("mid", worded).text == "MID CREDITS"
+    out, rect = render_badge(Image.new("RGB", (1000, 1500), (90, 90, 90)), texted, normalize_placement(p))
+    assert rect[2] >= 105 and rect[:2] == (35, 35)  # drawn as text on the type's default box, top left
+
+    # The images API: one icon, or a badge per scene in a lettered style, replaceable (an upload is cropped and scaled to the bundled badge's height).
+    monkeypatch.setattr(images, "config_overlays_dir", lambda: tmp_path / "overlays")
+    listed = client.get("/api/overlays/images/mediastinger", params={"set": "white"}).json()
+    assert (listed["set"], listed["set_label"], listed["noun"]) == ("white", "Transparent", "badge")
+    assert listed["images"] == [{"key": k, "label": l, "source": "bundled", "custom": False} for k, l in scene_items]
+    assert client.get("/api/overlays/images/mediastinger").json()["images"] == [{"key": "stinger", "label": "S icon", "source": "bundled", "custom": False}]
+    assert client.get("/api/overlays/images/mediastinger/stinger").content == (lib.bundled_dir / "icon" / "stinger.png").read_bytes()
+    assert client.get("/api/overlays/images/mediastinger/mid").status_code == 404                               # the icon style has no file per scene
+    assert client.get("/api/overlays/images/mediastinger/stinger", params={"set": "color"}).status_code == 404  # and a lettered style has no icon
+    assert client.get("/api/overlays/images/mediastinger/mid", params={"set": "color"}).content == (lib.bundled_dir / "color" / "mid.png").read_bytes()
+    files = {"file": ("mine.png", b"x", "image/png")}
+    assert client.post("/api/overlays/images/mediastinger/mid", files=files).status_code == 404
+    assert client.delete("/api/overlays/images/mediastinger/stinger", params={"set": "color"}).status_code == 404
+    buf = io.BytesIO()
+    canvas = Image.new("RGBA", (600, 300), (0, 0, 0, 0))
+    canvas.paste((255, 255, 255, 255), (100, 100, 500, 200))
+    canvas.save(buf, format="PNG")
+    assert client.post("/api/overlays/images/mediastinger/mid", params={"set": "color"}, files={"file": ("mine.png", buf.getvalue(), "image/png")}).json()["custom"] is True
+    mine = tmp_path / "overlays" / "mediastinger" / "color" / "mid.png"
+    with Image.open(mine) as img:
+        assert img.size == (240, 60)
+    assert cs.resolve_variant("mid", {**opts, "badge_style": "color"}).image == str(mine)
+    assert cs.resolve_variant("post", {**opts, "badge_style": "color"}).image == str(lib.bundled_dir / "color" / "post.png")  # the others keep their bundled badge
+    # A custom icon replaces the one file, for every scene.
+    assert client.post("/api/overlays/images/mediastinger/stinger", files={"file": ("mine.png", buf.getvalue(), "image/png")}).json()["custom"] is True
+    own = tmp_path / "overlays" / "mediastinger" / "icon" / "stinger.png"
+    with Image.open(own) as img:
+        assert img.size == (352, 88)
+    assert {cs.resolve(movie, opts, m).image for m in (post, mid, both)} == {str(own)}
+
+
+def test_server_engine_badges_only_the_movies_with_a_credits_scene(test_db, isolated_overlay_files):
+    client = FakeClient()
+    client.items["1"].append(_item(11, "movie", "Plain", 2020, tmdb=8))
+    client.items["1"].append(_item(12, "movie", "Mid", 2021, tmdb=7))
+    cfg = normalize_config({"enabled": True, "types": {"mediastinger": {"enabled": True}}})
+    sources = _sources(isolated_overlay_files, 10, 11, 12, 20, 30)
+    both = ["aftercreditsstinger", "duringcreditsstinger"]
+    meta = FakeMetadata({9: {"keywords": both}, 8: {"keywords": ["superhero"]}, 7: {"keywords": ["duringcreditsstinger"]}, 1: {"keywords": both}})
+    engine = _engine(test_db, client, meta, cfg, sources=sources)
+    stats = engine.run()
+    engine.flush()
+    assert stats["applied"] == 2 and sorted(u[0] for u in client.uploads) == ["10", "12"]  # not the plain movie, and never a show
+    state = _state_items(test_db)
+    assert state["srv|10"]["sig"].startswith("mediastinger:both|Mid and post credits|") and state["srv|12"]["sig"].startswith("mediastinger:mid|Mid credits|")
+    # Mid credits switched off: that movie's clean poster goes back, and the one with both keeps its badge.
+    no_mid = normalize_config({"enabled": True, "types": {"mediastinger": {"enabled": True, "options": {"scenes": {"mid": {"enabled": False}}}}}})
+    later = _engine(test_db, client, FakeMetadata(meta.by_id), no_mid, sources=sources)
+    stats = later.run()
+    later.flush()
+    state = _state_items(test_db)
+    assert stats["restored"] == 1 and "srv|12" not in state and state["srv|10"]["sig"].startswith("mediastinger:both|")

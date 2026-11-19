@@ -88,6 +88,12 @@ def _trim_providers(raw: Any) -> Dict[str, Dict[str, list]]:
     return out
 
 
+def _trim_keywords(raw: Any) -> list:
+    """TMDB's appended keywords → their names, lower case."""
+    entries = (raw.get("keywords") or raw.get("results") or []) if isinstance(raw, dict) else []
+    return sorted({str(k["name"]).strip().lower() for k in entries if isinstance(k, dict) and k.get("name")})
+
+
 _KEY_IN_URL = re.compile(r"api_key=[^&\s]+")
 
 
@@ -100,11 +106,13 @@ class MetadataProvider:
     """Resolves the TMDB record behind an ItemContext (by tmdb id, else tvdb/imdb via /find)."""
 
     def __init__(self, api_key: str, *, now: Optional[float] = None, db: Optional[Session] = None,
-                 finales: Optional[Any] = None, providers: bool = False) -> None:
+                 finales: Optional[Any] = None, providers: bool = False, keywords: bool = False) -> None:
         self.api_key = (api_key or "").strip()
         # Streaming badges need each record's watch providers: fetched with the details (one
         # request) and kept trimmed; a cached record without them is refetched once.
         self.want_providers = bool(providers)
+        # Post-credits badges need a movie's keywords: fetched and kept the same way.
+        self.want_keywords = bool(keywords)
         self._lock = threading.Lock()
         self._db = db  # None = this run's answers are kept in memory only (previews, tests)
         self._finales = finales  # FinaleLookup (Sonarr → TheTVDB); None = TMDB inference only
@@ -303,6 +311,15 @@ class MetadataProvider:
             return True
         return time.time() - released < _MOVIE_LIVE_WINDOW_DAYS * 86400
 
+    def _appended(self, media: str) -> Dict[str, str]:
+        """Record key → TMDB append_to_response name, for the extras this run wants."""
+        out: Dict[str, str] = {}
+        if self.want_providers:
+            out["providers"] = "watch/providers"
+        if self.want_keywords and media == MEDIA_MOVIE:  # only movie badges read keywords
+            out["keywords"] = "keywords"
+        return out
+
     def _usable(self, media: str, entry: Optional[Dict[str, Any]]) -> bool:
         """A cached details entry serves this run when it is settled and within its TTL, or
         live but already fetched during this run (or within the refresh floor)."""
@@ -314,7 +331,7 @@ class MetadataProvider:
             return False
         if entry.get("missing"):
             return age <= SETTLED_TTL_SECONDS
-        if self.want_providers and isinstance(entry.get("data"), dict) and "providers" not in entry["data"]:
+        if isinstance(entry.get("data"), dict) and any(key not in entry["data"] for key in self._appended(media)):
             return False
         if not self._is_live(media, entry.get("data")):
             return age <= SETTLED_TTL_SECONDS
@@ -334,8 +351,9 @@ class MetadataProvider:
         refreshing = isinstance(entry, dict) and entry.get("data")
         if refreshing:
             self.stats["refreshed"] += 1
+        extras = self._appended(media)
         data = self._get(f"/{'tv' if media == MEDIA_SHOW else 'movie'}/{tmdb_id}",
-                         {"append_to_response": "watch/providers"} if self.want_providers else None)
+                         {"append_to_response": ",".join(extras.values())} if extras else None)
         if data is None:
             stale = self._cache.get(key)  # better a stale answer than none during an outage
             if isinstance(stale, dict) and stale.get("data"):
@@ -344,16 +362,18 @@ class MetadataProvider:
         if data.get("_missing"):
             self._store(key, {"missing": True})
             return None, "not on TMDB (404)"
-        trimmed = self._trim(media, data, providers=self.want_providers)
+        trimmed = self._trim(media, data, providers="providers" in extras, keywords="keywords" in extras)
         self._store(key, {"data": trimmed})
         return trimmed, "refreshed" if refreshing else "fetched"
 
     @staticmethod
-    def _trim(media: str, data: Dict[str, Any], providers: bool = False) -> Dict[str, Any]:
+    def _trim(media: str, data: Dict[str, Any], providers: bool = False, keywords: bool = False) -> Dict[str, Any]:
         fields = _SHOW_FIELDS if media == MEDIA_SHOW else _MOVIE_FIELDS
         out = {k: data.get(k) for k in fields}
         if providers:
             out["providers"] = _trim_providers(data.get("watch/providers"))
+        if keywords:
+            out["keywords"] = _trim_keywords(data.get("keywords"))
         if media == MEDIA_SHOW:
             for ep_key in ("last_episode_to_air", "next_episode_to_air"):
                 ep = data.get(ep_key)

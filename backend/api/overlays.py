@@ -126,8 +126,8 @@ def _image_type(type_key: str):
     return overlay_type
 
 
-def _image_label(overlay_type, key: str) -> str:
-    labels = dict(overlay_type.image_items())
+def _image_label(overlay_type, key: str, image_set: str) -> str:
+    labels = dict(overlay_type.image_items_in(image_set))
     if key not in labels:
         raise HTTPException(status_code=404, detail=f"Unknown {overlay_type.images.noun}")
     return labels[key]
@@ -158,7 +158,7 @@ def list_overlay_images(type_key: str, set: Optional[str] = None) -> Dict[str, A
         "folder": str(library.config_dir / image_set),
         "images": [
             {"key": key, "label": label, "source": source, "custom": source == "custom"}
-            for key, label in overlay_type.image_items()
+            for key, label in overlay_type.image_items_in(image_set)
             for source in [overlay_type.image_source(key, image_set)]
         ],
     }
@@ -169,8 +169,8 @@ def get_overlay_image(type_key: str, key: str, set: Optional[str] = None) -> Res
     """The badge as it draws right now in a set: the custom file when uploaded, else the bundled
     one, else one the type joins from parts, else the default set's."""
     overlay_type = _image_type(type_key)
-    _image_label(overlay_type, key)
     image_set = _image_set(overlay_type, set)
+    _image_label(overlay_type, key, image_set)
     png = overlay_type.image_png(key, image_set)
     if png is not None:
         return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
@@ -188,7 +188,8 @@ def upload_overlay_image(type_key: str, key: str, set: Optional[str] = None, fil
     from PIL import Image, UnidentifiedImageError
 
     overlay_type = _image_type(type_key)
-    library, label, image_set = overlay_type.images, _image_label(overlay_type, key), _image_set(overlay_type, set)
+    library, image_set = overlay_type.images, _image_set(overlay_type, set)
+    label = _image_label(overlay_type, key, image_set)
     raw = file.file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="The file is empty")
@@ -214,7 +215,8 @@ def upload_overlay_image(type_key: str, key: str, set: Optional[str] = None, fil
 def delete_overlay_image(type_key: str, key: str, set: Optional[str] = None) -> Dict[str, Any]:
     """Drop a badge's custom file in a set so the bundled one is drawn again."""
     overlay_type = _image_type(type_key)
-    library, label, image_set = overlay_type.images, _image_label(overlay_type, key), _image_set(overlay_type, set)
+    library, image_set = overlay_type.images, _image_set(overlay_type, set)
+    label = _image_label(overlay_type, key, image_set)
     target = library.custom_file(key, image_set)
     if target.is_file():
         target.unlink()

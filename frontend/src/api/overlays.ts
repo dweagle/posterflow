@@ -12,10 +12,14 @@ export interface OverlayField {
   help?: string
   // Sub-heading the field is grouped under (fields with the same section render together).
   section?: string
+  // While the Text card shows, the field is drawn in its top row, by itself, instead of in its
+  // own section (a style picker that brings the Text card up stays where it was).
+  in_text_card?: boolean
   // Key of a top-level toggle option; the field is dimmed while that toggle is off.
   depends_on?: string
   // Only rendered while every listed option holds that value (a setting that matters for one style only).
-  // Shown only while each named option has that value (or one of those values).
+  // Shown only while each named option has that value (or one of those values). On a field of a
+  // states table it shows or hides that column.
   show_when?: Record<string, string | string[]>
   // Rendered but grayed out while every listed option holds that value (a setting another one makes moot);
   // `disabled_help` says why, on hover.
@@ -89,6 +93,9 @@ export interface OverlayTypeInfo {
   // Shared placement fields this type sets per state, so the page hides them; 'text' and
   // 'backdrop' hide those whole panels (an image badge has no text to style).
   hidden_placement: string[]
+  // Hidden the same way, but only while the options hold the named values (a type that draws
+  // text in one style and images in the others).
+  hidden_placement_when?: Record<string, Record<string, unknown>> | null
   // While the options hold these values another overlay places the badge: the Position and
   // Backdrop cards are greyed out and show the note.
   placement_lock?: { when: Record<string, unknown>; note: string } | null

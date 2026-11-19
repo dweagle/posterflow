@@ -34,8 +34,15 @@ const FIRST_ROW_CARDS = 3  // the settings grid is three cards wide
 
 // First-row slots left for a type's own sections after the shared cards (the Preview/Position
 // stack, Text, Backdrop); sections beyond them are the second row's cards.
-const freeFirstRowSlots = (t: OverlayTypeInfo): number =>
-  Math.max(0, FIRST_ROW_CARDS - 1 - (t.hidden_placement.includes('text') ? 0 : 1) - (t.hidden_placement.includes('backdrop') ? 0 : 1))
+const freeFirstRowSlots = (hidden: string[]): number =>
+  Math.max(0, FIRST_ROW_CARDS - 1 - (hidden.includes('text') ? 0 : 1) - (hidden.includes('backdrop') ? 0 : 1))
+
+// The placement panels and keys a type hides: the ones it always hides, and the ones it hides
+// while its options hold certain values (the Text card of a type with one text style).
+const hiddenPlacement = (t: OverlayTypeInfo, options: Record<string, unknown>): string[] => [
+  ...t.hidden_placement,
+  ...Object.entries(t.hidden_placement_when ?? {}).filter(([, when]) => optionsMatch(when, options)).map(([key]) => key),
+]
 
 // Which overlay of a type applies to a library: the one naming it, else one set to all libraries.
 const overlayFor = (t: OverlayTypeConfig | undefined, library?: string): OverlayDefinition | undefined =>
@@ -102,6 +109,8 @@ function Overlays() {
   const currentCfg = typeCfg && overlayIndex >= 0 ? typeCfg.overlays[overlayIndex] : null
   // Another overlay places this badge (Audio on the Resolution line): its own Position and Backdrop are not in use.
   const placementLock = current?.placement_lock && currentCfg && optionsMatch(current.placement_lock.when, currentCfg.options) ? current.placement_lock.note : undefined
+  const hidden = current && currentCfg ? hiddenPlacement(current, currentCfg.options) : []
+  const textCardShown = !hidden.includes('text')
   const enabledCount = config ? Object.values(config.types).filter((t) => t.enabled).length : 0
   const tmdbNeeded = Boolean(config) && types.some((t) => t.needs.includes('tmdb') && config?.types[t.key]?.enabled)
 
@@ -623,14 +632,23 @@ function Overlays() {
                         </button>
                       </div>
                     </div>
-                    <PlacementControls part="position" placement={currentCfg.placement} fonts={fonts} hidden={current.hidden_placement} lockedNote={placementLock} onChange={(patch) => updatePlacement(current.key, patch)} />
+                    <PlacementControls part="position" placement={currentCfg.placement} fonts={fonts} hidden={hidden} lockedNote={placementLock} onChange={(patch) => updatePlacement(current.key, patch)} />
                   </div>
                   {/* Then Text, the type's sections that fit the first row, Backdrop, and the rest as the second row's fixed-height cards. */}
-                  <PlacementControls part="text" placement={currentCfg.placement} fonts={fonts} hidden={current.hidden_placement} onChange={(patch) => updatePlacement(current.key, patch)} />
+                  <PlacementControls
+                    part="text"
+                    placement={currentCfg.placement}
+                    fonts={fonts}
+                    hidden={hidden}
+                    onChange={(patch) => updatePlacement(current.key, patch)}
+                    lead={current.schema.some((f) => f.in_text_card)
+                      ? <OptionFields key={`text-${current.key}`} render="fields" part="text" textCardShown schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} />
+                      : undefined}
+                  />
                   {/* Keyed by type: a type's cards never start from another type's field state (a picked badge, a half-typed number). */}
-                  <OptionFields key={`own-${current.key}`} render="fields" part="own" cardsFirst={freeFirstRowSlots(current)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
-                  <PlacementControls part="backdrop" placement={currentCfg.placement} fonts={fonts} hidden={current.hidden_placement} lockedNote={placementLock} onChange={(patch) => updatePlacement(current.key, patch)} />
-                  <OptionFields key={`merged-${current.key}`} render="fields" part="merged" cardsFirst={freeFirstRowSlots(current)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
+                  <OptionFields key={`own-${current.key}`} render="fields" part="own" textCardShown={textCardShown} cardsFirst={freeFirstRowSlots(hidden)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
+                  <PlacementControls part="backdrop" placement={currentCfg.placement} fonts={fonts} hidden={hidden} lockedNote={placementLock} onChange={(patch) => updatePlacement(current.key, patch)} />
+                  <OptionFields key={`merged-${current.key}`} render="fields" part="merged" textCardShown={textCardShown} cardsFirst={freeFirstRowSlots(hidden)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
                 </div>
               </div>
               {current.schema.some((f) => f.kind === 'states') && (

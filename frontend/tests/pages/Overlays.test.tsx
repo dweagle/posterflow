@@ -658,6 +658,69 @@ describe('Overlays', () => {
     expect(screen.queryByText(note)).toBeNull()
   })
 
+  it('shows the Text card only while the type\u2019s options call for text, with the Style picker staying at the top of the middle card', async () => {
+    const user = userEvent.setup()
+    const scenesType = {
+      key: 'mediastinger', label: 'Credits Scenes', description: 'A scene during or after the credits', order: 70, targets: ['movie'], needs: [],
+      hidden_placement: ['stroke_width', 'stroke_color'],
+      hidden_placement_when: { text: { badge_style: ['icon'] } },
+      schema: [
+        { kind: 'select', key: 'badge_style', label: 'Style', section: 'Badge', in_text_card: true, options: [{ value: 'icon', label: 'S icon' }, { value: 'text', label: 'Text' }] },
+        { kind: 'number', key: 'badge_scale', label: 'Badge size (%)', section: 'Badge', min: 10, max: 400, show_when: { badge_style: ['icon'] } },
+      ],
+      variants: [{ key: 'post', label: 'Post credits' }],
+      default_placement: placement,
+      default_options: { badge_style: 'icon', badge_scale: 100 },
+    }
+    const config = baseConfig()
+    mockGetOverlayTypes.mockResolvedValue({ types: [statusType, scenesType] })
+    mockGetOverlaysConfig.mockResolvedValue({
+      config: { ...config, types: { ...config.types, mediastinger: { enabled: true, overlays: [{ name: 'Credits Scenes', enabled: true, all_libraries: true, libraries: [], placement: { ...placement }, options: { badge_style: 'icon', badge_scale: 100 } }] } } },
+      has_tmdb_key: true, library_configs: [], badged_count: 0,
+    })
+    renderPage()
+    await screen.findByRole('heading', { level: 2, name: 'Airing Status' })
+    expect(document.querySelector('.overlay-panel-lead')).toBeNull()  // a type with no field of its own in the Text card has no top row for one
+    await user.click(screen.getByRole('tab', { name: /Credits Scenes/ }))
+    await screen.findByRole('heading', { level: 2, name: 'Credits Scenes' })
+    // The Backdrop card has a Style picker too: this is the type's own, wherever it is drawn.
+    const style = () => document.getElementById('ov-mediastinger-badge_style') as HTMLButtonElement
+    const cardOf = (el: HTMLElement) => el.closest('.overlay-panel') as HTMLElement
+    const pickStyle = (label: string) => {
+      fireEvent.click(style())
+      fireEvent.click(within(document.getElementById(style().getAttribute('aria-controls') ?? '') as HTMLElement).getByRole('option', { name: label }))
+    }
+    const firstField = (card: HTMLElement) => (card.querySelector('.overlay-panel-grid') as HTMLElement).firstElementChild as HTMLElement
+    // An image style: no Text card; the Style picker leads the type's Badge card in the first row.
+    expect(screen.queryByRole('heading', { level: 3, name: 'Text' })).toBeNull()
+    expect(cardOf(style()).querySelector('h3')?.textContent).toBe('Badge')
+    expect(cardOf(style()).classList.contains('overlay-settings-panel')).toBe(false)
+    expect(firstField(cardOf(style())).contains(style())).toBe(true)
+    expect(screen.getByLabelText('Badge size (%)')).toBeTruthy()
+
+    pickStyle('Text')
+    await waitFor(() => expect(screen.getByRole('heading', { level: 3, name: 'Text' })).toBeTruthy())
+    // The Text card took the Badge card's place, and the Style picker leads it: it did not go down a row.
+    expect(cardOf(style()).querySelector('h3')?.textContent).toBe('Text')
+    expect(firstField(cardOf(style())).contains(style())).toBe(true)
+    expect(style().dataset.value).toBe('text')
+    // It has the top row to itself, so Font and Weight keep their places side by side under it.
+    const cells = Array.from((cardOf(style()).querySelector('.overlay-panel-grid') as HTMLElement).children) as HTMLElement[]
+    expect(cells[0].className).toBe('overlay-panel-lead')
+    expect(cells[0].children).toHaveLength(1)
+    expect(cells[1].contains(document.getElementById('pl-font'))).toBe(true)
+    expect(cells[2].contains(document.getElementById('pl-font_weight'))).toBe(true)
+    expect(document.getElementById('pl-font')).toBeTruthy()
+    expect(document.getElementById('pl-stroke_width')).toBeNull()  // this type draws no letter outline
+    expect(screen.queryByRole('heading', { level: 3, name: 'Badge' })).toBeNull()  // nothing left for a card of its own
+    expect(document.querySelectorAll('.overlay-settings-panel')).toHaveLength(0)
+
+    pickStyle('S icon')
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 3, name: 'Text' })).toBeNull())
+    expect(cardOf(style()).querySelector('h3')?.textContent).toBe('Badge')
+    expect(firstField(cardOf(style())).contains(style())).toBe(true)
+  })
+
   it('offers an overlay only the libraries of the kind its type badges', async () => {
     const user = userEvent.setup()
     const libraryConfigs = [{ instance_name: 'srv', libraries: [

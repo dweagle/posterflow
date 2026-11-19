@@ -190,4 +190,32 @@ describe('ImageUploads', () => {
     await waitFor(() => expect(mockFetchOverlayImage).toHaveBeenCalledWith('resolution', '4k', undefined))
     expect(mockFetchOverlayImage).toHaveBeenCalledTimes(1)
   })
+
+  it('waits for a set’s own list before asking for a file when the set holds other keys', async () => {
+    const lettered = { type: 'mediastinger', set: 'color', set_label: 'Color', fallback_label: 'S icon', noun: 'badge', folder: '/m/color', images: [
+      { key: 'post', label: 'Post credits', source: 'bundled', custom: false },
+      { key: 'mid', label: 'Mid credits', source: 'bundled', custom: false },
+    ] }
+    const icon = { type: 'mediastinger', set: 'icon', set_label: 'S icon', fallback_label: 'S icon', noun: 'badge', folder: '/m/icon', images: [{ key: 'stinger', label: 'S icon', source: 'bundled', custom: false }] }
+    mockGetOverlayImages.mockResolvedValueOnce(lettered)
+    const view = render(<ImageUploads typeKey="mediastinger" idPrefix="ov" imageSet="color" noun="badge" />)
+    const select = (await screen.findByRole('combobox')) as HTMLButtonElement
+    await waitFor(() => expect(select.dataset.value).toBe('post'))
+    choose(select, 'Mid credits')
+    await waitFor(() => expect(mockFetchOverlayImage).toHaveBeenCalledWith('mediastinger', 'mid', 'color'))
+
+    // The icon set holds one file under its own key: the scene picked before is never asked for there.
+    let arrive: (value: unknown) => void = () => undefined
+    mockGetOverlayImages.mockReturnValueOnce(new Promise((resolve) => { arrive = resolve }))
+    mockFetchOverlayImage.mockClear()
+    view.rerender(<ImageUploads typeKey="mediastinger" idPrefix="ov" imageSet="icon" noun="badge" />)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(mockFetchOverlayImage).not.toHaveBeenCalled()
+
+    arrive(icon)
+    await waitFor(() => expect(select.dataset.value).toBe('stinger'))
+    expect(labelsOf(select)).toEqual(['S icon'])
+    await waitFor(() => expect(mockFetchOverlayImage).toHaveBeenCalledWith('mediastinger', 'stinger', 'icon'))
+    expect(mockFetchOverlayImage).toHaveBeenCalledTimes(1)
+  })
 })

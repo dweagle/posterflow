@@ -84,7 +84,8 @@ class ServerOverlayEngine:
         self._media: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}  # (instance, item id) → its media files, once looked up
         self.metadata = metadata or MetadataProvider(get_setting_value(db, SETTING_TMDB_API_KEY, "") if self._needs_tmdb else "", db=db,
                                                      finales=FinaleLookup.from_db(db) if self._needs_tmdb else None,
-                                                     providers=any("providers" in n for n in needs))
+                                                     providers=any("providers" in n for n in needs),
+                                                     keywords=any("keywords" in n for n in needs))
         self._instances = instances
         self._library_configs = library_configs
         self._client_factory = client_factory or (lambda inst: create_media_server_client(inst))

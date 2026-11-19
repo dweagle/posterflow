@@ -822,6 +822,22 @@
 
 /* Two fields that belong together (a width and its color) share one double-width cell so
    the grid can never wrap them onto different rows. */
+/* A type's own fields at the top of the Text card, in a row to themselves. Spanning two columns
+   does for this card what the outline pair does on the others: a 300px card gets its second
+   column from it, so the text fields under it sit where they do on every other type. */
+.overlay-panel-lead {
+  grid-column: span 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+/* On a card wide enough for three columns the first text field still starts the next row. */
+.overlay-panel-lead + .field-group {
+  grid-column-start: 1;
+}
+
 .overlay-field-pair {
   grid-column: span 2;
   display: grid;

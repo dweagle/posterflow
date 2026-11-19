@@ -29,6 +29,8 @@ function ImageUploads({ typeKey, idPrefix, imageSet, noun = 'logo', onChanged }:
   // The type `list` belongs to. Until the list of the type on screen has arrived, nothing of
   // another type is shown or asked for (the picker is empty and disabled, with no thumbnail).
   const [listType, setListType] = useState('')
+  // The set `list` belongs to: another set of the same type may hold other keys.
+  const [listSet, setListSet] = useState<OverlayImageSet | undefined>(undefined)
   const [setLabel, setSetLabel] = useState('')
   const [fallbackLabel, setFallbackLabel] = useState('')
   const [selected, setSelected] = useState('')
@@ -46,6 +48,7 @@ function ImageUploads({ typeKey, idPrefix, imageSet, noun = 'logo', onChanged }:
       if (seq !== loadSeq.current) return  // another set or type was asked for since: that answer wins
       setList(result.images)
       setListType(typeKey)
+      setListSet(imageSet)
       setSetLabel(result.set_label)
       setFallbackLabel(result.fallback_label ?? '')
       setSelected((prev) => (prev && result.images.some((l) => l.key === prev) ? prev : result.images[0]?.key ?? ''))
@@ -61,10 +64,12 @@ function ImageUploads({ typeKey, idPrefix, imageSet, noun = 'logo', onChanged }:
 
   const ready = listType === typeKey
   const images = ready ? list : []
+  // The list is this set's own: until then the selected key may not be one of its files.
+  const listed = ready && listSet === imageSet
 
   // The current file of the selected key, as an object URL (the API needs the auth header).
   useEffect(() => {
-    if (!selected || !ready) return
+    if (!selected || !listed) return
     let cancelled = false
     let url: string | null = null
     fetchOverlayImage(typeKey, selected, imageSet)
@@ -80,7 +85,7 @@ function ImageUploads({ typeKey, idPrefix, imageSet, noun = 'logo', onChanged }:
       cancelled = true
       if (url) URL.revokeObjectURL(url)
     }
-  }, [typeKey, selected, version, imageSet, ready])
+  }, [typeKey, selected, version, imageSet, listed])
 
   const current = images.find((l) => l.key === selected)
   const name = current?.label ?? selected

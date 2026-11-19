@@ -58,6 +58,29 @@ describe('PlacementControls', () => {
     expect(screen.queryByLabelText('Font')).toBeNull()
   })
 
+  it('leaves the letter outline out for a type that hides it and draws the type\u2019s own fields first in the Text card', () => {
+    render(<PlacementControls placement={placement} fonts={[]} onChange={vi.fn()} part="text" />)
+    expect(screen.getByLabelText('Outline width')).toBeTruthy()
+    expect(document.getElementById('pl-stroke_color')).toBeTruthy()
+    cleanup()
+    render(<PlacementControls placement={placement} fonts={[]} onChange={vi.fn()} part="text" hidden={['stroke_width', 'stroke_color']} lead={<div className="field-group" data-testid="lead">Style</div>} />)
+    expect(screen.getByRole('heading', { name: 'Text' })).toBeTruthy()
+    expect(screen.queryByLabelText('Outline width')).toBeNull()
+    expect(document.getElementById('pl-stroke_color')).toBeNull()
+    expect(document.getElementById('pl-font')).toBeTruthy()  // the rest of the card stays
+    // The type's field has the top row to itself; Font and Weight follow side by side, as on every other type.
+    const cells = Array.from((document.querySelector('.overlay-panel-grid') as HTMLElement).children) as HTMLElement[]
+    expect(cells[0].className).toBe('overlay-panel-lead')
+    expect(Array.from(cells[0].children)).toEqual([screen.getByTestId('lead')])
+    expect(cells[1].contains(document.getElementById('pl-font'))).toBe(true)
+    expect(cells[2].contains(document.getElementById('pl-font_weight'))).toBe(true)
+    cleanup()
+    // No field of its own: no empty top row.
+    render(<PlacementControls placement={placement} fonts={[]} onChange={vi.fn()} part="text" />)
+    expect(document.querySelector('.overlay-panel-lead')).toBeNull()
+    expect(((document.querySelector('.overlay-panel-grid') as HTMLElement).firstElementChild as HTMLElement).contains(document.getElementById('pl-font'))).toBe(true)
+  })
+
   it('can draw the text and backdrop panels on their own', () => {
     render(<PlacementControls placement={placement} fonts={[]} onChange={vi.fn()} part="text" />)
     expect(screen.getByRole('heading', { name: 'Text' })).toBeTruthy()
@@ -144,6 +167,34 @@ describe('OptionFields layouts', () => {
     render(<OptionFields render="fields" cardsFirst={1} schema={schema} options={options} onChange={vi.fn()} />)
     expect(document.querySelectorAll('.overlay-settings-panel')).toHaveLength(1)
     expect(document.querySelector('.overlay-settings-panel h3')?.textContent).toBe('Availability')
+  })
+
+  it('hands a field marked for the Text card to that card while it shows, and keeps it in its section otherwise', () => {
+    const lead: OverlayField[] = [
+      { kind: 'select', key: 'style', label: 'Style', section: 'Badge', in_text_card: true, options: [{ value: 'a', label: 'A' }] },
+      { kind: 'number', key: 'badge_width', label: 'Badge width', section: 'Badge' },
+    ]
+    const values = { style: 'a', badge_width: 130 }
+    // No Text card: the field is an ordinary one of its section, and there is nothing to lead with.
+    render(<OptionFields render="fields" schema={lead} options={values} onChange={vi.fn()} />)
+    expect(within(screen.getByRole('heading', { level: 3, name: 'Badge' }).closest('.overlay-panel') as HTMLElement).getByLabelText('Style')).toBeTruthy()
+    cleanup()
+    const { container } = render(<OptionFields render="fields" part="text" schema={lead} options={values} onChange={vi.fn()} />)
+    expect(container.textContent).toBe('')
+    cleanup()
+    // The Text card shows: the section keeps its other fields, and the marked one is drawn bare for the Text card.
+    render(<OptionFields render="fields" textCardShown schema={lead} options={values} onChange={vi.fn()} />)
+    expect(screen.queryByLabelText('Style')).toBeNull()
+    expect(screen.getByLabelText('Badge width')).toBeTruthy()
+    cleanup()
+    render(<OptionFields render="fields" part="text" textCardShown schema={lead} options={values} onChange={vi.fn()} />)
+    expect(screen.getByLabelText('Style')).toBeTruthy()
+    expect(screen.queryByRole('heading')).toBeNull()  // no card of its own
+    expect(screen.queryByLabelText('Badge width')).toBeNull()
+    cleanup()
+    // A section left with no field draws no card.
+    render(<OptionFields render="fields" textCardShown schema={[lead[0]]} options={values} onChange={vi.fn()} />)
+    expect(screen.queryByRole('heading')).toBeNull()
   })
 
   it('can draw the own cards and the merged card separately', () => {
@@ -271,6 +322,29 @@ describe('OptionFields state tables', () => {
     expect((screen.getByLabelText('4K off') as HTMLInputElement).checked).toBe(false)
     fireEvent.click(screen.getByLabelText('1080p on'))
     expect(onChange).toHaveBeenCalledWith({ badges: { '4k': { enabled: false }, '1080p': { enabled: false } } })
+  })
+
+  it('shows a table column only while its show_when holds', () => {
+    const onChange = vi.fn()
+    const scenes: OverlayField = {
+      kind: 'states', key: 'scenes', label: 'Scenes', item_label: 'Scene',
+      items: [{ key: 'post', label: 'Post credits', fields: [{ kind: 'text', key: 'text', label: 'Text', show_when: { badge_style: 'text' } }] }],
+    }
+    const options = { badge_style: 'icon', scenes: { post: { enabled: true, text: 'PCS' } } }
+    const defaults = { scenes: { post: { text: 'PCS' } } }
+    const view = render(<OptionFields schema={[scenes]} options={options} onChange={onChange} defaults={defaults} />)
+    const tables = () => document.querySelector('.overlay-states-tables') as HTMLElement
+    // Another style: the row is its switch alone, with nothing to reset.
+    expect(screen.queryByLabelText('Post credits Text')).toBeNull()
+    expect(tables().classList.contains('bare')).toBe(true)
+    expect(screen.queryByRole('button', { name: /defaults/ })).toBeNull()
+    view.rerender(<OptionFields schema={[scenes]} options={{ ...options, badge_style: 'text' }} onChange={onChange} defaults={defaults} />)
+    const input = screen.getByLabelText('Post credits Text') as HTMLInputElement
+    expect(input.value).toBe('PCS')
+    expect(tables().classList.contains('bare')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Post credits defaults' })).toBeTruthy()
+    fireEvent.change(input, { target: { value: 'POST CREDITS' } })
+    expect(onChange).toHaveBeenCalledWith({ badge_style: 'text', scenes: { post: { enabled: true, text: 'POST CREDITS' } } })
   })
 
   it('keeps rows with a priority in priority order, moving a changed row once its field loses focus', () => {

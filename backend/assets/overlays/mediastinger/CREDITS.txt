@@ -1,0 +1,5 @@
+icon/: Kometa's default Mediastinger overlay image (github.com/Kometa-Team/Kometa, defaults/overlays/images),
+created by Yozora, Bullmoose20 and Sohjiro, as it is. Kometa is MIT licensed: see ../LICENSE-Kometa.txt.
+
+color/, color_plain/, white/ and white_plain/: made for PosterFlow by the project author, under the project's
+MIT license (LICENSE at the repo root).
