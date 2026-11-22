@@ -6,6 +6,21 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.5] - 2026-11-22
+### Added
+- Overlays: export overlays to a file and import them on another PosterFlow, images included.
+  - Pick one, some or all overlays to export or import.
+  - Imported overlays are added switched off.
+  - Library picks, on and off switches, and server or Arr instance names stay out of the file.
+
+### Changed
+- Overlays: a Custom overlay can hold up to 300 badges, up from 30.
+- Overlays: overlay settings no longer load with the general settings.
+
+### Fixed
+- Overlays: custom badges correctly match a show's network. Network is now its own condition, separate from Studio on servers that separate them.
+- Plex: a label or genre named with just a number no longer matches the wrong titles, in custom badge conditions and border rules.
+
 ## [0.19.4] - 2026-11-22
 ### Added
 - Overlays: a Custom overlay puts your own badges on movie, show and season posters, as an uploaded image or as text.
