@@ -230,7 +230,7 @@ def test_rules_names_are_compared_whole_or_in_part():
     rated = _ctx(content_rating="TV-MA")
     assert _holds("content_rating", "begins", "tv-", rated) and _holds("content_rating", "regex", "^(R|TV-MA)$", rated) and not _holds("content_rating", "contains", "pg", rated)
     described = {f["key"]: f for f in describe_fields()}
-    for key in ("label", "genre", "collection", "studio", "content_rating", "radarr_tag", "sonarr_tag", "tmdb_genre", "tmdb_keyword", "tmdb_network", "tmdb_company", "tmdb_collection"):
+    for key in ("label", "genre", "collection", "studio", "network", "content_rating", "radarr_tag", "sonarr_tag", "tmdb_genre", "tmdb_keyword", "tmdb_network", "tmdb_company", "tmdb_collection"):
         assert [o["value"] for o in described[key]["ops"]] == ["is", "is_not", "contains", "not_contains", "begins", "ends", "regex"], key
     for key in ("audio_language", "subtitle_language", "original_language", "country", "list"):
         assert [o["value"] for o in described[key]["ops"]] == ["is", "is_not"], key  # codes and addresses: the whole value only
@@ -551,6 +551,27 @@ def test_lookups_a_name_in_part_asks_for_the_names_that_fit():
     # Another library has names of its own.
     assert _holds("label", "contains", "kid", _ctx(owner_id="10", library_key="9", client=client, lookups=look))
     assert [a for a in client.asked if a[0] == "names"] == [("names", "label", "1"), ("names", "label", "9")]
+
+
+def test_a_network_is_a_shows_asked_for_by_name_and_never_a_movies():
+    client = LookupClient()
+    client.names["network"] = ["HBO", "HBO Max", "Paramount+"]
+    client.carriers.update({("network", "hbo"): ["10"], ("network", "hbo max"): ["11"]})
+    look = Lookups(None)
+    ten, eleven = (_ctx("show", owner_id=i, rel_path=f"srv|{i}", client=client, lookups=look) for i in ("10", "11"))
+    assert _holds("network", "is", "HBO", ten) and not _holds("network", "is", "HBO", eleven) and _holds("network", "is_not", "HBO", eleven)
+    assert client.asked == [("network", "HBO", "1")]  # the server is asked for the name as it is: no list of names first
+    assert _holds("network", "contains", "hbo", eleven) and _holds("network", "begins", "hbo", ten) and not _holds("network", "contains", "paramount", ten)
+    assert _holds("network", "is", "HBO", _ctx("show", season_number=2, owner_id="10", rel_path="srv|10/s2", client=client, lookups=look))  # a season, by its show
+    # A movie is on no network: nothing is asked, whatever the comparison.
+    client.asked.clear()
+    movie = _ctx(owner_id="10", client=client, lookups=look)
+    assert not _holds("network", "is", "HBO", movie) and not _holds("network", "contains", "hbo", movie) and _holds("network", "is_not", "HBO", movie)
+    assert client.asked == []
+    # A network picked for one server is that server's.
+    named = {"field": "network", "op": "is", "value": "HBO", "instance": "other"}
+    assert normalize_rules([named]) == [named] and not rule_holds(named, ten, {}, TODAY)
+    assert next(f for f in describe_fields() if f["key"] == "network")["label"] == "Network" and next(f for f in describe_fields() if f["key"] == "studio")["label"] == "Studio"
 
 
 def test_a_studio_is_asked_for_by_the_spelling_the_library_has():
@@ -895,7 +916,7 @@ def test_api_rule_values_take_the_libraries_and_the_search(client, monkeypatch):
     assert client.get("/api/overlays/rule-values/title").status_code == 404
     # What the catalog says can be picked: listed, or searched as you type.
     assert {f["key"]: f["suggest"] for f in describe_fields() if f["suggest"]} == {
-        "label": "list", "genre": "list", "collection": "list", "studio": "list", "content_rating": "list", "radarr_tag": "list", "sonarr_tag": "list",
+        "label": "list", "genre": "list", "collection": "list", "studio": "list", "network": "list", "content_rating": "list", "radarr_tag": "list", "sonarr_tag": "list",
         "edition": "list", "audio_language": "list", "subtitle_language": "list", "tmdb_genre": "list", "tmdb_keyword": "search", "original_language": "list",
         "country": "list", "tmdb_company": "search", "tmdb_collection": "search"}
 

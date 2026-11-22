@@ -56,7 +56,7 @@ _RANK = ("lte", "gt")  # a chart: in its top N, or not
 _RANK_LABELS = {"lte": "is in the top", "gt": "is not in the top"}
 
 ARR_TAG_FIELDS = {"radarr_tag": "radarr", "sonarr_tag": "sonarr"}  # the field → the Arr it asks
-SERVER_FIELDS = ("label", "genre", "collection", "studio", "content_rating", "edition")  # what a media server holds
+SERVER_FIELDS = ("label", "genre", "collection", "studio", "network", "content_rating", "edition")  # what a media server holds
 MDBLIST = re.compile(r"^https://mdblist\.com/lists/[\w.~-]+(/[\w.~-]+){1,2}$")
 
 _HDR = [("any", "Any HDR"), ("dv", "Dolby Vision"), ("plus", "HDR10+"), ("hlg", "HLG")]
@@ -122,7 +122,9 @@ FIELD_LIST: List[Field] = [
           help="A Plex label or a Jellyfin tag on the movie or show. The number beside a Plex label is how many movies and shows carry it."),
     Field("genre", "Genre", G_SERVER, "tag", _TAG, suggest="list", help="A genre as your media server names it."),
     Field("collection", "Collection", G_SERVER, "tag", _TAG, suggest="list", help="The name of a collection the movie or show is in."),
-    Field("studio", "Studio or network", G_SERVER, "tag", _TAG, suggest="list", help="The studio of a movie or the network of a show, as your media server names it."),
+    Field("studio", "Studio", G_SERVER, "tag", _TAG, suggest="list", help="The studio of a movie or show, as your media server names it. For the network a show is on, use Network."),
+    Field("network", "Network", G_SERVER, "tag", _TAG, suggest="list",
+          help="The network a show is on, as your media server names it. Jellyfin keeps a show's networks among its studios. Shows only."),
     Field("content_rating", "Content rating", G_SERVER, "text", _TAG, suggest="list", placeholder="R, TV-MA", help="The age rating as your media server shows it."),
     Field("audience_rating", "Audience rating", G_SERVER, "number", _RANGE, step=0.1, help="The audience score your media server holds, 0 to 10."),
     Field("critic_rating", "Critic rating", G_SERVER, "number", _RANGE, step=0.1, help="The critic score your media server holds, 0 to 10."),
@@ -406,7 +408,9 @@ def _holds(spec: Field, op: str, value: Any, ctx: ItemContext, meta: Dict[str, A
             ctx.lookups.check_server(instance)  # warns when that server is gone
         return False  # another server's label (genre, rating...): this poster is not on that server
     fits = None if op == "is" else (lambda name: _text_hit(op, str(value), [name]))  # a name compared in part
-    if key in ("label", "genre", "collection", "studio"):
+    if key == "network" and ctx.media_type == MEDIA_MOVIE:
+        return False  # only a show is on a network
+    if key in ("label", "genre", "collection", "studio", "network"):
         if fits is None and key == "studio":  # a server asks for a studio by its exact spelling: found among the library's names
             whole = str(value).strip().casefold()
             fits = lambda name: name.strip().casefold() == whole  # noqa: E731

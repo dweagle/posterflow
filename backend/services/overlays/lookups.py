@@ -37,7 +37,7 @@ LIST_TTL_SECONDS = 6 * 3600
 SERVER_VALUES_TTL_SECONDS = 60
 TMDB_VALUES_TTL_SECONDS = 24 * 3600
 TMDB_SEARCH_TTL_SECONDS = 5 * 60
-SERVER_VALUE_FIELDS = ("label", "genre", "collection", "studio", "content_rating", "edition")
+SERVER_VALUE_FIELDS = ("label", "genre", "collection", "studio", "network", "content_rating", "edition")
 TMDB = "TMDB"
 CHART_TTL_SECONDS = 6 * 3600
 CHART_DEPTH = 500  # how far down a TMDB chart is read at most
@@ -204,7 +204,7 @@ def arr_tag_choices(db: Session, kind: str, reader: Optional[Callable[[str], Lis
 
 def server_values(db: Session, field: str, libraries: List[str], connect: Optional[Callable[[Dict[str, Any]], Any]] = None) -> Dict[str, Any]:
     """What these libraries ("instance:key") hold of a field, server by server: their labels,
-    genres, studios, content ratings, editions or collection names. {values: [{value, instance,
+    genres, studios, networks, content ratings, editions or collection names. {values: [{value, instance,
     label, note}], unreachable: [servers]}. One entry per value per server, the libraries of a
     server together. The note is the server, and for a label how many movies and shows carry it
     where the server counts them (Plex)."""

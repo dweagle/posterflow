@@ -2,11 +2,12 @@
 
 import io
 import json
+import re
 import traceback
 from urllib.parse import quote
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from core.logging import LogTags, log_error, log_user_action
 from models.job import JOB_TYPE_OVERLAYS, create_job, format_start_message
 from models.setting import get_setting_value
 from modules.overlays import run_overlays_background_job
+from services.overlays import images as overlay_images, sharing
 from services.overlays.base import normalize_placement
 from services.overlays.config import SETTING_TMDB_API_KEY, load_config, save_config
 from services.overlays.lookups import rule_values
@@ -129,8 +131,8 @@ def list_overlay_fonts() -> Dict[str, List[dict]]:
     return {"fonts": [{**f, "weights": _font_weights(f["id"])} for f in list_fonts()]}
 
 
-_IMAGE_MAX_BYTES = 5 * 1024 * 1024
-_IMAGE_MAX_SIDE = 2000
+_IMAGE_MAX_BYTES = overlay_images.MAX_UPLOAD_BYTES
+_IMAGE_MAX_SIDE = overlay_images.MAX_UPLOAD_SIDE
 
 
 def _read_upload(file: UploadFile):
@@ -170,6 +172,73 @@ def get_custom_badge(image_id: str) -> Response:
     if path is None:
         raise HTTPException(status_code=404, detail="No image with this id")
     return FileResponse(str(path), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+def _app_version() -> str:
+    try:
+        from main import get_app_version
+
+        return str(get_app_version() or "")
+    except Exception:
+        return ""
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
+
+
+@router.get("/export/options")
+def overlay_export_options() -> Dict[str, Any]:
+    """What an export can carry beside the overlays: per type, how many images the user replaced."""
+    return {"images": sharing.replaced_counts()}
+
+
+@router.get("/export")
+def export_overlays(overlays: str = "", images: str = "", db: Session = Depends(get_db)) -> Response:
+    """The saved overlays named ("type:index", comma separated) as one zip, with their images.
+    `images` names the types whose replaced images go along."""
+    picks = []
+    for part in overlays.split(","):
+        key, _, index = part.strip().rpartition(":")
+        if key and index.isdigit():
+            picks.append((key, int(index)))
+    try:
+        data, names = sharing.build_export(load_config(db), picks, [t.strip() for t in images.split(",") if t.strip()], app=_app_version())
+    except sharing.ExportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    filename = f"posterflow-overlay-{_slug(names[0]) or 'export'}.zip" if len(names) == 1 else f"posterflow-overlays-{len(names)}.zip"
+    log_user_action(f"Exported {len(names)} overlay{'s' if len(names) != 1 else ''} ({', '.join(names[:5])}{', ...' if len(names) > 5 else ''})")
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"})
+
+
+def _open_import(file: UploadFile) -> sharing.OverlayImport:
+    try:
+        return sharing.open_import(file.file)
+    except sharing.ExportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/import/read")
+def read_overlay_import(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """What an export holds, for the page to offer. Nothing is stored. A plain def: the file is
+    read in the threadpool."""
+    with _open_import(file) as found:
+        return {"file": file.filename or "", **found.describe()}
+
+
+@router.post("/import")
+def import_overlays(file: UploadFile = File(...), overlays: str = Form(""), images: str = Form("")) -> Dict[str, Any]:
+    """Bring in the overlays picked from an export (their index in the file, comma separated) and
+    the images of the types named. The overlays come back switched off for the page to add: they
+    are saved with the page. The images are stored now."""
+    picks = [int(part) for part in overlays.split(",") if part.strip().isdigit()]
+    with _open_import(file) as found:
+        result = found.take(picks, [t.strip() for t in images.split(",") if t.strip()])
+    count, stored = len(result["overlays"]), sum(result["images"].values())
+    log_user_action(f"Imported {count} overlay{'s' if count != 1 else ''} from {file.filename or 'a file'}"
+                    + (f", with {stored} image{'s' if stored != 1 else ''} for {', '.join(result['images'])}" if stored else ""))
+    return {"success": True, **result}
 
 
 def _image_type(type_key: str):

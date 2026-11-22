@@ -1,4 +1,4 @@
-import client, { deleteData, getData, postData } from './http'
+import client, { deleteData, downloadFile, getData, postData } from './http'
 import type { PlexLibraryConfig } from './client'
 
 // 'images' = the uploader for a type's PNG badges (file state, not an option value).
@@ -377,3 +377,63 @@ export interface OverlayRuleValue {
 // that fit `q`. `unreachable` names the sources that did not answer.
 export const getRuleValues = async (field: string, ask: { libraries?: string[]; q?: string } = {}): Promise<{ field: string; values: OverlayRuleValue[]; unreachable: string[] }> =>
   getData(`/api/overlays/rule-values/${encodeURIComponent(field)}`, { params: { ...(ask.libraries?.length ? { libraries: ask.libraries.join(',') } : {}), ...(ask.q ? { q: ask.q } : {}) } })
+
+// ── sharing overlays: an export is one zip that another Posterflow reads back ──
+
+// What can go along with the overlays: per type, how many of its images the user replaced.
+export const getOverlayExportOptions = async (): Promise<{ images: Record<string, number> }> => getData('/api/overlays/export/options')
+
+// Download the saved overlays picked (their place in the settings), with the replaced images of `imageTypes`.
+export const exportOverlays = async (picks: { type: string; index: number }[], imageTypes: string[] = []): Promise<void> => {
+  const params = new URLSearchParams({ overlays: picks.map((p) => `${p.type}:${p.index}`).join(',') })
+  if (imageTypes.length) params.set('images', imageTypes.join(','))
+  await downloadFile(`/api/overlays/export?${params.toString()}`, { fallbackName: 'posterflow-overlays.zip' })
+}
+
+export interface OverlayImportItem {
+  index: number  // its place in the file
+  type: string
+  type_label: string
+  name: string
+  badges: number | null  // a custom overlay's badges; null for the other types
+  images: number
+  missing_images: number
+  notes: string[]
+}
+
+// A built-in type's replaced images that the file carries; `replaces` = how many the user also replaced here.
+export interface OverlayImportImages {
+  type: string
+  label: string
+  noun: string
+  count: number
+  replaces: number
+}
+
+export interface OverlayImportContents {
+  file: string
+  overlays: OverlayImportItem[]
+  images: OverlayImportImages[]
+  unknown: number  // overlays this version cannot read (a type it does not have)
+}
+
+export interface OverlayImportResult {
+  success: boolean
+  overlays: { type: string; overlay: OverlayDefinition }[]
+  images: Record<string, number>
+}
+
+const fileForm = (file: File, fields: Record<string, string> = {}) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  Object.entries(fields).forEach(([key, value]) => formData.append(key, value))
+  return formData
+}
+
+// What a file holds. Nothing is stored.
+export const readOverlayImport = async (file: File): Promise<OverlayImportContents> =>
+  postData('/api/overlays/import/read', fileForm(file), { headers: { 'Content-Type': 'multipart/form-data' } })
+
+// The overlays picked come back switched off, for the page to add and save. The images of `imageTypes` are stored at once.
+export const importOverlays = async (file: File, picks: number[], imageTypes: string[] = []): Promise<OverlayImportResult> =>
+  postData('/api/overlays/import', fileForm(file, { overlays: picks.join(','), images: imageTypes.join(',') }), { headers: { 'Content-Type': 'multipart/form-data' } })

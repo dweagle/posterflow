@@ -87,8 +87,8 @@ class MediaServerClient(ABC):
     def find_by_field(
         self, field: str, value: str, library_key: str, include_collections: bool = True
     ) -> List[MediaServerItem]:
-        """Items in a library carrying a label/tag ("label"), genre ("genre") or studio
-        ("studio", a show's network); optionally also collections carrying it (border rules)."""
+        """Items in a library carrying a label/tag ("label"), genre ("genre"), studio ("studio")
+        or, for shows, network ("network"); optionally also collections carrying it (border rules)."""
         ...
 
     @abstractmethod
@@ -132,8 +132,8 @@ class MediaServerClient(ABC):
         ...
 
     def field_values(self, field: str, library_key: str) -> List[str]:
-        """The values a library has to pick from for "label", "genre", "studio", "content_rating"
-        or "edition"; empty where the server has no such list."""
+        """The values a library has to pick from for "label", "genre", "studio", "network",
+        "content_rating" or "edition"; empty where the server has no such list."""
         return []
 
     def collected_item_ids(self, library_key: str) -> Optional[Set[str]]:

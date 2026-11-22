@@ -299,11 +299,11 @@
   overflow: hidden;
 }
 
-/* Preview-state select, then the buttons as equal columns (sized by the widest label), one row. */
+/* Export, Import and Reset at their own width, then Save and Cancel as equal columns, one row. */
 .overlays-editor-actions {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: max-content;
+  grid-template-columns: repeat(3, max-content);
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   align-items: center;
@@ -1821,4 +1821,102 @@
   .overlay-rules-table td.overlay-rule-value-cell {
     max-width: none;
   }
+}
+
+/* The export and import dialogs: overlays to pick, grouped by type. */
+.overlay-share-lead {
+  margin: 0 0 var(--sp-12);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.overlay-share-lead strong {
+  display: block;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.overlay-share-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-12);
+}
+
+.overlays-page .overlay-share-tools .btn-toolbar {
+  flex: none;
+  min-width: 0;
+}
+
+.overlay-share-count {
+  margin-left: auto;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+.overlay-share-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  min-width: 0;
+  margin: 0 0 var(--sp-12);
+  padding: var(--sp-8) var(--sp-12) var(--sp-12);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.overlay-share-group legend {
+  padding: 0 var(--sp-6);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.overlay-share-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.overlay-share-item {
+  min-width: 0;
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+}
+
+.overlay-share-item span {
+  overflow-wrap: anywhere;
+}
+
+.overlay-share-item small {
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.overlay-share-images {
+  margin-top: var(--sp-4);
+}
+
+.overlay-share-note {
+  margin: 0;
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+}
+
+/* Under an entry: lined up with its name, past the checkbox. */
+.overlay-share-entry .overlay-share-note {
+  padding-left: calc(16px + var(--sp-8));
+}
+
+.overlay-share-note.warn {
+  color: var(--color-warning);
+}
+
+.overlay-share-error {
+  margin: var(--sp-8) 0 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
 }

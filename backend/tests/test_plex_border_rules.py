@@ -1,6 +1,7 @@
 import itertools
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from xml.etree.ElementTree import Element
 
 from PIL import Image
@@ -204,9 +205,15 @@ class _FakeSection:
         # (field, value) -> [collections] carrying that label/genre (server-side filter).
         self._collection_results = collection_results or {}
 
+    def listFilterChoices(self, field, libtype=None):
+        # Like Plex: a choice per label or genre there is, for items and for collections apart.
+        results = self._collection_results if libtype == "collection" else self._results
+        return [SimpleNamespace(key=f"id-{value}", title=value) for (f, value) in results if f == field]
+
     def search(self, **kwargs):
         # one page holds every row; the paging arguments of a listing are not modelled
-        kwargs = {k: v for k, v in kwargs.items() if k not in ("includeGuids", "container_start", "container_size", "maxresults")}
+        kwargs = {k: v.title if isinstance(v, SimpleNamespace) else v  # a filter choice, as the client passes it
+                  for k, v in kwargs.items() if k not in ("includeGuids", "container_start", "container_size", "maxresults")}
         if kwargs.get("libtype") == "collection":
             rest = {k: v for k, v in kwargs.items() if k != "libtype"}
             if not rest:
@@ -440,6 +447,9 @@ def test_build_plex_matcher_query_error_with_except_rule_returns_none(test_db, m
     class _BoomSection(_FakeSection):
         def search(self, **kwargs):
             raise RuntimeError("query boom")
+
+        def listFilterChoices(self, field, libtype=None):  # the names are a request too
+            raise RuntimeError("query boom")
     _patch_plex(monkeypatch, {"http://plex": [_BoomSection("1", "movie", results={})]})
     _add_rule_settings(test_db, mode="except")
     assert build_plex_matcher(test_db, "manual") is None
@@ -450,6 +460,9 @@ def test_build_plex_matcher_query_error_include_rule_still_runs(test_db, monkeyp
     matcher (the item just misses its border until the next clean run)."""
     class _BoomSection(_FakeSection):
         def search(self, **kwargs):
+            raise RuntimeError("query boom")
+
+        def listFilterChoices(self, field, libtype=None):  # the names are a request too
             raise RuntimeError("query boom")
     _patch_plex(monkeypatch, {"http://plex": [_BoomSection("1", "movie", results={})]})
     _add_rule_settings(test_db, mode="include")

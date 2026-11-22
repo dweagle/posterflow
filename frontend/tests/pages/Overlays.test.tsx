@@ -13,6 +13,10 @@ const mockSaveOverlaysConfig = vi.fn()
 const mockGetOverlayFonts = vi.fn()
 const mockFetchOverlayPreview = vi.fn()
 const mockRunOverlays = vi.fn()
+const mockReadOverlayImport = vi.fn()
+const mockImportOverlays = vi.fn()
+const mockExportOverlays = vi.fn()
+const mockGetOverlayExportOptions = vi.fn()
 const mockRunTool = vi.fn()
 const mockGetTools = vi.fn()
 
@@ -41,6 +45,10 @@ vi.mock('../../src/api/overlays', async () => {
     getOverlayFonts: (...args: unknown[]) => mockGetOverlayFonts(...args),
     fetchOverlayPreview: (...args: unknown[]) => mockFetchOverlayPreview(...args),
     runOverlays: (...args: unknown[]) => mockRunOverlays(...args),
+    readOverlayImport: (...args: unknown[]) => mockReadOverlayImport(...args),
+    importOverlays: (...args: unknown[]) => mockImportOverlays(...args),
+    exportOverlays: (...args: unknown[]) => mockExportOverlays(...args),
+    getOverlayExportOptions: (...args: unknown[]) => mockGetOverlayExportOptions(...args),
   }
 })
 
@@ -171,6 +179,8 @@ describe('Overlays', () => {
     mockGetJob.mockResolvedValue({ id: 7, status: 'completed', message: 'Overlays complete: 3 restored', error: null })
     mockFetchOverlayPreview.mockResolvedValue({ blob: new Blob(['x']), rect: { x: 300, y: 35, w: 400, h: 80 }, text: 'AIRING' })
     mockRunOverlays.mockResolvedValue({ success: true, job_id: 7, message: 'queued' })
+    mockGetOverlayExportOptions.mockResolvedValue({ images: {} })
+    mockExportOverlays.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -1003,6 +1013,78 @@ describe('Overlays', () => {
       // The overlay for the TV library sees the all-libraries ones beside it.
       await user.click(within(screen.getByRole('tablist', { name: 'Custom overlays' })).getByRole('tab', { name: 'TV only' }))
       await waitFor(() => expect(others().map((o: { id?: string }) => o.id)).toEqual([undefined, 'custom:0', 'custom:1']))
+    })
+  })
+
+  describe('export and import', () => {
+    const exportButton = () => screen.getByRole('button', { name: 'Export' }) as HTMLButtonElement
+    const importFile = (file: File) => fireEvent.change(screen.getByLabelText('Overlay file to import'), { target: { files: [file] } })
+    const zip = new File(['zip'], 'shared.zip', { type: 'application/zip' })
+    const imported = (name: string) => ({ name, enabled: false, all_libraries: true, libraries: [], placement: { ...placement }, options: JSON.parse(JSON.stringify(statusType.default_options)) })
+
+    it('exports the saved settings: the buttons sit before Reset to Defaults and Export waits for a save', async () => {
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByRole('heading', { level: 2, name: 'Airing Status' })
+      const actions = screen.getByRole('button', { name: /Reset to Defaults/ }).parentElement as HTMLElement
+      expect(within(actions).getAllByRole('button').slice(0, 3).map((b) => b.textContent?.trim())).toEqual(['Export', 'Import', 'Reset to Defaults'])
+
+      await user.click(exportButton())
+      const dialog = await screen.findByRole('dialog', { name: 'Export Overlays' })
+      expect((within(dialog).getByRole('checkbox', { name: /^Airing Status/ }) as HTMLInputElement).checked).toBe(true)  // the overlay being edited
+      await user.click(within(dialog).getByRole('button', { name: 'Export 1 Overlay' }))
+      await waitFor(() => expect(mockExportOverlays).toHaveBeenCalledWith([{ type: 'status', index: 0 }], []))
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Export Overlays' })).toBeNull())
+      expect(mockShowToast).toHaveBeenCalledWith('1 overlay exported', 'success')
+
+      await user.click(screen.getByLabelText('Overlays are OFF'))
+      expect(exportButton().disabled).toBe(true)
+      expect(exportButton().title).toBe('Save first. An export is made from the saved settings.')
+    })
+
+    it('adds imported overlays as new tabs, switched off and unsaved', async () => {
+      const user = userEvent.setup()
+      mockReadOverlayImport.mockResolvedValue({ file: 'shared.zip', unknown: 0, images: [], overlays: [
+        { index: 0, type: 'status', type_label: 'Airing Status', name: 'Airing Status', badges: null, images: 0, missing_images: 0, notes: [] },
+        { index: 1, type: 'status', type_label: 'Airing Status', name: 'Theirs', badges: null, images: 0, missing_images: 0, notes: ['The font Fancy is not installed here. The default font is drawn.'] },
+      ] })
+      mockImportOverlays.mockResolvedValue({ success: true, images: {}, overlays: [{ type: 'status', overlay: imported('Airing Status') }, { type: 'status', overlay: imported('Theirs') }, { type: 'gone', overlay: imported('Unknown') }] })
+      renderPage()
+      await screen.findByRole('heading', { level: 2, name: 'Airing Status' })
+
+      importFile(zip)
+      const dialog = await screen.findByRole('dialog', { name: 'Import Overlays' })
+      expect(mockReadOverlayImport).toHaveBeenCalledWith(zip)
+      expect(within(dialog).getByText(/The font Fancy is not installed here/)).toBeTruthy()
+      await user.click(within(dialog).getByRole('button', { name: 'Import 2 Overlays' }))
+      await waitFor(() => expect(mockImportOverlays).toHaveBeenCalledWith(zip, [0, 1], []))
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Import Overlays' })).toBeNull())
+
+      // A name already taken gets a number; the first imported overlay is the one shown.
+      const tabs = within(screen.getByRole('tablist', { name: 'Airing Status overlays' }))
+      expect(tabs.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Airing Status', 'Airing Status (2)', 'Theirs'])
+      expect(tabs.getByRole('tab', { name: 'Airing Status (2)' }).getAttribute('aria-selected')).toBe('true')
+      expect(screen.getByLabelText('Airing Status (2) off')).toBeTruthy()
+      expect(screen.getByLabelText('Theirs off')).toBeTruthy()
+      expect(mockShowToast).toHaveBeenCalledWith('2 overlays imported, switched off and not saved yet', 'success')
+      expect(exportButton().disabled).toBe(true)  // unsaved now
+
+      await user.click(screen.getAllByRole('button', { name: /^Save$/ })[0])
+      await waitFor(() => expect(mockSaveOverlaysConfig).toHaveBeenCalledTimes(1))
+      const saved = mockSaveOverlaysConfig.mock.calls[0][0].types.status.overlays
+      expect(saved.map((o: { name: string; enabled: boolean }) => [o.name, o.enabled])).toEqual([['Airing Status', true], ['Airing Status (2)', false], ['Theirs', false]])
+    })
+
+    it('says so when a file cannot be read or holds nothing to import', async () => {
+      mockReadOverlayImport.mockRejectedValueOnce(new Error('bad'))
+      renderPage()
+      await screen.findByRole('heading', { level: 2, name: 'Airing Status' })
+      importFile(zip)
+      await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('api error', 'error'))
+      mockReadOverlayImport.mockResolvedValueOnce({ file: 'shared.zip', unknown: 2, images: [], overlays: [] })
+      importFile(zip)
+      await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('That file holds nothing this version can import', 'error'))
+      expect(screen.queryByRole('dialog', { name: 'Import Overlays' })).toBeNull()
     })
   })
 })

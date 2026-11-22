@@ -414,28 +414,40 @@ class PlexClient(MediaServerClient):
     def find_by_field(
         self, field: str, value: str, library_key: str, include_collections: bool = True
     ) -> List[MediaServerItem]:
-        if field not in ("label", "genre", "studio"):
+        if field not in ("label", "genre", "studio", "network"):
             return []
         section = self._find_section(library_key)
-        if section is None:
+        if section is None or (field == "network" and str(section.type) != "show"):  # a movie library has no network filter
             return []
         # A plain studio filter matches the letters anywhere ("HBO" finds "Bohbot"): ask for the exact name, by case too.
-        filters = {"studio__exact" if field == "studio" else field: value}
+        filters = {"studio__exact": value} if field == "studio" else self._tag_filter(section, field, value)
         # Listing rows (no labels, no show paths): a full parse costs one request per item
-        items = [self._parse_item(row, section, bulk=True) for row in self._iter_listing(section, **filters)]
-        if include_collections:
+        items = [self._parse_item(row, section, bulk=True) for row in self._iter_listing(section, **filters)] if filters else []
+        if include_collections and field != "network":
             # Plex keeps collection labels/genres in their own namespace
             try:
-                items.extend(
-                    self._parse_item(row, section, bulk=True)
-                    for row in self._iter_listing(section, libtype="collection", **filters)
-                )
+                filters = filters if field == "studio" else self._tag_filter(section, field, value, "collection")
+                if filters:
+                    items.extend(
+                        self._parse_item(row, section, bulk=True)
+                        for row in self._iter_listing(section, libtype="collection", **filters)
+                    )
             except Exception:
                 pass  # some fields aren't filterable on collections; skip if unsupported
         return items
 
+    @staticmethod
+    def _tag_filter(section: Any, field: str, value: str, libtype: Optional[str] = None) -> Dict[str, Any]:
+        """The filter for a label, genre or network of this NAME, or {} when the library has none
+        of that name. Given a bare number, Plex takes it for a tag's id and answers with whatever
+        carries that tag."""
+        wanted = str(value).strip().casefold()
+        choice = next((c for c in section.listFilterChoices(field, libtype) if str(getattr(c, "title", "") or "").strip().casefold() == wanted), None)
+        return {field: choice} if choice is not None else {}
+
     # What Plex calls each filter; the first name a library knows is asked.
-    _VALUE_FILTERS = {"label": ("label",), "genre": ("genre",), "studio": ("studio",), "content_rating": ("contentRating",), "edition": ("edition", "editionTitle")}
+    _VALUE_FILTERS = {"label": ("label",), "genre": ("genre",), "studio": ("studio",), "network": ("network",), "content_rating": ("contentRating",),
+                      "edition": ("edition", "editionTitle")}
 
     def field_values(self, field: str, library_key: str) -> List[str]:
         from plexapi.exceptions import BadRequest, NotFound

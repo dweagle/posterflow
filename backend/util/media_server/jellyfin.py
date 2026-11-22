@@ -300,7 +300,9 @@ class JellyfinClient(MediaServerClient):
         rows = self._items_page(params)
         return [self._parse_item(row) for row in rows]
 
-    FIELD_PARAMS = {"label": "tags", "genre": "genres", "studio": "studios"}  # all three seen working on 12.0
+    FIELD_PARAMS = {"label": "tags", "genre": "genres", "studio": "studios", "network": "studios"}  # all three seen working on 12.0
+    # A series has no network field: its networks sit among its studios (seen on 12.0), so a network is a series' studio.
+    NETWORK_TYPES = "Series"
 
     def find_by_field(
         self, field: str, value: str, library_key: str, include_collections: bool = True
@@ -314,13 +316,13 @@ class JellyfinClient(MediaServerClient):
             {
                 "parentId": local_id,
                 "recursive": "true",
-                "includeItemTypes": "Movie,Series",
+                "includeItemTypes": self.NETWORK_TYPES if field == "network" else "Movie,Series",
                 param: value,
                 "fields": ITEM_FIELDS,
             }
         )
         items = [self._parse_item(row, library_key=global_key) for row in rows]
-        if include_collections:
+        if include_collections and field != "network":
             # Box sets are server-global, not per-library
             box_rows = self._items_page(
                 {"recursive": "true", "includeItemTypes": "BoxSet", param: value, "fields": ITEM_FIELDS}
@@ -338,8 +340,8 @@ class JellyfinClient(MediaServerClient):
     def field_values(self, field: str, library_key: str) -> List[str]:
         # Movies and series only: a show library otherwise lists what only its episodes carry
         # (their genres), which no show would ever match (seen on 12.0).
-        scope = {"parentId": self._local_library_id(library_key), "includeItemTypes": "Movie,Series"}
-        if field in ("genre", "studio"):
+        scope = {"parentId": self._local_library_id(library_key), "includeItemTypes": self.NETWORK_TYPES if field == "network" else "Movie,Series"}
+        if field in ("genre", "studio", "network"):
             data = self._request("GET", "/Genres" if field == "genre" else "/Studios", params={**scope, "enableImages": "false", "enableUserData": "false"})
             return [str(row["Name"]) for row in (data.get("Items") or [] if isinstance(data, dict) else []) if isinstance(row, dict) and row.get("Name")]
         if field in ("label", "content_rating"):

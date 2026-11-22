@@ -29,6 +29,9 @@ STYLES = [("plain", "Plain"), ("outline", "Outline"), ("soft", "Soft outline")]
 STYLE_KEYS = [s[0] for s in STYLES]
 _SOFTNESS = {"outline": 1.0, "soft": 3.0}
 _COLOR = re.compile(r"#[0-9a-fA-F]{6}")
+# What an image may be to come in, from an upload or from an overlay export.
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+MAX_UPLOAD_SIDE = 2000
 
 
 def config_overlays_dir() -> Path:

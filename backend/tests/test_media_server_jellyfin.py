@@ -271,6 +271,21 @@ def test_field_values_list_what_the_movies_and_series_of_a_library_carry(monkeyp
     assert client.field_values("edition", "lib1") == [] and client.field_values("bogus", "lib1") == []  # Jellyfin has no editions
     # Never the episodes: their genres are not a show's.
     assert asked == [("/Genres", "lib1", "Movie,Series"), ("/Studios", "lib1", "Movie,Series"), ("/Items/Filters", "lib1", "Movie,Series"), ("/Items/Filters", "lib1", "Movie,Series")]
+    # A series keeps its networks among its studios: the studios of the series alone.
+    asked.clear()
+    assert client.field_values("network", "lib1") == ["Action", "Drama"] and asked == [("/Studios", "lib1", "Series")]
+
+
+def test_find_by_field_reads_a_network_from_the_studios_of_series(monkeypatch):
+    seen = []
+
+    def items_handler(params, _data):
+        seen.append((params.get("studios"), params.get("parentId"), params.get("includeItemTypes")))
+        return {"Items": [{"Id": "s1", "Type": "Series", "Name": "Succession"}], "TotalRecordCount": 1}
+
+    client, _ = make_client(monkeypatch, {"/Items": items_handler})
+    assert [i.title for i in client.find_by_field("network", "HBO", "lib1")] == ["Succession"]
+    assert seen == [("HBO", "lib1", "Series")]  # series only, and no box sets: a collection is on no network
 
 
 def test_find_by_field_maps_studio_to_studios(monkeypatch):

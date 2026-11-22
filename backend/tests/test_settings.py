@@ -98,10 +98,11 @@ def test_get_settings_masks_sensitive_values(client, test_db):
 
 
 def test_get_settings_omits_internal_job_output(client, test_db):
-    """Stats and caches have their own routes; the settings fetch must not ship them."""
+    """Stats, caches and the overlay settings have their own routes; the settings fetch must not ship them."""
     test_db.add_all([
         Setting(key="poster_renamer_stats", value='{"total_matched": 1}'),
         Setting(key="maker_tools_monitor_status_cache", value="{}"),
+        Setting(key="overlays_config", value='{"enabled": true, "badge_server_posters": true}'),
         Setting(key="plex_url", value="http://localhost:32400"),
     ])
     test_db.commit()
@@ -109,7 +110,11 @@ def test_get_settings_omits_internal_job_output(client, test_db):
     data = client.get("/api/settings/").json()
     assert "poster_renamer_stats" not in data
     assert "maker_tools_monitor_status_cache" not in data
+    assert "overlays_config" not in data
     assert data["plex_url"] == "http://localhost:32400"
+    # The Overlays page still gets them from its own route.
+    overlays = client.get("/api/overlays/config").json()["config"]
+    assert overlays["enabled"] is True and overlays["badge_server_posters"] is True
 
 
 def test_save_bulk_with_masked_placeholder_preserves_original_secret(client, test_db):

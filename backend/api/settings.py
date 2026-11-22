@@ -180,8 +180,9 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "hidden_poster_styles",
 })
 
-# Job output and caches the UI reads through their own routes; they run to megabytes and never belong in a settings fetch
+# Job output, caches and the overlay settings: the UI reads them through their own routes, and they are too large for a settings fetch
 INTERNAL_SETTING_KEYS: frozenset[str] = frozenset({
+    "overlays_config",
     "poster_renamer_stats",
     "poster_renamer_last_output",
     "poster_unmatched_stats",
@@ -1050,7 +1051,7 @@ def test_apprise_notification(
 
 @router.get("/")
 def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
-    """Get all settings (sensitive values are masked, internal job output left out)"""
+    """Get all settings (sensitive values are masked; job output, caches and the overlay settings are left out)"""
     settings = db.query(Setting).filter(Setting.key.notin_(INTERNAL_SETTING_KEYS)).all()
     payload: Dict[str, str] = {}
     for setting in settings:

@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 from xml.etree.ElementTree import Element, SubElement
 
 from util.media_server.plex import NO_IMAGE_SELECTED, PlexClient, extract_provider_ids
@@ -42,15 +43,24 @@ class FakeSection:
         self.items = items or []
         self.collections_list = collections or []
         self.search_calls = []
+        self.choices = {}  # field → the names the library has, beside its labels
         for item in self.items:
             item._section = self
 
     def collections(self):
         return self.collections_list
 
+    def listFilterChoices(self, field, libtype=None):
+        # Like Plex: a choice per name there is, each with a key of its own (a tag's id).
+        rows = self.collections_list if libtype == "collection" else self.items
+        names = dict.fromkeys(lab.tag for row in rows for lab in getattr(row, "labels", [])) if field == "label" else self.choices.get(field, [])
+        return [SimpleNamespace(key=f"id-{name}", title=name) for name in names]
+
     def search(self, libtype=None, guid=None, title=None, label=None, container_start=0, maxresults=None, **kwargs):
+        named = lambda v: v.title if isinstance(v, SimpleNamespace) else v  # noqa: E731  (a filter choice, as the client passes it)
+        label, kwargs = named(label), {k: named(v) for k, v in kwargs.items()}
         self.search_calls.append({"libtype": libtype, "label": label, "container_start": container_start, "maxresults": maxresults,
-                                  **{k: v for k, v in kwargs.items() if k.startswith("studio")}})
+                                  **{k: v for k, v in kwargs.items() if k.startswith(("studio", "network"))}})
         if libtype == "collection":
             rows = list(self.collections_list)
         elif libtype == "season":
@@ -452,6 +462,34 @@ def test_find_by_field_reads_listing_rows():
     section.search_calls.clear()
     client.find_by_field("studio", "HBO", "1", include_collections=False)
     assert section.search_calls == [{"libtype": None, "label": None, "container_start": 0, "maxresults": 500, "studio__exact": "HBO"}]
+    # A network is a show's: a show library is asked for it by name, a movie library is not asked at all.
+    section.search_calls.clear()
+    assert client.find_by_field("network", "HBO", "1", include_collections=False) == [] and section.search_calls == []
+    shows = FakeSection(2, "TV", "show", items=[FakeItem(ratingKey=201, type="show", title="Succession", labels=[])])
+    shows.choices["network"] = ["HBO", "Channel 4"]
+    client = make_client([shows])
+    assert [i.title for i in client.find_by_field("network", "hbo", "2")] == ["Succession"]
+    assert shows.search_calls == [{"libtype": None, "label": None, "container_start": 0, "maxresults": 500, "network": "HBO"}]  # no collections: none is on a network
+    # A name the library has not is not asked for: given a bare number, Plex would take it for a tag's id.
+    shows.search_calls.clear()
+    assert client.find_by_field("network", "5", "2") == [] and client.find_by_field("label", "2024", "2") == [] and shows.search_calls == []
+
+
+def test_field_values_lists_a_librarys_networks_and_nothing_where_plex_has_no_such_filter():
+    from plexapi.exceptions import NotFound
+
+    shows = FakeSection(2, "TV", "show")
+    asked = []
+    shows.listFilterChoices = lambda name: asked.append(name) or [SimpleNamespace(key="1", title="HBO"), SimpleNamespace(key="2", title="Netflix"), SimpleNamespace(key="3", title="")]
+    movies = FakeSection(1, "Movies", "movie")
+
+    def no_filter(name):
+        raise NotFound(f'Unknown filter field "{name}" for libtype "movie".')
+
+    movies.listFilterChoices = no_filter
+    client = make_client([movies, shows])
+    assert client.field_values("network", "2") == ["HBO", "Netflix"] and asked == ["network"]
+    assert client.field_values("network", "1") == [] and client.field_values("network", "99") == []
 
 
 def test_upload_image_posts_to_the_rating_key(tmp_path):

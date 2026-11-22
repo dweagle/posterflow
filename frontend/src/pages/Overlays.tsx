@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Maximize2, Minimize2, Play, Plus, Eraser, RefreshCw, RotateCcw, Trash2, Undo2, Weight } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Download, Maximize2, Minimize2, Play, Plus, Eraser, RefreshCw, RotateCcw, Trash2, Undo2, Upload, Weight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import Toolbar from '../components/Toolbar'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -7,6 +7,7 @@ import OverlayPreview from '../components/overlays/OverlayPreview'
 import PlacementControls from '../components/overlays/PlacementControls'
 import OptionFields, { InfoIcon, Toggle } from '../components/overlays/OptionFields'
 import ListPicker from '../components/overlays/ListPicker'
+import { OverlayExportDialog, OverlayImportDialog } from '../components/overlays/OverlaySharing'
 import LibrarySelectGrid from '../components/poster-manager/LibrarySelectGrid'
 import type { PlexLibraryConfig } from '../api/client'
 import { getApiErrorMessage, getJob } from '../api/client'
@@ -14,9 +15,12 @@ import {
   getOverlayFonts,
   getOverlayTypes,
   getOverlaysConfig,
+  readOverlayImport,
   runOverlays,
   saveOverlaysConfig,
   type OverlayFont,
+  type OverlayImportContents,
+  type OverlayImportResult,
   type OverlayPlacement,
   type OverlayDefinition,
   type OverlayBadgeRow,
@@ -97,6 +101,11 @@ function Overlays() {
   const [largePreview, setLargePreview] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [showServerResetConfirm, setShowServerResetConfirm] = useState(false)
+  const [showExport, setShowExport] = useState(false)
+  const [importing, setImporting] = useState<{ file: File; contents: OverlayImportContents } | null>(null)
+  const [readingImport, setReadingImport] = useState(false)
+  const [imagesEpoch, setImagesEpoch] = useState(0)  // bumped when an import replaced a type's images, so its image cards load again
+  const importInput = useRef<HTMLInputElement>(null)
   const [maintenanceRunning, setMaintenanceRunning] = useState(false)
   const [watchedJobs, setWatchedJobs] = useState<number[]>([])  // jobs started here that have not finished (a reset starts one per server type)
   const watchTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
@@ -292,6 +301,52 @@ function Overlays() {
     updateOverlay(current.key, { placement: { ...current.default_placement }, options: { ...current.default_options } })
     setShowResetConfirm(false)
     showToast(`${currentCfg?.name || current.label} reset to defaults (not saved yet)`, 'info')
+  }
+
+  const hasOverlays = config ? Object.values(config.types).some((t) => t.overlays.length > 0) : false
+  const handleImportFile = async (file?: File) => {
+    if (!file) return
+    setReadingImport(true)
+    try {
+      const contents = await readOverlayImport(file)
+      if (contents.overlays.length === 0 && contents.images.length === 0) showToast('That file holds nothing this version can import', 'error')
+      else setImporting({ file, contents })
+    } catch (err) {
+      showToast(getApiErrorMessage(err, 'That file could not be read'), 'error')
+    } finally {
+      setReadingImport(false)
+    }
+  }
+  // Imported overlays join the page switched off and are saved with the page, like added ones.
+  const addImported = (result: OverlayImportResult) => {
+    setImporting(null)
+    const added = result.overlays.filter((o) => config?.types[o.type])
+    const first = added[0]
+    if (first && config) {
+      setSelectedType(first.type)
+      setOverlayByType((prev) => ({ ...prev, [first.type]: config.types[first.type].overlays.length }))
+    }
+    setConfig((prev) => {
+      if (!prev) return prev
+      const next = { ...prev.types }
+      for (const { type, overlay } of added) {
+        const taken = new Set(next[type].overlays.map((o) => o.name))
+        let name = overlay.name
+        for (let n = 2; taken.has(name); n++) name = `${overlay.name.slice(0, 54)} (${n})`
+        next[type] = { ...next[type], overlays: [...next[type].overlays, { ...overlay, name }] }
+      }
+      return { ...prev, types: next }
+    })
+    const images = Object.values(result.images).reduce((sum, n) => sum + n, 0)
+    if (images > 0) {
+      setAssetVersion((v) => v + 1)
+      setImagesEpoch((v) => v + 1)
+    }
+    const said = [
+      ...(added.length ? [`${added.length} overlay${added.length === 1 ? '' : 's'} imported, switched off and not saved yet`] : []),
+      ...(images ? [`${images} image${images === 1 ? '' : 's'} stored`] : []),
+    ]
+    showToast(said.join('. ') || 'Nothing was imported', said.length ? 'success' : 'info')
   }
 
   const variants = useMemo(() => {
@@ -552,6 +607,26 @@ function Overlays() {
                   <span className="overlays-editor-desc">{current.description}</span>
                 </div>
                 <div className="overlays-editor-actions">
+                  <button
+                    type="button"
+                    className="btn-toolbar btn-toolbar-link"
+                    onClick={() => setShowExport(true)}
+                    disabled={hasUnsaved || !hasOverlays}
+                    title={hasUnsaved ? 'Save first. An export is made from the saved settings.' : hasOverlays ? 'Save overlays and their images as a file that another Posterflow can import' : 'There is no overlay to export yet'}
+                  >
+                    <Download size={14} /> Export
+                  </button>
+                  <button type="button" className="btn-toolbar btn-toolbar-link" onClick={() => importInput.current?.click()} disabled={readingImport} title="Add overlays from a file exported by Posterflow">
+                    <Upload size={14} /> Import
+                  </button>
+                  <input
+                    ref={importInput}
+                    type="file"
+                    accept=".zip,application/zip"
+                    aria-label="Overlay file to import"
+                    hidden
+                    onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; void handleImportFile(file) }}
+                  />
                   {currentCfg && (
                     <button type="button" className="btn-toolbar btn-toolbar-link" onClick={() => setShowResetConfirm(true)}>
                       <RotateCcw size={14} /> Reset to Defaults
@@ -690,9 +765,9 @@ function Overlays() {
                       : undefined}
                   />
                   {/* Keyed by type: a type's cards never start from another type's field state (a picked badge, a half-typed number). */}
-                  <OptionFields key={`own-${current.key}`} render="fields" part="own" textCardShown={textCardShown} cardsFirst={freeFirstRowSlots(hidden)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
+                  <OptionFields key={`own-${current.key}-${imagesEpoch}`} render="fields" part="own" textCardShown={textCardShown} cardsFirst={freeFirstRowSlots(hidden)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
                   <PlacementControls part="backdrop" placement={currentCfg.placement} fonts={fonts} hidden={hidden} lockedNote={placementLock} onChange={(patch) => updatePlacement(current.key, patch)} />
-                  <OptionFields key={`merged-${current.key}`} render="fields" part="merged" textCardShown={textCardShown} cardsFirst={freeFirstRowSlots(hidden)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
+                  <OptionFields key={`merged-${current.key}-${imagesEpoch}`} render="fields" part="merged" textCardShown={textCardShown} cardsFirst={freeFirstRowSlots(hidden)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
                 </div>
               </div>
               {current.schema.some((f) => f.kind === 'states' || f.kind === 'badges') && (
@@ -709,6 +784,17 @@ function Overlays() {
           )}
         </>
       )}
+
+      {showExport && config && (
+        <OverlayExportDialog
+          types={types}
+          config={config}
+          current={current && overlayIndex >= 0 ? { type: current.key, index: overlayIndex } : undefined}
+          onClose={() => setShowExport(false)}
+          onDone={(count) => { setShowExport(false); showToast(`${count} overlay${count === 1 ? '' : 's'} exported`, 'success') }}
+        />
+      )}
+      {importing && <OverlayImportDialog file={importing.file} contents={importing.contents} onClose={() => setImporting(null)} onImported={addImported} />}
 
       <ConfirmDialog
         isOpen={showServerResetConfirm}
