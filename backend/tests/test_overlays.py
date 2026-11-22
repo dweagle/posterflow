@@ -2944,6 +2944,92 @@ def test_bundled_resolution_and_audio_images_are_kometas_on_its_backdrop_box():
     assert resolution.IMAGES.drawn_height("_res-4k", "lettering", 0) == 0 and resolution.IMAGES.bundled_height("nope", "lettering") == 80
 
 
+class FlakyMediaClient(FakeClient):
+    """A server whose media details may not arrive: "quiet" = an empty answer from a request that
+    failed, which the client counts (Jellyfin's); "raise" = the read raises (Plex's)."""
+
+    def __init__(self):
+        super().__init__()
+        self.mode = ""
+        self.failed_requests = 0
+
+    def _gone(self):
+        if self.mode == "raise":
+            raise ConnectionError("no route")
+        if self.mode == "quiet":
+            self.failed_requests += 1
+        return self.mode == "quiet"
+
+    def library_media(self, library_key):
+        self.media_calls.append(("library", str(library_key)))
+        return {} if self._gone() else {k: list(v) for k, v in self.media.items()}
+
+    def item_media(self, item):
+        self.media_calls.append(("item", item.item_id))
+        return [] if self._gone() else list(self.media.get(item.item_id, []))
+
+
+def test_server_engine_leaves_badges_alone_when_the_media_details_do_not_arrive(test_db, isolated_overlay_files, monkeypatch):
+    """Read from no files, a resolution badge would say "no badge" and come off every poster: a
+    read that failed is no answer, so the posters keep what they have until the next run."""
+    warnings = []
+    monkeypatch.setattr(server_mod, "log_warning", lambda tag, message: warnings.append(message))
+    client = FlakyMediaClient()
+    for lib in list(client.items.values()) + list(client.seasons.values()):
+        for it in lib:
+            it.client = client
+    client.media = {"10": [_file("Film (2026) [Remux-2160p][DV HDR10][TrueHD Atmos 7.1].mkv", "4k", dovi=True, hdr=True)],
+                    "20": [_file(f"Live S01E{i:02d} [WEBDL-1080p][EAC3 5.1].mkv", "1080") for i in range(1, 4)]}
+    cfg = normalize_config({"enabled": True, "types": {"resolution": {"enabled": True}, "audio": {"enabled": True}}})
+    sources = _sources(isolated_overlay_files, 10, 20, 30)
+
+    def run():
+        engine = _engine(test_db, client, FakeMetadata({}), cfg, sources=sources)
+        stats = engine.run()
+        engine.flush()
+        return stats
+
+    first = run()
+    assert (first["applied"], first["no_badge"], first["unanswered"]) == (2, 1, 0) and len(client.uploads) == 2
+    before = dict(_state_items(test_db))
+    for mode in ("quiet", "raise"):
+        client.mode = mode
+        client.media_calls.clear()
+        warnings.clear()
+        stats = run()
+        # Nothing goes up and nothing is taken off: every item waits for an answer.
+        assert (stats["unanswered"], stats["applied"], stats["refreshed"], stats["restored"], stats["no_badge"]) == (3, 0, 0, 0, 0), mode
+        assert len(client.uploads) == 2 and _state_items(test_db) == before, mode
+        if mode == "quiet":  # the listing is all that is asked: no item is asked one by one after it
+            assert client.media_calls == [("library", "1"), ("library", "2")]
+            assert warnings == [f"srv: the media details of library {key} did not arrive (a request failed). Its items are left as they are this run." for key in ("1", "2")]
+        else:  # the listing raised: each item is asked for itself, and said once for the server
+            assert [c for c in client.media_calls if c[0] == "item"] == [("item", "10"), ("item", "20"), ("item", "30")]
+            assert len([w for w in warnings if "could not read the media details of Film" in w]) == 1
+            assert not any("could not read the media details of Live" in w for w in warnings)
+        # At upload time the badge is not called stale either.
+        engine = _engine(test_db, client, FakeMetadata({}), cfg, sources=sources)
+        assert engine.badge_stale("srv", client.get_item("10"), sources[("srv", "10")]) is False, mode
+    client.mode = ""
+    again = run()
+    assert (again["current"], again["no_badge"], again["unanswered"]) == (2, 1, 0) and len(client.uploads) == 2  # answered again: all as it was
+
+
+def test_an_upload_without_media_details_still_draws_the_badges_that_need_none(test_db, isolated_overlay_files):
+    client = FlakyMediaClient()
+    show = client.items["2"][1]
+    show.client = client
+    client.mode = "quiet"
+    cfg = normalize_config({"enabled": True, "types": {"status": {"enabled": True}, "resolution": {"enabled": True}}})
+    sources = _sources(isolated_overlay_files, 30)
+    engine = _engine(test_db, client, FakeMetadata({2: {"status": "Ended", "first_air_date": "2010-01-01"}}), cfg, sources=sources)
+    composite = engine.compose_for_upload("srv", show, sources[("srv", "30")])
+    assert composite and _has_badge(Path(composite).read_bytes())  # the status badge goes up with the new poster
+    client.upload_image(show, "poster", composite)
+    engine.record_upload("srv", show, True)
+    assert _state_items(test_db)["srv|30"]["sig"].startswith("status:") and "resolution:" not in _state_items(test_db)["srv|30"]["sig"]
+
+
 def test_server_engine_badges_resolution_and_audio_from_the_media_files(test_db, isolated_overlay_files):
     client = FakeClient()
     for lib in list(client.items.values()) + list(client.seasons.values()):

@@ -102,6 +102,8 @@ class ServerOverlayEngine:
         self._needs_tmdb = any("tmdb" in n for n in needs)
         self._needs_media = any("media" in n for n in needs)  # resolution / audio badges read the items' media files
         self._media: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}  # (instance, item id) → its media files, once looked up
+        self._media_unread: Set[Tuple[str, str]] = set()  # items whose media files the server did not give: what they would badge is unknown
+        self._media_warned: Set[str] = set()  # servers already warned about for an item's media read
         self.metadata = metadata or MetadataProvider(get_setting_value(db, SETTING_TMDB_API_KEY, "") if self._needs_tmdb else "", db=db,
                                                      finales=FinaleLookup.from_db(db) if self._needs_tmdb else None,
                                                      providers=any("providers" in n for n in needs),
@@ -201,8 +203,10 @@ class ServerOverlayEngine:
     def _snapshot(self) -> Dict[str, int]:
         return {k: self.stats[k] for k in self._COUNTED}
 
+    _COUNT_NAMES = {"unanswered": "left as they are"}  # how a count reads in a library's line, where its key says little
+
     def _delta_text(self, before: Dict[str, int]) -> str:
-        parts = [f"{self.stats[k] - before[k]} {k.replace('_', ' ')}" for k in self._COUNTED if self.stats[k] - before[k]]
+        parts = [f"{self.stats[k] - before[k]} {self._COUNT_NAMES.get(k, k.replace('_', ' '))}" for k in self._COUNTED if self.stats[k] - before[k]]
         return ", ".join(parts) or "nothing to do"
 
     def log_summary(self) -> None:
@@ -220,7 +224,7 @@ class ServerOverlayEngine:
             f"{s['no_poster']} without a {'poster to badge' if self.server_sources else 'Posterflow poster'}, {s['failed']} failed",
         )
         if s["unanswered"]:
-            log_warning(LogTags.OVERLAYS, f"{s['unanswered']} item(s) left as they are: a source their custom conditions ask did not answer (see the warnings above)")
+            log_warning(LogTags.OVERLAYS, f"{s['unanswered']} item(s) left as they are: a source their badges read did not answer (see the warnings above)")
         if s["server_sourced"]:
             log_info(LogTags.OVERLAYS, f"Badged on the media server's own poster (no Posterflow poster): {s['server_sourced']} item(s)")
         if s["by_state"]:
@@ -455,7 +459,11 @@ class ServerOverlayEngine:
             meta = self.metadata.for_item(ctx)
             had_data = bool(meta)
         groups: Dict[Tuple[str, str], int] = {}  # a group → where its badge sits in `out`
+        media_unread = tuple(ctx.rel_path.split("|", 1)) in self._media_unread
         for otype, cfg in relevant:
+            if media_unread and "media" in otype.needs_for(cfg["options"]):  # read from no files, it would say "no badge"
+                meta = {**meta, "unanswered": "the media server did not give its media details"}
+                continue
             try:
                 badge = otype.resolve(ctx, cfg["options"], meta)
             except Unavailable as exc:
@@ -663,13 +671,22 @@ class ServerOverlayEngine:
     # ── the item's context: ids, ratings, and its media files when an overlay reads them ──
     def _load_library_media(self, instance_name: str, client: Any, library_key: str, items: List[Any]) -> None:
         """One listing per library fills in the media files of all its items."""
+        failed = getattr(client, "failed_requests", 0)
         try:
             by_id = client.library_media(library_key) or {}
         except Exception as exc:
             log_warning(LogTags.OVERLAYS, f"{instance_name}: could not read the media details of library {library_key}: {exc}")
             return
+        # A client that hands back what it got when a request failed (Jellyfin's): the listing is not the whole library.
+        cut_short = getattr(client, "failed_requests", 0) != failed
+        if cut_short:
+            log_warning(LogTags.OVERLAYS, f"{instance_name}: the media details of library {library_key} did not arrive (a request failed). "
+                                          "Its items are left as they are this run.")
         for item in items:
-            self._media[(instance_name, str(item.item_id))] = by_id.get(str(item.item_id), [])
+            key = (instance_name, str(item.item_id))
+            self._media[key] = by_id.get(str(item.item_id), [])
+            if cut_short:
+                self._media_unread.add(key)
 
     def _context(self, instance_name: str, item: Any, parent: Any = None, client: Any = None) -> ItemContext:
         ctx = ItemContext.from_server_item(item, instance_name, parent)
@@ -677,11 +694,20 @@ class ServerOverlayEngine:
             key = (instance_name, str(item.item_id))
             if key not in self._media:  # outside a run (an upload): asked for this one item
                 source = client or getattr(item, "client", None)
+                failed = getattr(source, "failed_requests", 0)
                 try:
                     self._media[key] = list(source.item_media(item) or []) if source is not None and callable(getattr(source, "item_media", None)) else []
+                    unread = getattr(source, "failed_requests", 0) != failed  # an empty answer from a request that failed (Jellyfin's client)
                 except Exception as exc:
                     log_debug(LogTags.OVERLAYS, f"Could not read the media details of {item.title}: {exc}")
                     self._media[key] = []
+                    unread = True
+                if unread:
+                    self._media_unread.add(key)
+                    if instance_name not in self._media_warned:
+                        self._media_warned.add(instance_name)
+                        log_warning(LogTags.OVERLAYS, f"{instance_name}: could not read the media details of {item.title}. "
+                                                      "Items whose media details cannot be read keep the badges they have until they can.")
             ctx.media = self._media[key]
         ctx.client = client or ctx.client
         ctx.lookups = self.lookups
