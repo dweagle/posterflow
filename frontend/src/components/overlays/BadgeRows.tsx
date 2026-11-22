@@ -53,7 +53,7 @@ function BadgeRows({ field, rows, kind, onChange, selected, onSelect, idPrefix, 
   const [own, setOwn] = useState('')
   const specs = field.fields ?? []
   const image = kind === 'image'
-  const max = field.max ?? 30
+  const max = field.max ?? 300
   const open = rows.find((r) => r.id === (selected ?? own)) ?? rows[0]
   const select = (id: string) => { setOwn(id); onSelect?.(id) }
   const update = (id: string, patch: Partial<OverlayBadgeRow>) => onChange(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)))

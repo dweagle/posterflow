@@ -975,7 +975,7 @@ def test_custom_type_describes_itself(custom):
     assert all(get_type(key).describe()["multi"] is False for key in ("status", "rating", "streaming"))
     schema = {f["key"]: f for f in desc["schema"]}
     rows = schema["badges"]
-    assert rows["kind"] == "badges" and rows["kind_option"] == "badge" and rows["fields"] == describe_fields() and rows["max"] == 30
+    assert rows["kind"] == "badges" and rows["kind_option"] == "badge" and rows["fields"] == describe_fields() and rows["max"] == 300
     assert [m["value"] for m in rows["modes"]] == ["all", "any"]
     assert schema["badge"]["in_text_card"] and schema["image_width"]["show_when"] == {"badge": "image"}
     assert desc["group_options"] == {"group": "group", "weight": "weight"} and get_type("status").describe()["group_options"] is None
@@ -1007,7 +1007,7 @@ def test_custom_options_normalize(custom):
     assert custom.normalize_options({"badge": "bogus", "weight": "heavy"})["badge"] == "image" and custom.normalize_options({"weight": "heavy"})["weight"] == 0
     # There is always a badge to edit, and never more than thirty.
     assert custom.normalize_options({"badges": []})["badges"] == custom.default_options()["badges"]
-    assert len(custom.normalize_options({"badges": [{"name": f"b{n}"} for n in range(50)]})["badges"]) == 30
+    assert len(custom.normalize_options({"badges": [{"name": f"b{n}"} for n in range(350)]})["badges"]) == 300
     assert custom.needs_for(custom.normalize_options(_options(rules=[_rule("resolution", "is", "4k")]))) == ("media",)
     assert custom.needs_for(custom.normalize_options(_options(badges=[
         _badge_row("a", 1, rules=[_rule("resolution", "is", "4k")]), _badge_row("b", 2, rules=[_rule("tmdb_genre", "is", "x")]),

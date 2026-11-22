@@ -26,7 +26,7 @@ from ..rules import MODE_KEYS, MODES, describe_fields, matches, needs, normalize
 KEY = "custom"
 TEXT, IMAGE = "text", "image"
 KINDS = [(TEXT, "Text"), (IMAGE, "Image")]
-MAX_BADGES = 30
+MAX_BADGES = 300
 TEXT_LIMIT = 120  # room for a few variables
 _IMAGE_ID = re.compile(r"[0-9a-f]{12}")
 _ROW_ID = re.compile(r"[0-9a-f]{8}")
