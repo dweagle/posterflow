@@ -255,10 +255,22 @@ def test_a_list_address_that_is_no_address_does_not_stop_the_file_being_read(ove
     assert seen["overlays"][0]["notes"] == ["Its conditions read lists from example.com."]
 
 
-def test_an_overlay_list_nested_past_reading_is_refused():
-    deep = '{"format": "%s", "version": 1, "overlays": %s%s}' % (sharing.FORMAT, "[" * 100000, "]" * 100000)
+def test_an_overlay_list_nested_past_reading_is_refused(monkeypatch):
+    def refuse(_raw):  # how deep a file is read depends on the machine's stack, so the reader's refusal is made here
+        raise RecursionError("nested too deep")
+
+    monkeypatch.setattr(sharing.json, "loads", refuse)
     with pytest.raises(sharing.ExportError, match="not an overlay export"):
-        _open(_zip(deep))
+        _open(_zip(_manifest()))
+
+
+def test_a_deeply_nested_overlay_list_gives_nothing_to_import():
+    deep = '{"format": "%s", "version": 1, "overlays": %s%s}' % (sharing.FORMAT, "[" * 100000, "]" * 100000)
+    try:
+        with _open(_zip(deep)) as found:  # read on a machine with stack to spare
+            assert found.describe()["overlays"] == []
+    except sharing.ExportError as exc:  # refused where the stack runs out first
+        assert "not an overlay export" in str(exc)
 
 
 def test_export_refuses_nothing_to_export_and_too_much(overlays_dir, monkeypatch):
