@@ -6,6 +6,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-11-22
+### Added
+- Overlays: a Custom overlay puts your own badges on movie, show and season posters, as an uploaded image or as text.
+  - One overlay holds several badges, each with its own image or wording, size, weight and conditions.
+  - Conditions: labels, genres, collections, studios, Radarr and Sonarr tags, file details, TMDB facts and charts, and MDBList, TMDB or your own id lists.
+  - Values to pick from fill in from your media servers, Radarr, Sonarr and TMDB.
+  - Text badges can show the poster's own runtime, rating, release date and more.
+  - Overlays that share a group show only the one with the highest weight.
+
+### Fixed
+- Overlays: Resolution and Audio badges stay on when Plex or Jellyfin fails to give its file details. Those posters are left as they are until the next run.
+- Overlays: overlay tabs wrap onto a new line instead of running off the page.
+
 ## [0.19.3] - 2026-11-19
 ### Added
 - Overlays: a Credits Scenes overlay badges movies that have a scene during or after the credits, using TMDB.
