@@ -49,7 +49,8 @@ class FakeSection:
         return self.collections_list
 
     def search(self, libtype=None, guid=None, title=None, label=None, container_start=0, maxresults=None, **kwargs):
-        self.search_calls.append({"libtype": libtype, "label": label, "container_start": container_start, "maxresults": maxresults})
+        self.search_calls.append({"libtype": libtype, "label": label, "container_start": container_start, "maxresults": maxresults,
+                                  **{k: v for k, v in kwargs.items() if k.startswith("studio")}})
         if libtype == "collection":
             rows = list(self.collections_list)
         elif libtype == "season":
@@ -147,6 +148,51 @@ class FakeServer:
 
 def make_client(sections):
     return PlexClient("http://plex.local", "token", server=FakeServer(sections))
+
+
+def test_collected_item_ids_are_the_listing_rows_that_name_a_collection():
+    client = make_client([FakeSection(1, "Movies", "movie")])
+    asked = []
+
+    def query(key, **kwargs):
+        asked.append(key)
+        root = Element("MediaContainer")
+        if "Container-Start=0&" in key:
+            SubElement(SubElement(root, "Video", ratingKey="10"), "Collection", tag="Pixar")
+            SubElement(SubElement(root, "Video", ratingKey="11"), "Genre", tag="Action")
+            SubElement(root, "Video", ratingKey="12")
+        return root
+
+    client.server.query = query
+    assert client.collected_item_ids("1") == {"10"}
+    assert asked[0].startswith("/library/sections/1/all?type=1&X-Plex-Container-Start=0")  # one plain listing
+    assert client.collected_item_ids("99") == set()
+
+
+def test_label_counts_say_how_many_movies_or_shows_of_the_library_carry_each_label():
+    from types import SimpleNamespace
+
+    section = FakeSection(1, "Movies", "movie")
+    section.listFilterChoices = lambda name: [SimpleNamespace(key="11", title="Pixar"), SimpleNamespace(key="12", title="Kometa"), SimpleNamespace(key="13", title="")]
+    client = make_client([section])
+    asked = []
+
+    def query(key, **kwargs):
+        asked.append(key)
+        return Element("MediaContainer", totalSize="31" if "label=11" in key else "0", size="0")
+
+    client.server.query = query
+    assert client.label_counts("1") == {"Pixar": 31, "Kometa": 0}
+    assert asked == ["/library/sections/1/all?type=1&label=11&X-Plex-Container-Start=0&X-Plex-Container-Size=0",
+                     "/library/sections/1/all?type=1&label=12&X-Plex-Container-Start=0&X-Plex-Container-Size=0"]  # the count alone, no rows
+    shows = FakeSection(2, "TV", "show")
+    shows.listFilterChoices = lambda name: [SimpleNamespace(key="11", title="Pixar")]
+    client = make_client([shows])
+    client.server.query = query
+    assert client.label_counts("2") == {"Pixar": 31} and "type=2" in asked[-1]
+    assert client.label_counts("99") == {}  # no such library
+    client.LABEL_COUNT_LIMIT = 0
+    assert client.label_counts("2") is None  # too many to count one by one: the list is offered as it is
 
 
 def make_movie(**overrides):
@@ -402,6 +448,10 @@ def test_find_by_field_reads_listing_rows():
     assert client.server.calls == [] and client.server.fetches == []
     assert [i.title for i in client.find_by_field("label", "Christmas", "1", include_collections=False)] == ["Elf"]
     assert client.find_by_field("bogus", "x", "1") == [] and client.find_by_field("label", "Christmas", "nope") == []
+    # A studio is asked for by its exact name: asked plainly, Plex matches the letters anywhere in a name.
+    section.search_calls.clear()
+    client.find_by_field("studio", "HBO", "1", include_collections=False)
+    assert section.search_calls == [{"libtype": None, "label": None, "container_start": 0, "maxresults": 500, "studio__exact": "HBO"}]
 
 
 def test_upload_image_posts_to_the_rating_key(tmp_path):
@@ -744,6 +794,29 @@ def _video(rating_key, resolution, file, *, dovi=False, transfer=None, audio=(),
     return row
 
 
+def test_media_files_read_codecs_channels_runtime_and_languages():
+    video = Element("Video", ratingKey="1")
+    media = SubElement(video, "Media", videoResolution="1080", videoCodec="H264", audioCodec="eac3", audioChannels="2", aspectRatio="2.35", duration="6461789",
+                       bitrate="12702", width="1920", height="816")
+    part = SubElement(media, "Part", file="/m/Film.mkv")
+    SubElement(part, "Stream", streamType="1", codec="h264", languageTag="en", languageCode="eng")
+    SubElement(part, "Stream", streamType="2", codec="eac3", channels="6", language="English", languageTag="en-US", languageCode="eng", displayTitle="English (EAC3 5.1)")
+    SubElement(part, "Stream", streamType="2", codec="aac", channels="2", language="Deutsch", languageCode="ger", displayTitle="Deutsch (AAC Stereo)")
+    SubElement(part, "Stream", streamType="2", codec="aac", channels="2", displayTitle="Unknown (AAC Stereo)")
+    SubElement(part, "Stream", streamType="3", codec="srt", languageTag="en", languageCode="eng")
+    SubElement(part, "Stream", streamType="3", codec="pgs", languageTag="en", languageCode="eng")
+    SubElement(part, "Stream", streamType="3", codec="srt", languageTag="pt-BR", languageCode="por")
+    entry = PlexClient._media_files(video)[0]
+    assert (entry["video_codec"], entry["channels"], entry["aspect"], entry["width"], entry["height"]) == ("h264", 6.0, 2.35, 1920.0, 816.0)  # the most channels a track has
+    assert round(entry["minutes"], 1) == 107.7 and round(entry["bitrate"], 1) == 12.7  # Mbps
+    assert entry["audio_languages"] == ["en", "ger"]  # two letters where Plex has them, each once; a track of no language is none
+    assert entry["subtitle_languages"] == ["en", "pt"]
+    bare = Element("Video", ratingKey="2")
+    SubElement(SubElement(bare, "Media", videoResolution="sd"), "Part", file="/m/Old.avi")
+    old = PlexClient._media_files(bare)[0]
+    assert (old["video_codec"], old["channels"], old["aspect"], old["minutes"], old["audio_languages"]) == ("", 0.0, 0.0, 0.0, [])
+
+
 def test_library_media_lists_every_file_with_its_streams_in_one_listing():
     movies = FakeSection("1", "Movies", "movie")
     shows = FakeSection("2", "TV", "show")
@@ -767,7 +840,9 @@ def test_library_media_lists_every_file_with_its_streams_in_one_listing():
     client.server.query = query
     media = client.library_media("machine1:/library/sections/1")
     assert asked == ["/library/sections/1/all?type=1&includeElements=Stream&X-Plex-Container-Start=0&X-Plex-Container-Size=500"]  # one request, streams included
-    assert media["101"] == [{"resolution": "4k", "hdr": True, "dovi": True, "path": "/m/Film [DV HDR10].mkv", "audio_titles": ["English (TrueHD 7.1)", "Commentary (AAC Stereo)"]}]
+    known = ("resolution", "hdr", "dovi", "path", "audio_titles")
+    assert len(media["101"]) == 1 and {key: media["101"][0][key] for key in known} == {
+        "resolution": "4k", "hdr": True, "dovi": True, "path": "/m/Film [DV HDR10].mkv", "audio_titles": ["English (TrueHD 7.1)", "Commentary (AAC Stereo)"]}
     assert (media["102"][0]["hdr"], media["102"][0]["dovi"]) == (True, False)   # HLG counts as HDR, as Plex's own HDR filter does
     assert (media["103"][0]["resolution"], media["103"][0]["hdr"], media["103"][0]["audio_titles"]) == ("sd", False, [])
     # Episodes are grouped under their show and under their season.

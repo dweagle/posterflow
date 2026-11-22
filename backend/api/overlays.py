@@ -19,9 +19,11 @@ from models.setting import get_setting_value
 from modules.overlays import run_overlays_background_job
 from services.overlays.base import normalize_placement
 from services.overlays.config import SETTING_TMDB_API_KEY, load_config, save_config
+from services.overlays.lookups import rule_values
 from services.overlays.registry import describe_types, get_type
 from services.overlays.server import ServerOverlayEngine
 from services.overlays.render import join_lines, render_badges
+from services.overlays.types.custom import KEY as CUSTOM_KEY, badge_file, prune_badges, store_badge
 from services.text_logo import list_fonts
 
 router = APIRouter(prefix="/api/overlays", tags=["overlays"])
@@ -34,6 +36,7 @@ class OverlayPreviewLayer(BaseModel):
     variant: str = ""
     placement: Dict[str, Any] = {}
     options: Dict[str, Any] = {}
+    id: str = ""  # tells the layers of one type apart (several custom overlays); comes back with the layer's rectangle
 
 
 class OverlayPreviewRequest(BaseModel):
@@ -85,9 +88,21 @@ def save_overlays_config(payload: Dict[str, Any], db: Session = Depends(get_db))
     """Save the settings. Switching overlays off does not touch the servers by itself — the
     Remove overlays button (or the workflow/schedule) uploads the clean posters again."""
     config = save_config(db, payload)
+    prune_badges(config["types"].get(CUSTOM_KEY, {}).get("overlays") or [])
     enabled = [k for k, v in config["types"].items() if v.get("enabled")]
     log_user_action(f"Saved overlay settings (enabled: {'on' if config['enabled'] else 'off'}; types: {', '.join(enabled) or 'none'})")
     return {"success": True, "config": config, "badged_count": ServerOverlayEngine(db, config).badged_count()}
+
+
+@router.get("/rule-values/{field}")
+def get_rule_values(field: str, libraries: Optional[str] = None, q: Optional[str] = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """The values there are to pick from for a condition's field: the Arrs' tags, what the
+    libraries named ("instance:key", comma separated) hold, TMDB's lists, or TMDB's keywords
+    that fit `q`. A plain def: the sources are asked in the threadpool."""
+    found = rule_values(db, field, [lib for lib in (libraries or "").split(",") if lib], q or "")
+    if found is None:
+        raise HTTPException(status_code=404, detail="This condition takes a typed value")
+    return {"field": field, **found}
 
 
 def _font_weights(font_id: str) -> List[str]:
@@ -116,6 +131,45 @@ def list_overlay_fonts() -> Dict[str, List[dict]]:
 
 _IMAGE_MAX_BYTES = 5 * 1024 * 1024
 _IMAGE_MAX_SIDE = 2000
+
+
+def _read_upload(file: UploadFile):
+    """An uploaded image, decoded: (image, width, height). Its size is checked from the header,
+    before anything is decoded."""
+    from PIL import Image, UnidentifiedImageError
+
+    raw = file.file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="The file is empty")
+    if len(raw) > _IMAGE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Image files must be 5 MB or smaller")
+    try:
+        img = Image.open(io.BytesIO(raw))
+        width, height = img.size
+        if width > _IMAGE_MAX_SIDE or height > _IMAGE_MAX_SIDE:
+            raise HTTPException(status_code=400, detail=f"Images must be at most {_IMAGE_MAX_SIDE} px on a side")
+        img.load()
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail="That file is not an image (use a PNG with a transparent background)")
+    return img, width, height
+
+
+@router.post("/badges")
+def upload_custom_badge(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Keep an image for a custom overlay and answer with its id, which the overlay's `image`
+    option then holds. A plain def: the decode runs in the threadpool."""
+    img, width, height = _read_upload(file)
+    image_id, kept_width, kept_height = store_badge(img)
+    log_user_action(f"Uploaded a custom overlay image ({width}x{height}, {file.filename or 'file'})")
+    return {"success": True, "id": image_id, "width": kept_width, "height": kept_height}
+
+
+@router.get("/badges/{image_id}")
+def get_custom_badge(image_id: str) -> Response:
+    path = badge_file(image_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="No image with this id")
+    return FileResponse(str(path), media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
 def _image_type(type_key: str):
@@ -185,25 +239,11 @@ def upload_overlay_image(type_key: str, key: str, set: Optional[str] = None, fil
     """Replace a badge's file in a set with an uploaded image: fitted onto the type's frame and
     stored as a PNG with transparency. A plain def: the decode runs in the threadpool, not on
     the event loop."""
-    from PIL import Image, UnidentifiedImageError
-
     overlay_type = _image_type(type_key)
     library, image_set = overlay_type.images, _image_set(overlay_type, set)
     label = _image_label(overlay_type, key, image_set)
-    raw = file.file.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="The file is empty")
-    if len(raw) > _IMAGE_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="Image files must be 5 MB or smaller")
-    try:
-        with Image.open(io.BytesIO(raw)) as img:
-            width, height = img.size  # from the header: nothing is decoded until the size has passed
-            if width > _IMAGE_MAX_SIDE or height > _IMAGE_MAX_SIDE:
-                raise HTTPException(status_code=400, detail=f"Images must be at most {_IMAGE_MAX_SIDE} px on a side")
-            img.load()
-            fitted = library.fit(img, key, image_set)
-    except UnidentifiedImageError:
-        raise HTTPException(status_code=400, detail="That file is not an image (use a PNG with a transparent background)")
+    img, width, height = _read_upload(file)
+    fitted = library.fit(img, key, image_set)
     target = library.custom_file(key, image_set)
     target.parent.mkdir(parents=True, exist_ok=True)
     fitted.save(target, format="PNG")
@@ -277,9 +317,10 @@ def overlay_preview(payload: OverlayPreviewRequest, db: Session = Depends(get_db
             base = _apply_saved_borders(db, base)
         # The other overlays under the edited one, then the edited one on top; the edge band once for all.
         layers = []
+        layer_ids: Dict[int, str] = {}  # id(badge) → the id its layer was sent with
         for layer in payload.others:
             other = get_type(layer.type)
-            if other is None or other.key == otype.key:
+            if other is None or (other.key == otype.key and not other.multi):
                 continue
             o_placement = normalize_placement(layer.placement, other.default_placement())
             o_options = other.normalize_options(layer.options)
@@ -287,14 +328,16 @@ def overlay_preview(payload: OverlayPreviewRequest, db: Session = Depends(get_db
             o_badge = other.resolve_variant(layer.variant or (o_variants[0]["key"] if o_variants else ""), o_options)
             if o_badge is not None:
                 layers.append((other.key, o_badge, o_placement))
+                layer_ids[id(o_badge)] = layer.id or other.key
         if badge is not None:
             layers.append((otype.key, badge, placement))
         # A badge that shares another type's line has no rectangle of its own: that type's covers the line.
         layers = join_lines(layers)
         base, rects = render_badges(base, [(b, p) for _key, b, p in layers])
-        keyed = [(key, r) for (key, _b, _p), r in zip(layers, rects)]  # in the order the badges are drawn
-        rect = next((r for key, r in keyed if key == otype.key), rect)
-        others_drawn = [{"type": key, "rect": [int(v) for v in r]} for key, r in keyed if key != otype.key]
+        # In the order the badges are drawn. A layer joined onto a line is a new badge: its type names it.
+        drawn = [(layer_ids.get(id(b), "" if b is badge or key == otype.key else key), key, r) for (key, b, _p), r in zip(layers, rects)]
+        rect = next((r for layer_id, _key, r in drawn if not layer_id), rect)
+        others_drawn = [{"type": key, "id": layer_id, "rect": [int(v) for v in r]} for layer_id, key, r in drawn if layer_id]
     except Exception as exc:
         log_error(LogTags.OVERLAYS, f"Overlay preview failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Preview failed: {exc}")

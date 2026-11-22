@@ -414,23 +414,68 @@ class PlexClient(MediaServerClient):
     def find_by_field(
         self, field: str, value: str, library_key: str, include_collections: bool = True
     ) -> List[MediaServerItem]:
-        if field not in ("label", "genre"):
+        if field not in ("label", "genre", "studio"):
             return []
         section = self._find_section(library_key)
         if section is None:
             return []
+        # A plain studio filter matches the letters anywhere ("HBO" finds "Bohbot"): ask for the exact name, by case too.
+        filters = {"studio__exact" if field == "studio" else field: value}
         # Listing rows (no labels, no show paths): a full parse costs one request per item
-        items = [self._parse_item(row, section, bulk=True) for row in self._iter_listing(section, **{field: value})]
+        items = [self._parse_item(row, section, bulk=True) for row in self._iter_listing(section, **filters)]
         if include_collections:
             # Plex keeps collection labels/genres in their own namespace
             try:
                 items.extend(
                     self._parse_item(row, section, bulk=True)
-                    for row in self._iter_listing(section, libtype="collection", **{field: value})
+                    for row in self._iter_listing(section, libtype="collection", **filters)
                 )
             except Exception:
                 pass  # some fields aren't filterable on collections; skip if unsupported
         return items
+
+    # What Plex calls each filter; the first name a library knows is asked.
+    _VALUE_FILTERS = {"label": ("label",), "genre": ("genre",), "studio": ("studio",), "content_rating": ("contentRating",), "edition": ("edition", "editionTitle")}
+
+    def field_values(self, field: str, library_key: str) -> List[str]:
+        from plexapi.exceptions import BadRequest, NotFound
+
+        section = self._find_section(library_key)
+        for name in self._VALUE_FILTERS.get(field, ()) if section is not None else ():
+            try:
+                return [str(choice.title) for choice in section.listFilterChoices(name) if getattr(choice, "title", None)]
+            except (BadRequest, NotFound):
+                continue  # this kind of library has no such filter (editions in a show library)
+        return []
+
+    def collected_item_ids(self, library_key: str) -> Optional[Set[str]]:
+        # A listing row names the collections its item is in.
+        section = self._find_section(library_key)
+        libtype = {"movie": 1, "show": 2}.get(str(getattr(section, "type", "") or ""))
+        if section is None or libtype is None:
+            return set()
+        return {str(row.attrib.get("ratingKey")) for row in self._raw_rows(f"/library/sections/{section.key}/all?type={libtype}")
+                if any(child.tag == "Collection" for child in row)}
+
+    LABEL_COUNT_LIMIT = 300  # more labels than this are not counted one by one
+
+    def label_counts(self, library_key: str) -> Optional[Dict[str, int]]:
+        """Plex lists every label of the server for any library: the ones on collections and on
+        other libraries' items too. One small request per label says how many of this library's
+        movies or shows carry it."""
+        section = self._find_section(library_key)
+        libtype = {"movie": 1, "show": 2}.get(str(getattr(section, "type", "") or ""))
+        if section is None or libtype is None:
+            return {}
+        choices = [choice for choice in section.listFilterChoices("label") if getattr(choice, "title", None)]
+        if len(choices) > self.LABEL_COUNT_LIMIT:
+            return None
+        counts: Dict[str, int] = {}
+        for choice in choices:
+            found = self.server.query(f"/library/sections/{section.key}/all?type={libtype}&label={quote(str(choice.key))}"
+                                      "&X-Plex-Container-Start=0&X-Plex-Container-Size=0")
+            counts[str(choice.title)] = int(found.attrib.get("totalSize") or found.attrib.get("size") or 0) if found is not None else 0
+        return counts
 
     def get_seasons(self, show: MediaServerItem) -> List[MediaServerItem]:
         if not show.item_id:
@@ -822,15 +867,42 @@ class PlexClient(MediaServerClient):
                 streams = list(part.iter("Stream"))
                 videos = [st for st in streams if st.attrib.get("streamType") == "1"]
                 dovi = any(str(st.attrib.get("DOVIPresent") or "").lower() in ("1", "true") for st in videos)
-                titles = [st.attrib.get("extendedDisplayTitle") or st.attrib.get("displayTitle") for st in streams if st.attrib.get("streamType") == "2"]
+                audios = [st for st in streams if st.attrib.get("streamType") == "2"]
+                titles = [st.attrib.get("extendedDisplayTitle") or st.attrib.get("displayTitle") for st in audios]
                 files.append({
                     "resolution": str(media.attrib.get("videoResolution") or ""),
                     "hdr": dovi or any(str(st.attrib.get("colorTrc") or "").lower() in cls._HDR_TRANSFERS for st in videos),
                     "dovi": dovi,
                     "path": str(part.attrib.get("file") or ""),
                     "audio_titles": [str(t) for t in titles if t],
+                    "video_codec": str(media.attrib.get("videoCodec") or "").lower(),
+                    "channels": max([cls._number(st.attrib.get("channels")) for st in audios] + [cls._number(media.attrib.get("audioChannels"))]),
+                    "aspect": cls._number(media.attrib.get("aspectRatio")),
+                    "minutes": cls._number(media.attrib.get("duration")) / 60000,
+                    "bitrate": cls._number(media.attrib.get("bitrate")) / 1000,  # Mbps
+                    "width": cls._number(media.attrib.get("width")),
+                    "height": cls._number(media.attrib.get("height")),
+                    "audio_languages": cls._languages(audios),
+                    "subtitle_languages": cls._languages(st for st in streams if st.attrib.get("streamType") == "3"),
                 })
         return files
+
+    @staticmethod
+    def _number(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _languages(streams: Any) -> List[str]:
+        """The streams' languages as two-letter codes (the three-letter one where Plex has no other), each once."""
+        found: List[str] = []
+        for st in streams:
+            code = str(st.attrib.get("languageTag") or "").split("-")[0].lower() or str(st.attrib.get("languageCode") or "").lower()
+            if code and code not in found:
+                found.append(code)
+        return found
 
     def library_media(self, library_key: str) -> Dict[str, List[Dict[str, Any]]]:
         """One listing with streams per library: the movies, or every episode (grouped under its

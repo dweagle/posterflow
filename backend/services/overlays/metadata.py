@@ -106,13 +106,17 @@ class MetadataProvider:
     """Resolves the TMDB record behind an ItemContext (by tmdb id, else tvdb/imdb via /find)."""
 
     def __init__(self, api_key: str, *, now: Optional[float] = None, db: Optional[Session] = None,
-                 finales: Optional[Any] = None, providers: bool = False, keywords: bool = False) -> None:
+                 finales: Optional[Any] = None, providers: bool = False, keywords: bool = False,
+                 details: bool = False, show_keywords: bool = False) -> None:
         self.api_key = (api_key or "").strip()
         # Streaming badges need each record's watch providers: fetched with the details (one
         # request) and kept trimmed; a cached record without them is refetched once.
         self.want_providers = bool(providers)
         # Post-credits badges need a movie's keywords: fetched and kept the same way.
         self.want_keywords = bool(keywords)
+        # Custom conditions read a show's keywords too, and the genres and original language.
+        self.want_show_keywords = bool(show_keywords)
+        self.want_details = bool(details)
         self._lock = threading.Lock()
         self._db = db  # None = this run's answers are kept in memory only (previews, tests)
         self._finales = finales  # FinaleLookup (Sonarr → TheTVDB); None = TMDB inference only
@@ -316,9 +320,13 @@ class MetadataProvider:
         out: Dict[str, str] = {}
         if self.want_providers:
             out["providers"] = "watch/providers"
-        if self.want_keywords and media == MEDIA_MOVIE:  # only movie badges read keywords
+        if self.want_keywords and (media == MEDIA_MOVIE or self.want_show_keywords):
             out["keywords"] = "keywords"
         return out
+
+    def _wanted(self, media: str) -> list:
+        """The record keys a cached record must hold to serve this run."""
+        return [*self._appended(media), *(("companies",) if self.want_details else ())]
 
     def _usable(self, media: str, entry: Optional[Dict[str, Any]]) -> bool:
         """A cached details entry serves this run when it is settled and within its TTL, or
@@ -331,7 +339,7 @@ class MetadataProvider:
             return False
         if entry.get("missing"):
             return age <= SETTLED_TTL_SECONDS
-        if isinstance(entry.get("data"), dict) and any(key not in entry["data"] for key in self._appended(media)):
+        if isinstance(entry.get("data"), dict) and any(key not in entry["data"] for key in self._wanted(media)):
             return False
         if not self._is_live(media, entry.get("data")):
             return age <= SETTLED_TTL_SECONDS
@@ -362,14 +370,26 @@ class MetadataProvider:
         if data.get("_missing"):
             self._store(key, {"missing": True})
             return None, "not on TMDB (404)"
-        trimmed = self._trim(media, data, providers="providers" in extras, keywords="keywords" in extras)
+        trimmed = self._trim(media, data, providers="providers" in extras, keywords="keywords" in extras, details=self.want_details)
         self._store(key, {"data": trimmed})
         return trimmed, "refreshed" if refreshing else "fetched"
 
     @staticmethod
-    def _trim(media: str, data: Dict[str, Any], providers: bool = False, keywords: bool = False) -> Dict[str, Any]:
+    def _trim(media: str, data: Dict[str, Any], providers: bool = False, keywords: bool = False, details: bool = False) -> Dict[str, Any]:
         fields = _SHOW_FIELDS if media == MEDIA_SHOW else _MOVIE_FIELDS
         out = {k: data.get(k) for k in fields}
+        if details:
+            def names(key: str) -> list:
+                return sorted({str(row["name"]).strip() for row in data.get(key) or [] if isinstance(row, dict) and row.get("name")})
+
+            out["genres"] = names("genres")
+            out["original_language"] = str(data.get("original_language") or "")
+            out["companies"] = names("production_companies")
+            out["networks"] = names("networks")
+            out["type"] = str(data.get("type") or "")
+            out["collection"] = str((data.get("belongs_to_collection") or {}).get("name") or "")
+            out["countries"] = sorted({str(code).upper() for code in data.get("origin_country") or [] if code}
+                                      | {str(row["iso_3166_1"]).upper() for row in data.get("production_countries") or [] if isinstance(row, dict) and row.get("iso_3166_1")})
         if providers:
             out["providers"] = _trim_providers(data.get("watch/providers"))
         if keywords:

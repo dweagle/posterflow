@@ -2,7 +2,8 @@
 
 Each type holds named `overlays`: every one applies to all selected libraries or to the
 libraries ("instance:key") it names, with its own placement and options. An item takes the
-overlay naming its library, else one set to all libraries; none = no badge of that type."""
+overlay naming its library, else one set to all libraries; none = no badge of that type. A
+`multi` type (custom badges) draws every one of its overlays that covers the item's library."""
 
 from __future__ import annotations
 
@@ -74,7 +75,8 @@ def normalize_config(raw: Any) -> Dict[str, Any]:
             if not isinstance(raw_overlay, dict):
                 continue
             libs = sorted({str(k).strip() for k in (raw_overlay.get("libraries") or []) if str(k).strip()} - claimed)
-            claimed |= set(libs)  # a library is named by one overlay of a type
+            if not otype.multi:
+                claimed |= set(libs)  # a library is named by one overlay of a type
             all_libraries = raw_overlay.get("all_libraries", not libs)
             o_enabled = raw_overlay.get("enabled", True)
             overlays.append({

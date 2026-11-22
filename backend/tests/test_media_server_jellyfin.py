@@ -252,6 +252,79 @@ def test_find_by_field_maps_label_to_tags(monkeypatch):
     assert client.find_by_field("bogus", "x", "lib1") == []
 
 
+def test_field_values_list_what_the_movies_and_series_of_a_library_carry(monkeypatch):
+    asked = []
+
+    def named(path):
+        def handler(params, _data):
+            asked.append((path, params.get("parentId"), params.get("includeItemTypes")))
+            return {"Items": [{"Name": "Action", "Id": "g1"}, {"Name": "Drama", "Id": "g2"}, {"Id": "nameless"}]}
+        return handler
+
+    def filters(params, _data):
+        asked.append(("/Items/Filters", params.get("parentId"), params.get("includeItemTypes")))
+        return {"Genres": ["Action"], "Tags": ["kids", "", "pixar"], "OfficialRatings": ["PG", "R"], "Years": [1999]}
+
+    client, _ = make_client(monkeypatch, {"/Genres": named("/Genres"), "/Studios": named("/Studios"), "/Items/Filters": filters})
+    assert client.field_values("genre", "lib1") == ["Action", "Drama"] and client.field_values("studio", "lib1") == ["Action", "Drama"]
+    assert client.field_values("label", "lib1") == ["kids", "pixar"] and client.field_values("content_rating", "lib1") == ["PG", "R"]
+    assert client.field_values("edition", "lib1") == [] and client.field_values("bogus", "lib1") == []  # Jellyfin has no editions
+    # Never the episodes: their genres are not a show's.
+    assert asked == [("/Genres", "lib1", "Movie,Series"), ("/Studios", "lib1", "Movie,Series"), ("/Items/Filters", "lib1", "Movie,Series"), ("/Items/Filters", "lib1", "Movie,Series")]
+
+
+def test_find_by_field_maps_studio_to_studios(monkeypatch):
+    def items_handler(params, _data):
+        assert params.get("studios") == "Pixar" and params.get("parentId") == "lib1" and params.get("includeItemTypes") == "Movie,Series"
+        return {"Items": [{"Id": "m1", "Type": "Movie", "Name": "Up"}], "TotalRecordCount": 1}
+
+    client, _ = make_client(monkeypatch, {"/Items": items_handler})
+    assert [i.title for i in client.find_by_field("studio", "Pixar", "lib1", include_collections=False)] == ["Up"]
+
+
+def test_media_file_reads_codecs_channels_runtime_and_languages(monkeypatch):
+    cultures = [{"TwoLetterISOLanguageName": "en", "ThreeLetterISOLanguageName": "eng", "ThreeLetterISOLanguageNames": ["eng"]},
+                {"TwoLetterISOLanguageName": "de", "ThreeLetterISOLanguageName": "ger", "ThreeLetterISOLanguageNames": ["ger", "deu"]},
+                {"TwoLetterISOLanguageName": "", "ThreeLetterISOLanguageName": "ace", "ThreeLetterISOLanguageNames": ["ace"]},
+                {"TwoLetterISOLanguageName": "zh-TW", "ThreeLetterISOLanguageName": "zht", "ThreeLetterISOLanguageNames": ["zht"]}]
+    row = {"Id": "m1", "Type": "Movie", "Path": "/m/Film.mkv", "RunTimeTicks": 64_617_890_000, "MediaStreams": [
+        {"Type": "Video", "Codec": "HEVC", "Width": 1920, "Height": 816, "AspectRatio": "2.35:1", "BitRate": 11_992_737, "VideoRangeType": "SDR"},
+        {"Type": "Audio", "Codec": "eac3", "Channels": 6, "Language": "eng", "BitRate": 640_000, "DisplayTitle": "English - Dolby Digital+ - 5.1"},
+        {"Type": "Audio", "Codec": "aac", "Channels": 2, "Language": "deu", "DisplayTitle": "German - AAC - Stereo"},
+        {"Type": "Subtitle", "Codec": "subrip", "Language": "eng"}, {"Type": "Subtitle", "Codec": "PGSSUB", "Language": "ENG"}, {"Type": "Subtitle", "Language": "ace"},
+        {"Type": "Subtitle", "Language": "zht"},
+        {"Type": "Subtitle", "Language": None},
+    ]}
+    asked = []
+
+    def cultures_handler(params, _data):
+        asked.append("cultures")
+        return cultures
+
+    client, _ = make_client(monkeypatch, {"/Items": lambda params, _d: {"Items": [row] if params.get("startIndex", 0) == 0 else [], "TotalRecordCount": 1},
+                                          "/Localization/Cultures": cultures_handler})
+    entry = client.library_media("srv123:lib1")["m1"][0]
+    assert (entry["video_codec"], entry["channels"], entry["aspect"], entry["width"], entry["height"]) == ("hevc", 6.0, 2.35, 1920.0, 816.0)
+    assert round(entry["minutes"], 1) == 107.7 and round(entry["bitrate"], 2) == 12.63  # the video and audio streams together, in Mbps
+    assert entry["audio_languages"] == ["en", "de"]  # the server's own table gives the two-letter codes
+    assert entry["subtitle_languages"] == ["en", "ace", "zh"]  # each once; one without a two-letter code keeps its own; a region is dropped
+    client.library_media("srv123:lib1")
+    assert asked == ["cultures"]  # the table is asked for once
+
+
+def test_a_request_given_up_on_is_counted_and_the_language_table_is_asked_again(monkeypatch):
+    client, session = make_client(monkeypatch, {"/Localization/Cultures": FakeResponse(status_code=500)})
+    client.max_retries = 1
+    assert client.failed_requests == 0
+    assert client.field_values("genre", "srv123:lib1") == [] and client.failed_requests == 1  # an empty list, and one request that failed
+    assert client.find_by_field("label", "Kids", "srv123:lib1", include_collections=False) == [] and client.failed_requests == 2
+    assert client._language_codes() == {} and client._language_codes() == {}
+    assert [c["path"] for c in session.calls].count("/Localization/Cultures") == 2  # not kept: asked again
+    session.routes["/Localization/Cultures"] = [{"TwoLetterISOLanguageName": "en", "ThreeLetterISOLanguageName": "eng"}]
+    assert client._language_codes() == {"eng": "en"} and client._language_codes() == {"eng": "en"}
+    assert [c["path"] for c in session.calls].count("/Localization/Cultures") == 3
+
+
 def test_get_collection_items(monkeypatch):
     def items_handler(params, _data):
         assert params.get("parentId") == "box1"
@@ -381,8 +454,10 @@ def test_library_media_reads_resolution_range_and_audio_from_the_streams(monkeyp
     client, _session = make_client(monkeypatch, {"/Items": items})
     media = client.library_media("srv123:lib1")
     assert asked[0]["parentId"] == "lib1" and asked[0]["fields"] == "MediaStreams,Path" and asked[0]["includeItemTypes"] == "Movie,Episode"
-    assert media["m1"] == [{"resolution": "4k", "hdr": True, "dovi": True, "path": "/m/Film [DV HDR10].mkv",
-                            "audio_titles": ["English - TrueHD - 7.1", "TRUEHD Dolby TrueHD + Dolby Atmos"]}]
+    known = ("resolution", "hdr", "dovi", "path", "audio_titles")
+    assert {key: media["m1"][0][key] for key in known} == {"resolution": "4k", "hdr": True, "dovi": True, "path": "/m/Film [DV HDR10].mkv",
+                                                           "audio_titles": ["English - TrueHD - 7.1", "TRUEHD Dolby TrueHD + Dolby Atmos"]}
+    assert len(media["m1"]) == 1 and (media["m1"][0]["aspect"], media["m1"][0]["width"], media["m1"][0]["height"]) == (2.4, 3840.0, 1600.0)  # no ratio given: the frame's
     assert (media["m2"][0]["resolution"], media["m2"][0]["hdr"], media["m2"][0]["audio_titles"]) == ("480", False, ["English - MP3 - Stereo", "MP3"])
     # An episode sits under its show and its season; the codec is added in the form the file-name patterns expect.
     assert media["s1"] == media["s1a"] and len(media["s1"]) == 1 and media["s1"][0]["audio_titles"] == ["English - Dolby Digital+ - 5.1", "EAC3"]

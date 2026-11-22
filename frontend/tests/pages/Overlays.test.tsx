@@ -820,4 +820,189 @@ describe('Overlays', () => {
     renderPage()
     expect(await screen.findByText(/Add a TMDB API key/)).toBeTruthy()
   })
+
+  describe('custom overlays', () => {
+    const customType = {
+      key: 'custom',
+      label: 'Custom',
+      description: 'Your own text or images on the posters that match your conditions.',
+      order: 90,
+      targets: ['movie', 'show', 'season'],
+      needs: [],
+      hidden_placement: ['stroke_width', 'stroke_color'],
+      hidden_placement_when: { text: { badge: 'image' } },
+      multi: true,
+      group_options: { group: 'group', weight: 'weight' },
+      schema: [
+        { kind: 'select', key: 'badge', label: 'Badge', section: 'Badge', in_text_card: true, options: [{ value: 'text', label: 'Text' }, { value: 'image', label: 'Image' }] },
+        { kind: 'number', key: 'image_width', label: 'Image width', section: 'Badge', min: 10, max: 1000, show_when: { badge: 'image' } },
+        { kind: 'toggles', key: 'posters', label: 'Posters', section: 'Applies to', toggles: [{ key: 'movies', label: 'Movies' }, { key: 'shows', label: 'Shows' }] },
+        { kind: 'pair', key: 'group_weight', label: 'Group and weight', section: 'Applies to', pair: [
+          { kind: 'text', key: 'group', label: 'Group' },
+          { kind: 'number', key: 'weight', label: 'Weight', min: 0, max: 9999, disabled_when: { group: '' }, disabled_help: 'Set a group first' },
+        ] },
+        { kind: 'toggle', key: 'apply_to_seasons', label: 'Season posters too', section: 'Seasons' },
+        {
+          kind: 'badges', key: 'badges', label: 'Badges', kind_option: 'badge', max: 30,
+          modes: [{ value: 'all', label: 'All of them' }, { value: 'any', label: 'Any of them' }],
+          fields: [
+            { key: 'label', label: 'Label or tag', group: 'Media server', kind: 'tag', ops: [{ value: 'is', label: 'is' }, { value: 'is_not', label: 'is not' }], options: [] },
+            { key: 'released', label: 'Released', group: 'Item', kind: 'days', ops: [{ value: 'within', label: 'in the last' }, { value: 'older', label: 'more than' }], options: [] },
+            { key: 'tmdb_genre', label: 'TMDB genre', group: 'TMDB', kind: 'tag', ops: [{ value: 'is', label: 'is' }, { value: 'is_not', label: 'is not' }], options: [], needs: ['tmdb', 'details'] },
+          ],
+        },
+      ],
+      variants: [{ key: '00000001', label: 'Badge 1' }],
+      default_placement: { ...placement, vertical_align: 'bottom' },
+      default_options: { badge: 'text', image_width: 200, movies: true, shows: true, apply_to_seasons: false, group: '', weight: 0,
+        badges: [{ id: '00000001', name: 'Badge 1', enabled: true, text: 'CUSTOM', image: '', weight: 0, match: 'all', rules: [] }] },
+    }
+    const badge = (id: string, name: string, extra: Record<string, unknown> = {}) =>
+      ({ id, name, enabled: true, text: name.toUpperCase(), image: '', weight: 0, match: 'all', rules: [] as unknown[], ...extra })
+    // An overlay with one badge that says the overlay's name, unless it is given badges of its own.
+    const customOverlay = (name: string, extra: Record<string, unknown> = {}, badges = [badge('00000001', 'Badge 1', { text: name.toUpperCase() })]) => ({
+      name, enabled: true, all_libraries: true, libraries: [] as string[], placement: { ...customType.default_placement },
+      options: { ...JSON.parse(JSON.stringify(customType.default_options)), badges }, ...extra,
+    })
+    const libraryConfigs = [{ instance_name: 'srv', libraries: [
+      { key: '1', title: 'Movies', type: 'movie', enabled: true },
+      { key: '2', title: 'TV Shows', type: 'show', enabled: true },
+    ] }]
+    const load = (overlays: ReturnType<typeof customOverlay>[], statusOn = false, hasKey = true) => {
+      const cfg = baseConfig() as ReturnType<typeof baseConfig> & { types: Record<string, { enabled: boolean; overlays: unknown[] }> }
+      cfg.types.custom = { enabled: true, overlays }
+      cfg.types.status.enabled = statusOn
+      mockGetOverlayTypes.mockResolvedValue({ types: [statusType, customType] })
+      mockGetOverlaysConfig.mockResolvedValue({ config: cfg, has_tmdb_key: hasKey, library_configs: libraryConfigs, badged_count: 0 })
+    }
+    const openCustom = async (user: ReturnType<typeof userEvent.setup>) => {
+      renderPage()
+      await user.click(await screen.findByRole('tab', { name: 'Custom' }))
+      await screen.findByRole('heading', { level: 2, name: 'Custom' })
+    }
+    const panel = () => screen.getByRole('group', { name: 'Overlay name and libraries' })
+    const lastPreview = () => mockFetchOverlayPreview.mock.calls.at(-1)?.[0]
+    const save = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(screen.getAllByRole('button', { name: /^Save$/ })[0])
+      await waitFor(() => expect(mockSaveOverlaysConfig).toHaveBeenCalledTimes(1))
+      return mockSaveOverlaysConfig.mock.calls[0][0].types.custom.overlays
+    }
+
+    it('lets several custom overlays name the same library', async () => {
+      const user = userEvent.setup()
+      load([customOverlay('New', { all_libraries: false, libraries: ['srv:1'] }), customOverlay('Kids')])
+      await openCustom(user)
+      await user.click(within(screen.getByRole('tablist', { name: 'Custom overlays' })).getByRole('tab', { name: 'Kids' }))
+      expect(within(panel()).getByText('Applies to every selected library.')).toBeTruthy()
+      await user.click(within(panel()).getByLabelText('All libraries'))
+      const movies = within(panel()).getByLabelText(/Movies/) as HTMLInputElement
+      expect(movies.disabled).toBe(false)  // New names it too: custom badges share a library
+      await user.click(movies)
+      const saved = await save(user)
+      expect(saved.map((o: { libraries: string[] }) => o.libraries)).toEqual([['srv:1'], ['srv:1']])
+    })
+
+    it('holds several badges in one overlay, each with its own wording, weight and conditions', async () => {
+      const user = userEvent.setup()
+      load([customOverlay('Top 10', {}, [badge('0000000a', 'Netflix', { weight: 60 }), badge('0000000b', 'Disney', { weight: 50 })])])
+      await openCustom(user)
+      // The preview states are the overlay's badges, and the first one is open.
+      expect(stateLabels()).toEqual(['Netflix', 'Disney'])
+      await waitFor(() => expect(lastPreview()).toMatchObject({ type: 'custom', variant: '0000000a' }))
+      expect(screen.getByRole('heading', { name: 'Conditions: Netflix' })).toBeTruthy()
+      // Opening another badge's conditions previews that badge, and the other way round.
+      fireEvent.click(screen.getByRole('button', { name: /^Disney conditions/ }))
+      await waitFor(() => expect(lastPreview().variant).toBe('0000000b'))
+      fireEvent.click(screen.getByRole('button', { name: /Add Condition/ }))
+      pick('Condition 1', 'Released')
+      fireEvent.change(screen.getByLabelText('Condition 1 value'), { target: { value: '45' } })
+      pickState('Netflix')
+      expect(await screen.findByRole('heading', { name: 'Conditions: Netflix' })).toBeTruthy()
+      fireEvent.change(screen.getByLabelText('Netflix text'), { target: { value: 'N' } })
+      fireEvent.click(screen.getByRole('button', { name: /Add Badge/ }))
+      expect(stateLabels()).toEqual(['Netflix', 'Disney', 'Badge 3'])
+      const saved = await save(user)
+      expect(saved).toHaveLength(1)
+      expect(saved[0].options.badges.map((r: { name: string; text: string; weight: number }) => [r.name, r.text, r.weight])).toEqual([['Netflix', 'N', 60], ['Disney', 'DISNEY', 50], ['Badge 3', '', 0]])
+      expect(saved[0].options.badges[1].rules).toEqual([{ field: 'released', op: 'within', value: 45 }])
+      expect(saved[0].options.badges[0].rules).toEqual([])
+    })
+
+    it('keeps the Badge picker at the top of the Text card, and swaps that card for the image settings', async () => {
+      const user = userEvent.setup()
+      load([customOverlay('New')])
+      await openCustom(user)
+      const textCard = screen.getByRole('heading', { name: 'Text' }).parentElement as HTMLElement
+      expect(within(textCard).getByLabelText('Badge')).toBeTruthy()
+      expect(within(textCard).getByLabelText('Font')).toBeTruthy()
+      expect(within(textCard).queryByLabelText('Outline width')).toBeNull()  // no letter outline on a custom badge
+      expect(document.getElementById('pl-stroke_color')).toBeNull()
+      expect(screen.queryByRole('heading', { name: 'Badge' })).toBeNull()
+      expect(screen.getByLabelText('Movies')).toBeTruthy()
+      expect(screen.getByRole('heading', { name: 'Seasons' })).toBeTruthy()
+      expect((screen.getByLabelText('Badge 1 text') as HTMLInputElement).value).toBe('NEW')  // the wording sits in the badge's row
+      pick('Badge', 'Image')
+      expect(screen.queryByRole('heading', { name: 'Text' })).toBeNull()
+      const badgeCard = screen.getByRole('heading', { name: 'Badge' }).parentElement as HTMLElement
+      expect(within(badgeCard).getByLabelText('Image width')).toBeTruthy()
+      expect(screen.queryByLabelText('Badge 1 text')).toBeNull()
+      expect(screen.getByRole('button', { name: 'Upload Badge 1 image' })).toBeTruthy()
+    })
+
+    it('takes a weight once the overlay is in a group and shows it on the tab', async () => {
+      const user = userEvent.setup()
+      load([customOverlay('Netflix'), customOverlay('Disney')])
+      await openCustom(user)
+      const tabs = () => screen.getByRole('tablist', { name: 'Custom overlays' })
+      // The Text card has a Weight of its own (the font's), and so has each badge: this one sits beside Group.
+      const applies = () => screen.getByRole('heading', { name: 'Applies to' }).parentElement as HTMLElement
+      const weight = () => within(applies()).getByLabelText('Weight') as HTMLInputElement
+      expect(weight().disabled).toBe(true)  // a weight means nothing outside a group
+      expect(within(tabs()).queryByLabelText(/weight/)).toBeNull()
+      await user.type(screen.getByLabelText('Group'), 'top10')
+      expect(weight().disabled).toBe(false)
+      expect(within(tabs()).getByLabelText('Netflix: group top10, weight 0')).toBeTruthy()
+      fireEvent.change(weight(), { target: { value: '60' } })
+      expect(within(tabs()).getByLabelText('Netflix: group top10, weight 60').textContent?.trim()).toBe('60')
+      expect(within(tabs()).getByRole('tab', { name: 'Netflix' })).toBeTruthy()  // the tab keeps its own name
+      expect(within(tabs()).queryByLabelText(/^Disney: group/)).toBeNull()
+      const saved = await save(user)
+      expect(saved[0].options).toMatchObject({ group: 'top10', weight: 60 })
+    })
+
+    it('asks for a TMDB key only while a condition reads TMDB', async () => {
+      const user = userEvent.setup()
+      load([customOverlay('New')], false, false)
+      await openCustom(user)
+      expect(screen.queryByText(/Add a TMDB API key/)).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: /Add Condition/ }))
+      pick('Condition 1', 'TMDB genre')
+      expect(await screen.findByText(/Add a TMDB API key/)).toBeTruthy()
+      fireEvent.click(screen.getByLabelText('Badge 1 on'))  // a badge that is off asks TMDB nothing
+      await waitFor(() => expect(screen.queryByText(/Add a TMDB API key/)).toBeNull())
+    })
+
+    it('draws the other custom overlays in the preview, each with its own handle', async () => {
+      const user = userEvent.setup()
+      load([customOverlay('New'), customOverlay('Kids'), customOverlay('Off', { enabled: false }), customOverlay('TV only', { all_libraries: false, libraries: ['srv:2'] })], true)
+      mockFetchOverlayPreview.mockResolvedValue({ blob: new Blob(['x']), rect: { x: 300, y: 1385, w: 400, h: 80 }, text: 'NEW', layers: [{ type: 'custom', id: 'custom:1', rect: { x: 100, y: 100, w: 200, h: 80 } }] })
+      await openCustom(user)
+      // Editing New (all libraries): the status badge, and Kids. Not the one switched off, nor the one for another library.
+      await waitFor(() => expect(lastPreview()).toMatchObject({ type: 'custom', options: expect.objectContaining({ badges: [expect.objectContaining({ text: 'NEW' })] }) }))
+      const others = () => lastPreview().others
+      expect(others()).toEqual([
+        expect.objectContaining({ type: 'status' }),
+        // No badge is named for another custom overlay: the server draws its heaviest.
+        expect.objectContaining({ type: 'custom', id: 'custom:1', label: 'Kids', variant: '', options: expect.objectContaining({ badges: [expect.objectContaining({ text: 'KIDS' })] }) }),
+      ])
+      const handle = await screen.findByRole('slider', { name: /Kids position/ })
+      fireEvent.load(screen.getByAltText(/Overlay preview/))
+      fireEvent.keyDown(handle, { key: 'ArrowRight', shiftKey: true })
+      await waitFor(() => expect(others()[1].placement.horizontal_offset).toBe(10))
+      expect(lastPreview().placement.horizontal_offset).toBe(0)  // the edited overlay stayed put
+      // The overlay for the TV library sees the all-libraries ones beside it.
+      await user.click(within(screen.getByRole('tablist', { name: 'Custom overlays' })).getByRole('tab', { name: 'TV only' }))
+      await waitFor(() => expect(others().map((o: { id?: string }) => o.id)).toEqual([undefined, 'custom:0', 'custom:1']))
+    })
+  })
 })

@@ -7,7 +7,10 @@ A *file* is one playable file as the media server reports it:
      "hdr": bool,             # the server calls the video HDR
      "dovi": bool,            # a video stream carries Dolby Vision
      "path": str,             # the file's path
-     "audio_titles": [str]}   # the audio tracks' display titles
+     "audio_titles": [str],   # the audio tracks' display titles
+     # and what custom overlays' conditions read besides (0 or "" = the server did not say):
+     "video_codec": str, "channels": float, "aspect": float, "minutes": float, "bitrate": float (Mbps),
+     "width": float, "height": float, "audio_languages": [code], "subtitle_languages": [code]}
 
 A movie's files are its versions; a show's and a season's files are their episodes'.
 
@@ -232,3 +235,59 @@ def audio_badge(files: Optional[Iterable[File]], *, episodes: bool = False, perc
         if _enough(files, hit, episodes, pct):
             return key
     return None
+
+
+# ── what a custom overlay's conditions read besides: languages, codecs, sizes ──
+
+# key, label, what the server calls it
+VIDEO_CODECS: List[Tuple[str, str, "re.Pattern[str]"]] = [
+    ("hevc", "HEVC (H.265)", re.compile(r"(?i)hevc|h\.?265")),
+    ("h264", "H.264", re.compile(r"(?i)h\.?264|avc")),
+    ("av1", "AV1", re.compile(r"(?i)\bav1\b")),
+    ("vp9", "VP9", re.compile(r"(?i)\bvp9\b")),
+    ("vc1", "VC-1", re.compile(r"(?i)vc-?1|wmv3")),
+    ("mpeg2", "MPEG-2", re.compile(r"(?i)mpeg-?2")),
+    ("mpeg4", "MPEG-4", re.compile(r"(?i)mpeg-?4|xvid|divx")),
+]
+
+
+def _files(files: Optional[Iterable[File]]) -> List[File]:
+    return [f for f in (files or []) if isinstance(f, dict)]
+
+
+def spoken(files: Optional[Iterable[File]], kind: str, *, episodes: bool = False, percent: Any = DEFAULT_PERCENT) -> List[str]:
+    """The audio or subtitle languages (`kind`) the media has, as the server's codes: every one a
+    movie's files have; for a show or a season the ones enough of its episodes have."""
+    found: List[str] = []
+    listed = _files(files)
+    key = f"{kind}_languages"
+    for f in listed:
+        for code in f.get(key) or []:
+            if code not in found:
+                found.append(code)
+    if not episodes:
+        return found
+    pct = _percent(percent)
+    return [code for code in found if _enough(listed, lambda f, code=code: code in (f.get(key) or []), True, pct)]
+
+
+def typical(files: Optional[Iterable[File]], key: str, *, episodes: bool = False) -> float:
+    """One number for the item out of its files' (channels, aspect, minutes, bitrate, width,
+    height): a movie's best file (its first file's aspect), a show's or season's middle episode.
+    0 = not known."""
+    values = sorted(float(f.get(key) or 0) for f in _files(files) if float(f.get(key) or 0) > 0)
+    if not values:
+        return 0.0
+    if episodes:
+        return values[len(values) // 2]
+    return next(float(f.get(key) or 0) for f in _files(files) if float(f.get(key) or 0) > 0) if key == "aspect" else values[-1]
+
+
+def video_codec(files: Optional[Iterable[File]], *, episodes: bool = False) -> str:
+    """The key of the item's video codec (see VIDEO_CODECS): a movie's first file's, a show's or
+    season's most common one. '' = not known."""
+    keys = [next((key for key, _label, pattern in VIDEO_CODECS if pattern.search(str(f.get("video_codec") or ""))), "") for f in _files(files)]
+    keys = [key for key in keys if key]
+    if not keys:
+        return ""
+    return max(set(keys), key=keys.count) if episodes else keys[0]

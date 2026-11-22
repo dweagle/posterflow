@@ -1562,7 +1562,7 @@ def test_server_engine_uses_the_overlay_that_names_the_items_library(test_db, is
 
 def test_overlays_api_types_and_config_roundtrip(client, test_db, isolated_overlay_files):
     types = client.get("/api/overlays/types").json()["types"]
-    assert [t["key"] for t in types] == ["status", "rating", "content_rating", "streaming", "resolution", "audio", "edition", "mediastinger"]
+    assert [t["key"] for t in types] == ["status", "rating", "content_rating", "streaming", "resolution", "audio", "edition", "mediastinger", "custom"]
     cfg = client.get("/api/overlays/config").json()
     assert cfg["config"]["enabled"] is False and cfg["has_tmdb_key"] is False and cfg["badged_count"] == 0
     body = {"enabled": True, "all_libraries": False, "libraries": ["srv:1"],
@@ -1609,7 +1609,7 @@ def test_overlays_api_preview_and_run(client, test_db, isolated_overlay_files, m
     # The other layers that drew a badge come back with their rectangles (so they can be dragged too);
     # unknown types and the edited type itself are left out.
     rating_alone = client.post("/api/overlays/preview", json={"type": "rating", "variant": "top", "placement": {}, "options": {}})
-    assert json.loads(with_rating.headers["x-overlay-layers"]) == [{"type": "rating", "rect": [int(v) for v in rating_alone.headers["x-overlay-rect"].split(",")]}]
+    assert json.loads(with_rating.headers["x-overlay-layers"]) == [{"type": "rating", "id": "rating", "rect": [int(v) for v in rating_alone.headers["x-overlay-rect"].split(",")]}]
     assert alone.headers["x-overlay-layers"] == "[]"
     # The text travels percent-encoded: a header carries plain ASCII only, and a state's text may be anything.
     accented = client.post("/api/overlays/preview", json={"type": "status", "variant": "airing", "placement": {}, "options": {"states": {"airing": {"text": "EN COURS · ÉTÉ"}}}})
@@ -2077,7 +2077,7 @@ def test_every_type_ends_its_cards_with_the_seasons_toggle():
     # draws sections in schema order); a movies-only type has no Seasons card at all.
     seen = set()
     for otype in all_types().values():
-        fields = [f for f in otype.schema() if f["kind"] != "states"]
+        fields = [f for f in otype.schema() if f["kind"] not in ("states", "badges")]  # the tables under the cards
         if "season" not in otype.targets:
             assert not any(f.get("section") == "Seasons" or f["key"] == "apply_to_seasons" for f in fields), otype.key
             seen.add(otype.key)
@@ -3202,7 +3202,7 @@ def test_credits_scenes_type_tells_post_mid_and_both_apart(client, monkeypatch, 
     assert (desc["label"], desc["order"], desc["needs"], desc["hidden_placement"], desc["targets"]) == ("Credits Scenes", 70, ["tmdb", "keywords"], ["stroke_width", "stroke_color"], ["movie"])  # no letter outline on this type
     # The Text card is hidden while a style draws an image; only this type hides a card by its options.
     assert desc["hidden_placement_when"] == {"text": {"badge_style": ["icon", "color", "color_plain", "white", "white_plain"]}}
-    assert all(t.describe()["hidden_placement_when"] is None for key, t in all_types().items() if key != "mediastinger")
+    assert all(t.describe()["hidden_placement_when"] is None for key, t in all_types().items() if key not in ("mediastinger", "custom"))
     p = desc["default_placement"]
     assert (p["horizontal_align"], p["horizontal_offset"], p["vertical_align"], p["vertical_offset"]) == ("left", 35, "top", 35)
     assert (p["back_enabled"], p["back_style"], p["back_color"], p["back_padding"], p["back_radius"], p["back_min_width"]) == (True, "solid", "#00000099", 9, 30, 105)  # the icon's dark box

@@ -3,7 +3,70 @@ import type { PlexLibraryConfig } from './client'
 
 // 'images' = the uploader for a type's PNG badges (file state, not an option value).
 // 'toggles' = several boolean options as one compact row of switches.
-export type OverlayFieldKind = 'number' | 'toggle' | 'text' | 'color' | 'select' | 'states' | 'images' | 'toggles'
+// 'pair' = two fields on one line, the second a small box.
+// 'badges' = a custom overlay's own list of badges, each with its wording or image, weight and conditions.
+export type OverlayFieldKind = 'number' | 'toggle' | 'text' | 'color' | 'select' | 'states' | 'images' | 'toggles' | 'pair' | 'badges'
+
+// One thing a condition can look at, with the comparisons it offers.
+export interface OverlayRuleField {
+  key: string
+  label: string
+  group: string
+  // tag = the item carries the value or not; days = a number of days, or a date for "before" and
+  // "after"; choice = one of `options`.
+  kind: 'tag' | 'text' | 'number' | 'days' | 'choice'
+  ops: { value: string; label: string }[]
+  options: { value: string; label: string }[]
+  help?: string
+  placeholder?: string
+  step?: number
+  // What a value must look like (a regular expression); one that does not is marked.
+  pattern?: string
+  // What the field reads that has to be fetched: 'tmdb' needs the TMDB key.
+  needs?: string[]
+  // A condition may hold several values of this field: any one of them will do.
+  multi?: boolean
+  // What a new condition on the field starts with, where the kind's own start would not do.
+  start?: string | number | null
+  // A condition on the field may name a region (a chart TMDB keeps per country).
+  region?: boolean
+  // Values can be asked for (getRuleValues): 'list' = the ones there are, to pick from or type
+  // past; 'search' = looked up as the user types. '' = the value is typed.
+  suggest?: '' | 'list' | 'search'
+}
+
+// One value of a condition. What an Arr instance or a media server holds may name it:
+// that instance's tag, that server's label ('' or unset = any of them).
+export interface OverlayRulePart {
+  value: string | number
+  instance?: string
+}
+
+export interface OverlayRule extends OverlayRulePart {
+  field: string
+  op: string
+  // More values: the comparison holds when it holds for any one of them (a negative one,
+  // "is not" or "does not contain", when it holds for none).
+  also?: OverlayRulePart[]
+  // A chart's region, as a two-letter country code ('' or unset = TMDB's own chart).
+  region?: string
+}
+
+// One badge of a custom overlay. A poster gets the heaviest badge whose conditions it matches.
+export interface OverlayBadgeRow {
+  id: string
+  name: string
+  enabled: boolean
+  text: string
+  // The id of the uploaded picture ('' = none yet).
+  image: string
+  // Its own size: an image's width or a wording's text size, in px of a 1000x1500 poster. 0 = the overlay's.
+  size?: number
+  weight: number
+  // 'all' or 'any' of the conditions must hold.
+  match: string
+  rules: OverlayRule[]
+}
 
 export interface OverlayField {
   kind: OverlayFieldKind
@@ -44,6 +107,16 @@ export interface OverlayField {
   // kind === 'images': the option that holds the image set drawn (none = the type has one set), and what one file is called.
   set_option?: string
   noun?: string
+  // kind === 'pair': the two fields.
+  pair?: OverlayField[]
+  // kind === 'badges': the option that says whether the badges are text or images, what a
+  // condition can look at, and the "all or any" choices.
+  kind_option?: string
+  // kind === 'badges': what the wording column's info icon says (the variables it takes), and how long a wording may be.
+  text_help?: string
+  text_limit?: number
+  fields?: OverlayRuleField[]
+  modes?: { value: string; label: string }[]
 }
 
 export interface OverlayPlacement {
@@ -99,6 +172,12 @@ export interface OverlayTypeInfo {
   // While the options hold these values another overlay places the badge: the Position and
   // Backdrop cards are greyed out and show the note.
   placement_lock?: { when: Record<string, unknown>; note: string } | null
+  // Every overlay of the type that covers a library draws its own badge there (custom badges),
+  // so several of them may name the same library.
+  multi?: boolean
+  // The options holding an overlay's group and its weight in it: an overlay in a group shows
+  // its weight on its tab.
+  group_options?: { group: string; weight: string } | null
   schema: OverlayField[]
   // A variant may take its label from an option's current value (`labels[value]`); a value
   // with no label hides the variant (e.g. the fallback logo when "On no service" is Nothing).
@@ -175,7 +254,8 @@ export interface OverlayPreviewResult {
   rect: { x: number; y: number; w: number; h: number }
   text: string
   // The other layers that drew a badge, with their rectangles, so those can be dragged too.
-  layers: { type: string; rect: { x: number; y: number; w: number; h: number } }[]
+  // `id` is the one the layer was sent with (its type when it had none).
+  layers: { type: string; id: string; rect: { x: number; y: number; w: number; h: number } }[]
 }
 
 export type OverlayPreviewBase = 'plain' | 'bordered'
@@ -186,6 +266,10 @@ export interface OverlayPreviewLayer {
   variant: string
   placement: OverlayPlacement
   options: Record<string, unknown>
+  // Tells the layers of one type apart (several custom overlays). Unset = the type's key.
+  id?: string
+  // The layer's name on its drag handle. Unset = its type's label.
+  label?: string
 }
 
 export const fetchOverlayPreview = async (params: {
@@ -208,8 +292,8 @@ export const fetchOverlayPreview = async (params: {
   try { text = decodeURIComponent(encoded) } catch { /* not encoded: use it as it is */ }
   let layers: OverlayPreviewResult['layers'] = []
   try {
-    const parsed = JSON.parse(String(resp.headers?.['x-overlay-layers'] ?? '[]')) as { type: string; rect: number[] }[]
-    layers = parsed.map((l) => ({ type: l.type, rect: { x: l.rect[0], y: l.rect[1], w: l.rect[2], h: l.rect[3] } }))
+    const parsed = JSON.parse(String(resp.headers?.['x-overlay-layers'] ?? '[]')) as { type: string; id?: string; rect: number[] }[]
+    layers = parsed.map((l) => ({ type: l.type, id: l.id || l.type, rect: { x: l.rect[0], y: l.rect[1], w: l.rect[2], h: l.rect[3] } }))
   } catch { /* an older server: nothing else to drag */ }
   return { blob: resp.data as Blob, rect: { x, y, w, h }, text, layers }
 }
@@ -264,3 +348,32 @@ export const uploadOverlayImage = async (type: string, key: string, file: File, 
 
 export const deleteOverlayImage = async (type: string, key: string, set?: OverlayImageSet): Promise<{ success: boolean; type: string; key: string; set: OverlayImageSet; custom: boolean }> =>
   deleteData(`/api/overlays/images/${encodeURIComponent(type)}/${encodeURIComponent(key)}`, { params: setParams(set) })
+
+// ── a custom overlay's own picture: every upload gets a new id, which the overlay's option holds ──
+
+export const uploadCustomBadge = async (file: File): Promise<{ success: boolean; id: string; width: number; height: number }> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return postData('/api/overlays/badges', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
+
+export const fetchCustomBadge = async (id: string): Promise<Blob> => {
+  const resp = await client.get(`/api/overlays/badges/${encodeURIComponent(id)}`, { responseType: 'blob' })
+  return resp.data as Blob
+}
+
+export interface OverlayRuleValue {
+  value: string
+  // Its name as the list shows it.
+  label: string
+  // What the list shows beside the name: the server or instance it is on, a label's count, a language's code.
+  note?: string
+  // The Arr instance or the media server the value is one of.
+  instance?: string
+}
+
+// The values there are to pick from for a condition's field: the Arrs' tags instance by
+// instance, what the given libraries ("instance:key") hold, TMDB's lists, or TMDB's keywords
+// that fit `q`. `unreachable` names the sources that did not answer.
+export const getRuleValues = async (field: string, ask: { libraries?: string[]; q?: string } = {}): Promise<{ field: string; values: OverlayRuleValue[]; unreachable: string[] }> =>
+  getData(`/api/overlays/rule-values/${encodeURIComponent(field)}`, { params: { ...(ask.libraries?.length ? { libraries: ask.libraries.join(',') } : {}), ...(ask.q ? { q: ask.q } : {}) } })

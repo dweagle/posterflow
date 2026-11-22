@@ -92,6 +92,16 @@ class ItemContext:
     # The media files behind the item (see media.py): a movie's versions, a show's or a season's
     # episodes. None = not looked up (no active overlay needs it).
     media: Optional[List[Dict[str, Any]]] = None
+    # What a custom overlay's conditions read (see rules.py). `owner_id` is the server's id of the
+    # movie or show: a season is asked about through its show.
+    owner_id: str = ""
+    library_key: str = ""           # the item's library as the server's client takes it
+    edition: str = ""               # the edition the server names (Plex)
+    paths: List[str] = field(default_factory=list)  # a movie's files, a show's folder
+    added_at: Optional[str] = None
+    release_date: Optional[str] = None
+    client: Any = field(default=None, repr=False)   # the item's media server
+    lookups: Any = field(default=None, repr=False)  # the engine's rules.Lookups
 
     @property
     def is_season(self) -> bool:
@@ -137,6 +147,13 @@ class ItemContext:
             ratings=dict(getattr(ids_source, "ratings", None) or {}),
             content_rating=str(getattr(ids_source, "content_rating", None) or "").strip() or None,
             library_id=f"{instance_name}:{lib_key}" if lib_key else "",
+            owner_id=str(getattr(ids_source, "item_id", "") or ""),
+            library_key=lib_key,
+            edition=str(getattr(ids_source, "edition_title", None) or ""),
+            paths=[str(p) for p in (getattr(ids_source, "paths", None) or [])],
+            added_at=getattr(ids_source, "added_at", None),
+            release_date=getattr(ids_source, "release_date", None),
+            client=getattr(item, "client", None),
         )
 
 
@@ -172,6 +189,9 @@ class OverlayBadge:
     # it as a separate layer): {fill '#RRGGBBAA', line_width, line_color, padding, radius,
     # min_width, max_width} in reference px. None = the backdrop is the only box.
     box: Optional[Dict[str, Any]] = None
+    # Of the badges of one type that share a group only the heaviest is drawn (the first on a tie).
+    group: str = ""
+    weight: int = 0
 
     @property
     def signature(self) -> str:
@@ -220,6 +240,12 @@ class OverlayType:
     # Types that draw PNG badges: their files (an images.ImageLibrary) and, from image_items(),
     # the keys a user may replace with an upload, each with its label.
     images: Any = None
+    # Every overlay of the type that covers an item's library draws its own badge, each named
+    # after its overlay. Otherwise an item takes one overlay of the type.
+    multi: bool = False
+    # {"group": option key, "weight": option key} of a type whose overlays can share a group: the
+    # page shows the weight on the tab of an overlay that is in one.
+    group_options: Dict[str, str] = {}
 
     def default_placement(self) -> Dict[str, Any]:
         return dict(DEFAULT_PLACEMENT)
@@ -289,6 +315,8 @@ class OverlayType:
             "hidden_placement": list(self.hidden_placement),
             "hidden_placement_when": self.hidden_placement_when or None,
             "placement_lock": self.placement_lock or None,
+            "multi": self.multi,
+            "group_options": self.group_options or None,
             "schema": self.schema(),
             "variants": self.variants(opts),
             "default_placement": self.default_placement(),

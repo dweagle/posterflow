@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
 import { Info, RotateCcw } from 'lucide-react'
 import NumberField from '../poster-manager/NumberField'
+import BadgeRows from './BadgeRows'
 import ImageUploads from './ImageUploads'
 import ListPicker from './ListPicker'
-import type { OverlayField } from '../../api/overlays'
+import type { OverlayBadgeRow, OverlayField } from '../../api/overlays'
 import { optionsMatch } from '../../utils/optionsMatch'
 
 const HEX_RGB = /^#[0-9a-fA-F]{6}$/
@@ -182,6 +183,14 @@ function SingleField({ field, values, onChange, idPrefix, typeKey, onAssetsChang
           <ImageUploads typeKey={typeKey} idPrefix={id} imageSet={field.set_option ? String(values[field.set_option] ?? '') || undefined : undefined} noun={field.noun} onChanged={onAssetsChanged} />
         </div>
       )
+    case 'pair':
+      return (
+        <div className="overlay-field-row">
+          {(field.pair ?? []).map((f) => (
+            <SingleField key={f.key} field={f} values={values} onChange={onChange} idPrefix={idPrefix} typeKey={typeKey} onAssetsChanged={onAssetsChanged} />
+          ))}
+        </div>
+      )
     case 'toggle':
       return (
         <div className={group} title={why}>
@@ -240,7 +249,7 @@ type OptionFieldsProps = {
   onChange: (next: Values) => void
   idPrefix?: string
   // 'fields' = the plain options as panels (siblings, for a shared panel grid);
-  // 'states' = the per-state tables; 'all' = both.
+  // 'states' = the per-state tables and a custom overlay's badges; 'all' = both.
   render?: 'all' | 'fields' | 'states'
   // When the shared placement has its backdrop off, per-state back_* fields are locked.
   backdropEnabled?: boolean
@@ -260,6 +269,11 @@ type OptionFieldsProps = {
   part?: 'all' | 'own' | 'merged' | 'text'
   // The Text card is on the page: fields marked `in_text_card` are drawn there, not in their section.
   textCardShown?: boolean
+  // The preview state on the page: of a custom overlay's badges, the one that is open.
+  variant?: string
+  onVariantChange?: (variant: string) => void
+  // The libraries the overlay being edited covers ("instance:key"), for the values a condition offers.
+  scope?: string[]
 }
 
 // Group fields by their `section` hint, keeping first-appearance order ('' = no heading).
@@ -339,12 +353,13 @@ function StateCell({ field, values, onChange, id, ariaLabel, dimmed, unavailable
 
 // Renders an overlay type's option schema. Every overlay type ships its own schema from the
 // backend, so a new type needs no frontend code unless it wants a custom panel.
-function OptionFields({ schema, options, onChange, idPrefix = 'ov', typeKey = '', render = 'all', backdropEnabled = true, defaults, onAssetsChanged, exclude = [], cardsFirst, part = 'all', textCardShown = false }: OptionFieldsProps) {
+function OptionFields({ schema, options, onChange, idPrefix = 'ov', typeKey = '', render = 'all', backdropEnabled = true, defaults, onAssetsChanged, exclude = [], cardsFirst, part = 'all', textCardShown = false, variant, onVariantChange, scope }: OptionFieldsProps) {
   const lockReason = (field: OverlayField) => (!backdropEnabled && field.key.startsWith('back_') ? 'Backdrop is off (Backdrop panel)' : undefined)
   const set = (key: string, value: unknown) => onChange({ ...options, [key]: value })
   const shown = (field: OverlayField) =>
     !field.show_when || optionsMatch(field.show_when, options)
-  const simple = render === 'states' ? [] : schema.filter((f) => f.kind !== 'states' && !exclude.includes(f.key) && shown(f))
+  const simple = render === 'states' ? [] : schema.filter((f) => f.kind !== 'states' && f.kind !== 'badges' && !exclude.includes(f.key) && shown(f))
+  const badgeFields = render === 'fields' ? [] : schema.filter((f) => f.kind === 'badges')
   // A table column with a show_when comes and goes like a plain field.
   const groups = render === 'fields' ? [] : schema.filter((f) => f.kind === 'states')
     .map((g) => ({ ...g, items: (g.items ?? []).map((item) => ({ ...item, fields: item.fields.filter(shown) })) }))
@@ -523,6 +538,21 @@ function OptionFields({ schema, options, onChange, idPrefix = 'ov', typeKey = ''
           </div>
         )
       })}
+      {badgeFields.map((field) => (
+        <BadgeRows
+          key={field.key}
+          field={field}
+          rows={Array.isArray(options[field.key]) ? (options[field.key] as OverlayBadgeRow[]) : []}
+          kind={String(options[field.kind_option ?? ''] ?? '')}
+          onChange={(rows) => set(field.key, rows)}
+          selected={variant}
+          onSelect={onVariantChange}
+          idPrefix={`${idPrefix}-${field.key}`}
+          scope={scope}
+          toggle={(checked, onToggle, label) => <Toggle checked={checked} onChange={onToggle} label={label} visibleLabel={false} />}
+          info={(help) => <InfoIcon help={help} />}
+        />
+      ))}
     </>
   )
 }

@@ -87,8 +87,8 @@ class MediaServerClient(ABC):
     def find_by_field(
         self, field: str, value: str, library_key: str, include_collections: bool = True
     ) -> List[MediaServerItem]:
-        """Items in a library carrying a label/tag ("label") or genre ("genre");
-        optionally also collections carrying it (border rules)."""
+        """Items in a library carrying a label/tag ("label"), genre ("genre") or studio
+        ("studio", a show's network); optionally also collections carrying it (border rules)."""
         ...
 
     @abstractmethod
@@ -130,6 +130,21 @@ class MediaServerClient(ABC):
     def image_url(self, item: MediaServerItem, max_width: Optional[int] = None) -> Optional[str]:
         """Server-relative image path for backend proxying, or None."""
         ...
+
+    def field_values(self, field: str, library_key: str) -> List[str]:
+        """The values a library has to pick from for "label", "genre", "studio", "content_rating"
+        or "edition"; empty where the server has no such list."""
+        return []
+
+    def collected_item_ids(self, library_key: str) -> Optional[Set[str]]:
+        """The ids of a library's movies or shows that are in any collection; None where the
+        server cannot say."""
+        return None
+
+    def label_counts(self, library_key: str) -> Optional[Dict[str, int]]:
+        """How many of a library's movies or shows carry each label, where the server's own label
+        list (field_values) holds more than theirs. None = that list is exact as it is."""
+        return None
 
     def labeled_item_ids(self, library_key: str, label: str) -> Set[str]:
         """Ids of the library's items carrying a label; empty by default."""

@@ -12,7 +12,7 @@ const SNAP_DISTANCE = 14
 const HANDLE_PAD = 1
 
 type Rect = { x: number; y: number; w: number; h: number }
-type LayerRect = { type: string; rect: Rect }
+type LayerRect = { type: string; id: string; rect: Rect }
 // Renders kept by their input string: switching back to a type or state seen before shows
 // it at once instead of asking the server for the same picture again.
 type CachedRender = { blob: Blob; rect: Rect; text: string; layers: LayerRect[] }
@@ -35,7 +35,8 @@ type Props = {
   // Their names, for their drag handles.
   labels?: Record<string, string>
   // Called when one of the other overlays' badges is dragged or nudged: its own placement changes.
-  onLayerPlacementChange?: (type: string, patch: Partial<OverlayPlacement>) => void
+  // A layer is named by its id (its type when it was sent without one).
+  onLayerPlacementChange?: (layer: string, patch: Partial<OverlayPlacement>) => void
   // Bumped when a file the badge draws changed on the server (a logo upload): fetch again.
   refreshKey?: number
 }
@@ -132,7 +133,7 @@ function OverlayPreview({ type, variant, placement, options, onPlacementChange, 
     const timer = setTimeout(() => {
       fetchOverlayPreview({ type, variant, placement, options, base, others, enabled })
         .then((result) => {
-          const render = { blob: result.blob, rect: result.rect, text: result.text, layers: result.layers ?? [] }
+          const render = { blob: result.blob, rect: result.rect, text: result.text, layers: (result.layers ?? []).map((l) => ({ ...l, id: l.id || l.type })) }
           cache.current.set(deps, render)  // kept even if this render was overtaken: its inputs may come back
           while (cache.current.size > RENDER_CACHE_SIZE) {
             const oldest = cache.current.keys().next().value
@@ -170,13 +171,14 @@ function OverlayPreview({ type, variant, placement, options, onPlacementChange, 
     return () => ro.disconnect()
   }, [measure, url, large])
 
+  const other = (layer: string) => others.find((o) => (o.id ?? o.type) === layer)
   // What a handle moves: the edited overlay's badge (layer null) or another layer's.
   const target = (layer: string | null): { rect: Rect | null; placement: OverlayPlacement | null; change: (patch: Partial<OverlayPlacement>) => void } =>
     layer === null
       ? { rect, placement, change: onPlacementChange }
       : {
-          rect: layerRects.find((l) => l.type === layer)?.rect ?? null,
-          placement: others.find((o) => o.type === layer)?.placement ?? null,
+          rect: layerRects.find((l) => l.id === layer)?.rect ?? null,
+          placement: other(layer)?.placement ?? null,
           change: (patch) => onLayerPlacementChange?.(layer, patch),
         }
   const dragRect = drag ? target(drag.layer).rect : null
@@ -265,21 +267,21 @@ function OverlayPreview({ type, variant, placement, options, onPlacementChange, 
         ))}
         {/* The other overlays' handles first, so the edited overlay's stays on top where they overlap. */}
         {scale > 0 && !error && layerRects.map((l) => {
-          const p = others.find((o) => o.type === l.type)?.placement
+          const p = other(l.id)?.placement
           return p ? (
             <div
-              key={l.type}
-              className={handleClass(l.type)}
-              style={handleStyle(l.type, l.rect)}
+              key={l.id}
+              className={handleClass(l.id)}
+              style={handleStyle(l.id, l.rect)}
               role="slider"
-              aria-label={`${labels[l.type] ?? l.type} position (drag or use arrow keys)`}
+              aria-label={`${other(l.id)?.label ?? labels[l.type] ?? l.type} position (drag or use arrow keys)`}
               aria-valuetext={`${p.horizontal_offset}, ${p.vertical_offset}`}
               tabIndex={0}
-              onPointerDown={onPointerDown(l.type)}
+              onPointerDown={onPointerDown(l.id)}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerCancel={() => setDrag(null)}
-              onKeyDown={onKeyDown(l.type)}
+              onKeyDown={onKeyDown(l.id)}
             />
           ) : null
         })}

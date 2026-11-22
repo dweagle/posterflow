@@ -2,7 +2,7 @@ import base64
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 
@@ -108,6 +108,8 @@ class JellyfinClient(MediaServerClient):
         self._libraries_cache: Optional[List[MediaServerLibrary]] = None
         self._libraries_unanswered = False  # the last library list request got no answer
         self._user_id_cache: Optional[str] = None
+        self._language_cache: Optional[Dict[str, str]] = None
+        self.failed_requests = 0  # requests given up on; a listing then comes back empty, which is no answer
 
         info = self.get_server_info()
         if not info:
@@ -147,6 +149,7 @@ class JellyfinClient(MediaServerClient):
                         self.logger.error(
                             f"Jellyfin {method} {path} failed after {self.max_retries} retries: {ex}"
                         )
+        self.failed_requests += 1
         return None
 
     def get_server_info(self) -> Optional[MediaServerInfo]:
@@ -297,7 +300,7 @@ class JellyfinClient(MediaServerClient):
         rows = self._items_page(params)
         return [self._parse_item(row) for row in rows]
 
-    FIELD_PARAMS = {"label": "tags", "genre": "genres"}
+    FIELD_PARAMS = {"label": "tags", "genre": "genres", "studio": "studios"}  # all three seen working on 12.0
 
     def find_by_field(
         self, field: str, value: str, library_key: str, include_collections: bool = True
@@ -324,6 +327,26 @@ class JellyfinClient(MediaServerClient):
             )
             items.extend(self._parse_item(row) for row in box_rows)
         return items
+
+    def collected_item_ids(self, library_key: str) -> Optional[Set[str]]:
+        # Box sets are the server's: every member of every one of them.
+        found: Set[str] = set()
+        for collection in self.get_collections(library_key):
+            found |= {str(item.item_id) for item in self.get_collection_items(collection)}
+        return found
+
+    def field_values(self, field: str, library_key: str) -> List[str]:
+        # Movies and series only: a show library otherwise lists what only its episodes carry
+        # (their genres), which no show would ever match (seen on 12.0).
+        scope = {"parentId": self._local_library_id(library_key), "includeItemTypes": "Movie,Series"}
+        if field in ("genre", "studio"):
+            data = self._request("GET", "/Genres" if field == "genre" else "/Studios", params={**scope, "enableImages": "false", "enableUserData": "false"})
+            return [str(row["Name"]) for row in (data.get("Items") or [] if isinstance(data, dict) else []) if isinstance(row, dict) and row.get("Name")]
+        if field in ("label", "content_rating"):
+            data = self._request("GET", "/Items/Filters", params=scope)
+            found = data.get("Tags" if field == "label" else "OfficialRatings") if isinstance(data, dict) else None
+            return [str(value) for value in found or [] if value]
+        return []
 
     def get_seasons(self, show: MediaServerItem) -> List[MediaServerItem]:
         data = self._request("GET", f"/Shows/{show.item_id}/Seasons")
@@ -566,11 +589,48 @@ class JellyfinClient(MediaServerClient):
     # ── media details (resolution, HDR, audio) for the overlays ──
     MEDIA_FIELDS = "MediaStreams,Path"
 
+    def _language_codes(self) -> Dict[str, str]:
+        """Three-letter language code → the two-letter one, from the server's own table (asked once)."""
+        if self._language_cache is None:
+            rows = self._request("GET", "/Localization/Cultures")
+            if not isinstance(rows, list):
+                return {}  # no answer: asked again next time
+            self._language_cache = {
+                str(three).lower(): str(row.get("TwoLetterISOLanguageName")).lower().split("-")[0]  # "zh-tw" is zh: the language, not the region
+                for row in rows if isinstance(row, dict) and row.get("TwoLetterISOLanguageName")
+                for three in [row.get("ThreeLetterISOLanguageName"), *(row.get("ThreeLetterISOLanguageNames") or [])] if three
+            }
+        return self._language_cache
+
     @staticmethod
-    def _media_file(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _media_file(data: Dict[str, Any], languages: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
         """One movie's or episode's file, from the item's streams. Jellyfin reports a frame size
-        rather than a resolution name, and a video range rather than HDR flags."""
+        rather than a resolution name, and a video range rather than HDR flags. `languages`
+        turns its three-letter language codes into two-letter ones."""
         from services.overlays.media import frame_resolution
+
+        def number(value: Any) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def spoken(kind: str) -> List[str]:
+            found: List[str] = []
+            for st in streams:
+                code = str(st.get("Language") or "").lower() if st.get("Type") == kind else ""
+                code = (languages or {}).get(code, code)
+                if code and code not in found:
+                    found.append(code)
+            return found
+
+        def aspect() -> float:
+            ratio = str((video or {}).get("AspectRatio") or "")
+            across, _, down = ratio.partition(":")
+            if number(across) and number(down):
+                return round(number(across) / number(down), 2)
+            width, height = number((video or {}).get("Width")), number((video or {}).get("Height"))
+            return round(width / height, 2) if width and height else 0.0
 
         streams = [st for st in (data.get("MediaStreams") or []) if isinstance(st, dict)]
         video = next((st for st in streams if st.get("Type") == "Video"), None)
@@ -590,6 +650,15 @@ class JellyfinClient(MediaServerClient):
             "dovi": dovi,
             "path": str(data.get("Path") or ""),
             "audio_titles": titles,
+            "video_codec": str((video or {}).get("Codec") or "").lower(),
+            "channels": max([number(st.get("Channels")) for st in streams if st.get("Type") == "Audio"] + [0.0]),
+            "aspect": aspect(),
+            "minutes": number(data.get("RunTimeTicks")) / 600_000_000,
+            "bitrate": sum(number(st.get("BitRate")) for st in streams if st.get("Type") in ("Video", "Audio")) / 1_000_000,  # Mbps
+            "width": number((video or {}).get("Width")),
+            "height": number((video or {}).get("Height")),
+            "audio_languages": spoken("Audio"),
+            "subtitle_languages": spoken("Subtitle"),
         }
 
     def library_media(self, library_key: str) -> Dict[str, List[Dict[str, Any]]]:
@@ -600,7 +669,7 @@ class JellyfinClient(MediaServerClient):
                                  "enableUserData": "false", "enableImages": "false"})
         out: Dict[str, List[Dict[str, Any]]] = {}
         for row in rows:
-            entry = self._media_file(row)
+            entry = self._media_file(row, self._language_codes())
             if entry is None or row.get("LocationType") == "Virtual":
                 continue
             owners = [row.get("Id")] if row.get("Type") == "Movie" else [row.get("SeriesId"), row.get("SeasonId")]
@@ -619,7 +688,7 @@ class JellyfinClient(MediaServerClient):
         else:
             return []
         rows = self._items_page({**params, "fields": self.MEDIA_FIELDS, "enableUserData": "false", "enableImages": "false"})
-        return [entry for row in rows if row.get("LocationType") != "Virtual" for entry in [self._media_file(row)] if entry is not None]
+        return [entry for row in rows if row.get("LocationType") != "Virtual" for entry in [self._media_file(row, self._language_codes())] if entry is not None]
 
     def _download(self, url: str) -> Optional[bytes]:
         try:

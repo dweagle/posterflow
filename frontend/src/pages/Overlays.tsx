@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Maximize2, Minimize2, Play, Plus, Eraser, RefreshCw, RotateCcw, Trash2, Undo2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Maximize2, Minimize2, Play, Plus, Eraser, RefreshCw, RotateCcw, Trash2, Undo2, Weight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import Toolbar from '../components/Toolbar'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -19,6 +19,7 @@ import {
   type OverlayFont,
   type OverlayPlacement,
   type OverlayDefinition,
+  type OverlayBadgeRow,
   type OverlayTypeConfig,
   type OverlayTypeInfo,
   type OverlaysConfig,
@@ -47,6 +48,30 @@ const hiddenPlacement = (t: OverlayTypeInfo, options: Record<string, unknown>): 
 // Which overlay of a type applies to a library: the one naming it, else one set to all libraries.
 const overlayFor = (t: OverlayTypeConfig | undefined, library?: string): OverlayDefinition | undefined =>
   (library ? t?.overlays.find((o) => o.enabled && !o.all_libraries && o.libraries.includes(library)) : undefined) ?? t?.overlays.find((o) => o.enabled && o.all_libraries)
+
+// The overlays of a type a library's posters draw: one (see overlayFor), or for a type that
+// draws all of its overlays (custom badges) every one covering the library.
+const overlaysFor = (info: OverlayTypeInfo, t: OverlayTypeConfig | undefined, library?: string): OverlayDefinition[] => {
+  if (!info.multi) {
+    const one = overlayFor(t, library)
+    return one ? [one] : []
+  }
+  return (t?.overlays ?? []).filter((o) => o.enabled && (o.all_libraries || (library !== undefined && o.libraries.includes(library))))
+}
+
+// A custom overlay's own badges (the type's schema has a `badges` field), or none.
+const badgeRows = (info: OverlayTypeInfo, options: Record<string, unknown>): OverlayBadgeRow[] | null => {
+  const field = info.schema.find((f) => f.kind === 'badges')
+  return field ? (Array.isArray(options[field.key]) ? (options[field.key] as OverlayBadgeRow[]) : []) : null
+}
+
+// Does a switched-on badge of a switched-on overlay of the type hold a condition that reads TMDB?
+const rulesNeedTmdb = (info: OverlayTypeInfo, t: OverlayTypeConfig | undefined): boolean => {
+  const field = info.schema.find((f) => f.kind === 'badges')
+  if (!field || !t) return false
+  const reads = new Set((field.fields ?? []).filter((f) => f.needs?.includes('tmdb')).map((f) => f.key))
+  return t.overlays.some((o) => o.enabled && (badgeRows(info, o.options) ?? []).some((row) => row.enabled && row.rules.some((r) => reads.has(r.field))))
+}
 
 function Overlays() {
   const { showToast } = useToast()
@@ -112,7 +137,7 @@ function Overlays() {
   const hidden = current && currentCfg ? hiddenPlacement(current, currentCfg.options) : []
   const textCardShown = !hidden.includes('text')
   const enabledCount = config ? Object.values(config.types).filter((t) => t.enabled).length : 0
-  const tmdbNeeded = Boolean(config) && types.some((t) => t.needs.includes('tmdb') && config?.types[t.key]?.enabled)
+  const tmdbNeeded = Boolean(config) && types.some((t) => config?.types[t.key]?.enabled && (t.needs.includes('tmdb') || rulesNeedTmdb(t, config?.types[t.key])))
 
   const updateType = (key: string, patch: Partial<OverlaysConfig['types'][string]>) =>
     setConfig((prev) => (prev ? { ...prev, types: { ...prev.types, [key]: { ...prev.types[key], ...patch } } } : prev))
@@ -271,6 +296,9 @@ function Overlays() {
 
   const variants = useMemo(() => {
     if (!current || !currentCfg) return current?.variants ?? []
+    // A custom overlay's states are its own badges, in the order of its table.
+    const rows = badgeRows(current, currentCfg.options)
+    if (rows) return rows.map((r, i) => ({ key: r.id, label: r.name.trim() || `Badge ${i + 1}` }))
     // The list follows the options being edited: a variant standing for a table row shows only
     // while that row is on and sorts by the row's priority; one tied to an option is relabeled
     // or dropped as that option changes. Otherwise the backend's order is kept.
@@ -295,21 +323,23 @@ function Overlays() {
   // Every OTHER enabled type, in the overlay it would use for the libraries being edited here,
   // so the preview shows the whole composition.
   const otherLayers = useMemo(() => {
-    if (!config || !current) return { layers: [], overlayAt: {} as Record<string, number> }
+    if (!config || !current) return { layers: [], overlayAt: {} as Record<string, { type: string; index: number }> }
     const mine = config.types[current.key]
     const edited = mine?.overlays[Math.min(overlayByType[current.key] ?? 0, Math.max(0, (mine?.overlays.length ?? 1) - 1))]
     const anchor = edited && !edited.all_libraries ? edited.libraries[0] : undefined
-    const overlayAt: Record<string, number> = {}  // which overlay of each type is drawn, so a drag on it lands there
+    const overlayAt: Record<string, { type: string; index: number }> = {}  // layer id → the overlay it draws, so a drag on it lands there
     const layers = types
-      .filter((t) => t.key !== current.key && config.types[t.key]?.enabled)
-      .flatMap((t) => {
-        const cfg = overlayFor(config.types[t.key], anchor)
-        if (!cfg) return []
-        overlayAt[t.key] = config.types[t.key].overlays.indexOf(cfg)
+      // The other types, and the other overlays of a type that draws all of its own.
+      .filter((t) => (t.key !== current.key || t.multi) && config.types[t.key]?.enabled)
+      .flatMap((t) => overlaysFor(t, config.types[t.key], anchor).filter((cfg) => cfg !== edited).map((cfg) => {
+        const index = config.types[t.key].overlays.indexOf(cfg)
+        const id = t.multi ? `${t.key}:${index}` : t.key
+        overlayAt[id] = { type: t.key, index }
         const chosen = variantByType[t.key]
-        const v = chosen && t.variants.some((x) => x.key === chosen) ? chosen : t.variants[0]?.key ?? ''
-        return [{ type: t.key, variant: v, placement: cfg.placement, options: cfg.options }]
-      })
+        // Another custom overlay draws its heaviest badge: the server picks it when none is named.
+        const v = badgeRows(t, cfg.options) ? '' : chosen && t.variants.some((x) => x.key === chosen) ? chosen : t.variants[0]?.key ?? ''
+        return { type: t.key, variant: v, placement: cfg.placement, options: cfg.options, ...(t.multi ? { id, label: cfg.name.trim() || t.label } : {}) }
+      }))
     return { layers, overlayAt }
   }, [config, current, types, variantByType, overlayByType])
   const typeLabels = useMemo(() => Object.fromEntries(types.map((t) => [t.key, t.label])), [types])
@@ -327,6 +357,12 @@ function Overlays() {
   )
   const libraryKinds = !current ? 'movie or TV' : current.targets.includes('movie') ? (current.targets.includes('show') ? 'movie or TV' : 'movie') : 'TV'
   const overlayName = (o: OverlayDefinition, index: number) => o.name.trim() || `Overlay ${index + 1}`
+  // An overlay in a group: the group's name and the overlay's weight in it, for its tab.
+  const groupOf = (o: OverlayDefinition): { group: string; weight: number } | null => {
+    const keys = current?.group_options
+    const group = keys ? String(o.options[keys.group] ?? '').trim() : ''
+    return keys && group ? { group, weight: Number(o.options[keys.weight]) || 0 } : null
+  }
   // Which overlay of the selected type names a library (-1 = none; an all-libraries overlay never does).
   const namedBy = (fullKey: string) => (typeCfg?.overlays ?? []).findIndex((o) => !o.all_libraries && o.libraries.includes(fullKey))
   const addOverlay = (key: string) => {
@@ -528,11 +564,18 @@ function Overlays() {
                 <div className="overlays-def-tabs">
                   {typeCfg.overlays.length > 0 && (
                     <div className="overlays-def-tablist pf-subtabs" role="tablist" aria-label={`${current.label} overlays`}>
-                      {typeCfg.overlays.map((o, i) => (
+                      {typeCfg.overlays.map((o, i) => {
+                        const grouped = groupOf(o)
+                        return (
                         <div key={i} className={`overlays-tab ${overlayIndex === i ? 'active' : ''} ${o.enabled ? 'on' : ''}`}>
                           <button type="button" role="tab" aria-selected={overlayIndex === i} onClick={() => selectOverlay(current.key, i)}>
                             {overlayName(o, i)}
                           </button>
+                          {grouped && (
+                            <span className="overlays-tab-weight" title={`Group ${grouped.group}, weight ${grouped.weight}. The highest weight in a group is drawn.`} aria-label={`${overlayName(o, i)}: group ${grouped.group}, weight ${grouped.weight}`}>
+                              <Weight size={12} /> {grouped.weight}
+                            </span>
+                          )}
                           <Toggle
                             checked={o.enabled}
                             onChange={(v) => setConfig((prev) => (prev ? { ...prev, types: { ...prev.types, [current.key]: { ...prev.types[current.key], overlays: prev.types[current.key].overlays.map((x, j) => (j === i ? { ...x, enabled: v } : x)) } } } : prev))}
@@ -540,7 +583,8 @@ function Overlays() {
                             visibleLabel={false}
                           />
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                   <button type="button" className="btn-toolbar btn-toolbar-link overlays-def-add" onClick={() => addOverlay(current.key)} title="Add an overlay of this type: name it and pick the libraries it applies to">
@@ -560,7 +604,7 @@ function Overlays() {
                       <span className="overlays-def-hint">
                         {coveredLibraries.length === 0
                           ? (selectedLibraries.size === 0 ? 'No libraries are selected at the top of the page.' : `No ${libraryKinds} library is selected at the top of the page.`)
-                          : currentCfg.all_libraries ? 'Applies to every selected library that no other overlay of this type names.' : 'Applies to the ticked libraries only.'}
+                          : currentCfg.all_libraries ? (current.multi ? 'Applies to every selected library.' : 'Applies to every selected library that no other overlay of this type names.') : 'Applies to the ticked libraries only.'}
                       </span>
                     </div>
                     <div className="overlays-def-label">Libraries</div>
@@ -571,7 +615,7 @@ function Overlays() {
                       </label>
                       {coveredLibraries.map((lib) => {
                         const owner = namedBy(lib.fullKey)
-                        const taken = owner >= 0 && owner !== overlayIndex
+                        const taken = !current.multi && owner >= 0 && owner !== overlayIndex  // custom badges may share a library
                         // With All libraries on, the boxes only show what this overlay covers; they are picked when it is off.
                         const covered = currentCfg.all_libraries ? !taken : currentCfg.libraries.includes(lib.fullKey)
                         const locked = taken || currentCfg.all_libraries
@@ -606,7 +650,7 @@ function Overlays() {
                   large={largePreview}
                   others={otherLayers.layers}
                   labels={typeLabels}
-                  onLayerPlacementChange={(key, patch) => updatePlacement(key, patch, otherLayers.overlayAt[key])}
+                  onLayerPlacementChange={(layer, patch) => { const at = otherLayers.overlayAt[layer]; if (at) updatePlacement(at.type, patch, at.index) }}
                   refreshKey={assetVersion}
                 />
                 <div className="overlay-panels">
@@ -651,9 +695,9 @@ function Overlays() {
                   <OptionFields key={`merged-${current.key}`} render="fields" part="merged" textCardShown={textCardShown} cardsFirst={freeFirstRowSlots(hidden)} schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} typeKey={current.key} onAssetsChanged={() => setAssetVersion((v) => v + 1)} />
                 </div>
               </div>
-              {current.schema.some((f) => f.kind === 'states') && (
+              {current.schema.some((f) => f.kind === 'states' || f.kind === 'badges') && (
                 <section className="overlays-states-section">
-                  <OptionFields key={`states-${current.key}`} render="states" schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} backdropEnabled={currentCfg.placement.back_enabled !== false} defaults={current.default_options} />
+                  <OptionFields key={`states-${current.key}`} render="states" schema={current.schema} options={currentCfg.options} onChange={(options) => updateOptions(current.key, options)} idPrefix={`ov-${current.key}`} backdropEnabled={currentCfg.placement.back_enabled !== false} defaults={current.default_options} variant={variant} onVariantChange={(key) => setVariantByType((prev) => ({ ...prev, [current.key]: key }))} scope={currentCfg.all_libraries ? coveredLibraries.map((l) => l.fullKey) : currentCfg.libraries} />
                 </section>
               )}
                 </>

@@ -22,6 +22,7 @@ import re
 import tempfile
 import threading
 from contextlib import nullcontext
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from PIL import Image
@@ -42,9 +43,11 @@ from util.media_server.instances import instance_type
 from .base import ItemContext, OverlayBadge, OverlayType
 from .config import SETTING_TMDB_API_KEY, overlay_signature
 from .finales import FinaleLookup
+from .lookups import Lookups
 from .metadata import MetadataProvider, describe_record
 from .registry import all_types
 from .render import join_lines, render_badges, stand_in_mark
+from .rules import Unavailable
 
 ProgressCallback = Callable[[str, int, int, str], None]
 _STATE_LOCK = threading.Lock()  # process-wide: two runs may flush at once (workflow + webhook)
@@ -54,6 +57,23 @@ _SEASON_FILE = re.compile(r"^season\s*0*(\d+)$", re.I)  # SeasonNN.jpg beside th
 # this prefix plus the server's reference to that poster. The image itself is never kept.
 _SERVER_SOURCE = "server:"
 _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def configured_instances(db: Session) -> List[Dict[str, Any]]:
+    """The media servers that are set up: name, url, key and type each."""
+    raw = get_setting_value(db, "plex_instances")
+    try:
+        parsed = json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+    out = []
+    for inst in parsed if isinstance(parsed, list) else []:
+        if not isinstance(inst, dict):
+            continue
+        name, url, key = (str(inst.get(k) or "").strip() for k in ("name", "url", "api_key"))
+        if name and url and key:
+            out.append({"name": name, "url": url, "api_key": key, "type": instance_type(inst)})
+    return out
 
 
 class ServerOverlayEngine:
@@ -85,7 +105,11 @@ class ServerOverlayEngine:
         self.metadata = metadata or MetadataProvider(get_setting_value(db, SETTING_TMDB_API_KEY, "") if self._needs_tmdb else "", db=db,
                                                      finales=FinaleLookup.from_db(db) if self._needs_tmdb else None,
                                                      providers=any("providers" in n for n in needs),
-                                                     keywords=any("keywords" in n for n in needs))
+                                                     keywords=any("keywords" in n for n in needs),
+                                                     details=any("details" in n for n in needs),
+                                                     show_keywords=any("show_keywords" in n for n in needs))
+        # What custom overlays' conditions ask the server, the Arrs and lists.
+        self.lookups = Lookups(db, server_names=lambda: [inst["name"] for inst in self.instances()])
         self._instances = instances
         self._library_configs = library_configs
         self._client_factory = client_factory or (lambda inst: create_media_server_client(inst))
@@ -104,7 +128,7 @@ class ServerOverlayEngine:
         self._overlay_hashes: Dict[int, str] = {}  # id(overlay definition) → overlay_signature, computed once
         self.stats: Dict[str, Any] = {
             "applied": 0, "refreshed": 0, "restored": 0, "current": 0,
-            "no_badge": 0, "no_data": 0, "no_poster": 0, "failed": 0, "by_state": {}, "uploads_by_instance": {},
+            "no_badge": 0, "no_data": 0, "no_poster": 0, "failed": 0, "unanswered": 0, "by_state": {}, "uploads_by_instance": {},
             "server_sourced": 0,
             "plex_pruned": 0, "plex_freed_bytes": 0, "plex_shared": 0, "reuploaded": 0,
         }
@@ -119,19 +143,7 @@ class ServerOverlayEngine:
     def instances(self) -> List[Dict[str, Any]]:
         if self._instances is not None:
             return self._instances
-        raw = get_setting_value(self.db, "plex_instances")
-        try:
-            parsed = json.loads(raw) if raw else []
-        except (json.JSONDecodeError, TypeError):
-            return []
-        out = []
-        for inst in parsed if isinstance(parsed, list) else []:
-            if not isinstance(inst, dict):
-                continue
-            name, url, key = (str(inst.get(k) or "").strip() for k in ("name", "url", "api_key"))
-            if name and url and key:
-                out.append({"name": name, "url": url, "api_key": key, "type": instance_type(inst)})
-        return out
+        return configured_instances(self.db)
 
     def library_configs(self) -> List[Dict[str, Any]]:
         if self._library_configs is not None:
@@ -184,7 +196,7 @@ class ServerOverlayEngine:
         """Per-item outcomes are debug: INFO carries the run's shape and totals only."""
         log_debug(LogTags.OVERLAYS, message)
 
-    _COUNTED = ("applied", "refreshed", "restored", "current", "no_badge", "no_data", "no_poster", "failed")
+    _COUNTED = ("applied", "refreshed", "restored", "current", "no_badge", "no_data", "no_poster", "failed", "unanswered")
 
     def _snapshot(self) -> Dict[str, int]:
         return {k: self.stats[k] for k in self._COUNTED}
@@ -207,6 +219,8 @@ class ServerOverlayEngine:
             f"{s['current']} already current; {s['no_badge']} item(s) with no badge by rule, {s['no_data']} without TMDB data, "
             f"{s['no_poster']} without a {'poster to badge' if self.server_sources else 'Posterflow poster'}, {s['failed']} failed",
         )
+        if s["unanswered"]:
+            log_warning(LogTags.OVERLAYS, f"{s['unanswered']} item(s) left as they are: a source their custom conditions ask did not answer (see the warnings above)")
         if s["server_sourced"]:
             log_info(LogTags.OVERLAYS, f"Badged on the media server's own poster (no Posterflow poster): {s['server_sourced']} item(s)")
         if s["by_state"]:
@@ -412,11 +426,27 @@ class ServerOverlayEngine:
                         return overlay
         return next((o for o in overlays if o.get("all_libraries")), None)
 
+    @staticmethod
+    def _overlays_for(otype: OverlayType, tcfg: Dict[str, Any], library_id: str) -> List[Dict[str, Any]]:
+        """The type's overlays an item draws: one (see _overlay_for), or for a `multi` type every
+        one set to all libraries or naming the item's library."""
+        if not otype.multi:
+            one = ServerOverlayEngine._overlay_for(tcfg, library_id)
+            return [one] if one is not None else []
+        instance, _, key = (library_id or "").partition(":")
+        key = key.rsplit("/", 1)[-1]
+
+        def names(overlay: Dict[str, Any]) -> bool:
+            return any(str(lib).partition(":")[0] == instance and str(lib).partition(":")[2].rsplit("/", 1)[-1] == key for lib in overlay.get("libraries") or [])
+
+        return [o for o in ServerOverlayEngine._type_configs(tcfg) if o.get("all_libraries") or (instance and key and names(o))]
+
     def _resolve(self, ctx: ItemContext) -> Tuple[List[Tuple[OverlayType, OverlayBadge, Dict[str, Any]]], bool, bool, Dict[str, Any]]:
-        """(badges, had_data, applicable, meta)."""
+        """(badges, had_data, applicable, meta). `meta["unanswered"]` names a source a custom
+        overlay's conditions asked that did not answer: its badge is then unknown."""
         out: List[Tuple[OverlayType, OverlayBadge, Dict[str, Any]]] = []
         relevant = [(otype, cfg) for otype, tcfg in self.active if ctx.target in otype.targets
-                    for cfg in [self._overlay_for(tcfg, ctx.library_id)] if cfg is not None]
+                    for cfg in self._overlays_for(otype, tcfg, ctx.library_id)]
         if not relevant:
             return out, True, False, {}
         meta: Dict[str, Any] = {}
@@ -424,14 +454,31 @@ class ServerOverlayEngine:
         if any("tmdb" in otype.needs_for(cfg["options"]) for otype, cfg in relevant):  # media-only overlays ask TMDB nothing
             meta = self.metadata.for_item(ctx)
             had_data = bool(meta)
+        groups: Dict[Tuple[str, str], int] = {}  # a group → where its badge sits in `out`
         for otype, cfg in relevant:
             try:
                 badge = otype.resolve(ctx, cfg["options"], meta)
+            except Unavailable as exc:
+                meta = {**meta, "unanswered": str(exc)}
+                continue
             except Exception as exc:
                 log_warning(LogTags.OVERLAYS, f"{otype.label} overlay failed for {self._label(ctx)}: {exc}")
                 continue
-            if badge is not None:
-                out.append((otype, badge, cfg["placement"]))
+            if badge is None:
+                continue
+            if otype.multi:  # named after its overlay (and its own name, when it has one), in the logs and the totals
+                name = str(cfg.get("name") or otype.label)
+                name = f"{name}: {badge.key}" if badge.key else name
+                badge = replace(badge, key=name, text=name if badge.image else badge.text)
+            if badge.group:  # of one group the heaviest match is the one drawn, the first on a tie
+                group = (otype.key, badge.group.casefold())
+                at = groups.get(group)
+                if at is not None:
+                    if badge.weight > out[at][1].weight:
+                        out[at] = (otype, badge, cfg["placement"])
+                    continue
+                groups[group] = len(out)
+            out.append((otype, badge, cfg["placement"]))
         return out, had_data, True, meta
 
     @staticmethod
@@ -444,9 +491,12 @@ class ServerOverlayEngine:
         "cfg:<type>:<hash>" line per badge for the overlay definition that produced it. A settings
         edit changes the lines of every item it touches, so any run or upload sees it per item."""
         lines = [f"{otype.key}:{badge.signature}{stand_in_mark(badge, placement)}" for otype, badge, placement in resolved]
-        for otype, _badge, _placement in resolved:
+        for otype, _badge, placement in resolved:
             tcfg = next((t for o, t in self.active if o.key == otype.key), None)
-            overlay = self._overlay_for(tcfg, ctx.library_id) if tcfg else None
+            # The overlay that drew the badge is the one whose placement it carries.
+            overlay = next((o for o in self._type_configs(tcfg) if o.get("placement") is placement), None) if tcfg else None
+            if overlay is None and tcfg:
+                overlay = self._overlay_for(tcfg, ctx.library_id)
             if overlay is not None:
                 lines.append(f"cfg:{otype.key}:{self._overlay_hashes.setdefault(id(overlay), overlay_signature(overlay))}")
         return "\n".join(lines)
@@ -633,6 +683,8 @@ class ServerOverlayEngine:
                     log_debug(LogTags.OVERLAYS, f"Could not read the media details of {item.title}: {exc}")
                     self._media[key] = []
             ctx.media = self._media[key]
+        ctx.client = client or ctx.client
+        ctx.lookups = self.lookups
         return ctx
 
     # ── the per-item decision ──────────────────────────────────────────────
@@ -646,6 +698,10 @@ class ServerOverlayEngine:
         if not applicable:
             if entry:  # overlays off (or this kind no longer targeted): give the clean poster back
                 self._restore(instance_name, client, item, key, entry, label, dry_run, parent)
+            return
+        if meta.get("unanswered"):  # a badge of its is unknown: nothing is added or taken away
+            self.stats["unanswered"] += 1
+            self._log_item(f"{label} → left as it is | {meta['unanswered']}")
             return
         sig = self._signature(ctx, resolved)
         ids = ", ".join(f"{k} {v}" for k, v in (("tmdb", ctx.tmdb_id), ("tvdb", ctx.tvdb_id), ("imdb", ctx.imdb_id)) if v) or "no ids"
@@ -860,7 +916,9 @@ class ServerOverlayEngine:
             return False
         entry = self._state["items"].get(f"{instance_name}|{item.item_id}")
         ctx = self._context(instance_name, item, parent)
-        resolved, _had_data, applicable, _meta = self._resolve(ctx)
+        resolved, _had_data, applicable, meta = self._resolve(ctx)
+        if meta.get("unanswered"):
+            return False  # a badge of its is unknown: the next run decides
         sig = self._signature(ctx, resolved) if applicable else ""
         if not sig:
             return bool(entry)
@@ -1011,6 +1069,7 @@ class ServerOverlayEngine:
         source = "TMDB key set" if (not self._needs_tmdb or self.metadata.available) else "no TMDB key — status badges will be skipped"
         log_info(LogTags.OVERLAYS, f"Overlays on: {names} ({source}); mode: {mode}{' (dry run)' if dry_run else ''}")
         self.metadata.begin_run(refresh=mode == "rebuild")
+        self.lookups.begin_run(refresh=mode == "rebuild")
         if mode == "rebuild" and self._needs_tmdb and self.metadata.available:
             log_info(LogTags.OVERLAYS, "Rebuild: the TMDB cache is set aside, every title is asked again")
 
