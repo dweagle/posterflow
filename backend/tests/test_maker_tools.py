@@ -1792,8 +1792,6 @@ def test_downgrade_v8_linked_layers_preserves_descriptor_bearing_entries():
         filename="Legacy.png\x00", filetype=b"png ", data=b"legacy-bytes",
         child_id="\x00", mod_time=0.0, lock_state=0,
     )
-    if not hasattr(legacy_entry, "content_descriptor"):
-        pytest.skip("psd-tools lacks linked-layer content_descriptor support")
 
     content_id = "content-id-123"
     descriptor = DescriptorBlock()
