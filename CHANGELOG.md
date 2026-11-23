@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.6] - 2026-11-22
+### Fixed
+- Maker Tools: PSD exports keep Photoshop 2024+ smart objects intact.
+
 ## [0.19.5] - 2026-11-22
 ### Added
 - Overlays: export overlays to a file and import them on another PosterFlow, images included.
