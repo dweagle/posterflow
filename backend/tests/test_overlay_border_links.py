@@ -323,35 +323,40 @@ def test_a_poster_written_without_the_border_pass_loses_its_note(test_db):
     assert test_db.query(PosterBorder).count() == 1
 
 
-def test_webhook_promotion_drops_the_notes_of_the_posters_it_writes(test_db, tmp_path, monkeypatch):
-    """With the border pass off a webhook copies staged posters over the placed ones: plain again."""
+def test_webhook_promotion_drops_the_note_of_a_poster_it_replaces(test_db, tmp_path, monkeypatch):
+    """With the border pass off a webhook copies the poster it staged over the placed one: plain again."""
     import modules.upload as upload_module
     from models.drive import Drive
     from models.job import Job
+
+    dest = tmp_path / "dest"
 
     class _Renamer:
         def __init__(self, _db, **_kwargs):
             pass
 
         def rename_posters(self, **_kwargs):
-            return {"success": True, "stats": {"total_matched": 1, "movies": 1, "series": 0, "collections": 0}}
+            staged = dest / "tmp" / "Elf (2003)" / "poster.jpg"
+            staged.write_bytes(b"new")
+            return {"success": True, "renamed_files": [str(staged)], "stats": {"total_matched": 1, "movies": 1, "series": 0, "collections": 0}}
 
     monkeypatch.setattr("modules.upload.PosterRenameService", _Renamer)
-    dest = tmp_path / "dest"
-    for folder, placed in (("Elf (2003)", b"bordered"), ("Heat (1995)", b"staged")):
+    for folder in ("Elf (2003)", "Heat (1995)"):
         (dest / "tmp" / folder).mkdir(parents=True)
         (dest / "tmp" / folder / "poster.jpg").write_bytes(b"staged")
         (dest / folder).mkdir()
-        (dest / folder / "poster.jpg").write_bytes(placed)
+        (dest / folder / "poster.jpg").write_bytes(b"bordered")
     _note(test_db, str(dest / "Elf (2003)" / "poster.jpg"), "holiday:Winter")
-    _note(test_db, str(dest / "Heat (1995)" / "poster.jpg"), "rule:Hands off")
+    _note(test_db, str(dest / "Heat (1995)" / "poster.jpg"), "holiday:Winter")
     test_db.add(Setting(key="poster_destination", value=str(dest)))
     test_db.add(Setting(key="poster_drive_priority", value=json.dumps({"drive_ids": [1]})))
+    test_db.add(Setting(key="plex_webhook_adopt_existing_processed", value="false"))
     test_db.add(Drive(id=1, name="Drive", drive_id="drive-1", style_type="MM2K", subscribed=True))
     job = Job(job_type="Plex Upload Webhook", status="pending", progress=0, message="Queued")
     test_db.add(job)
     test_db.commit()
 
-    upload_module._run_webhook_preupload_rename_pass(test_db, job, {"media_type": "movie", "title": "Jaws", "year": 1975, "tmdb_id": 578, "imdb_id": None, "tvdb_id": None, "season_number": None})
-    assert (dest / "Elf (2003)" / "poster.jpg").read_bytes() == b"staged"
-    assert _notes(test_db) == {"Heat (1995)/poster.jpg": "rule:Hands off"}  # untouched by the copy: its note stays
+    upload_module._run_webhook_preupload_rename_pass(test_db, job, {"media_type": "movie", "title": "Elf", "year": 2003, "tmdb_id": 1, "imdb_id": None, "tvdb_id": None, "season_number": None})
+    assert (dest / "Elf (2003)" / "poster.jpg").read_bytes() == b"new"
+    assert (dest / "Heat (1995)" / "poster.jpg").read_bytes() == b"bordered"
+    assert _notes(test_db) == {"Heat (1995)/poster.jpg": "holiday:Winter"}  # left alone by the copy: its note stays

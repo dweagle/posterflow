@@ -35,6 +35,7 @@ from core.logging import (
 )
 from models.setting import get_setting, upsert_setting
 from services.poster_borders import HOLIDAY, RULE, BorderNotes, border_key
+from util.poster_settings import note_placement
 from util.posters.scanner import artwork_type_of
 from util.fs_scan import iter_file_entries
 
@@ -1717,6 +1718,7 @@ class BorderReplacerService:
                 if len(files_needing_processing) == 0:
                     if not dry_run:
                         border_notes.save(placed_paths)
+                        note_placement(self.db, by_border_pass=True)
                     log_info(
                         LogTags.BORDER_REPLACER,
                         "No files need processing - all up to date",
@@ -2064,6 +2066,7 @@ class BorderReplacerService:
             _flush_tracking_updates(force=True)
             if not dry_run:
                 border_notes.save(placed_paths)
+                note_placement(self.db, by_border_pass=True)
 
             log_success(
                 LogTags.BORDER_REPLACER,

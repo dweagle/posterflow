@@ -27,7 +27,7 @@ from core.logging import (
 from database import SessionLocal
 from models.drive import Drive
 from models.setting import get_setting, upsert_setting
-from util.poster_settings import get_poster_destination
+from util.poster_settings import get_poster_destination, placed_by_border_pass
 from util.posters.scanner import is_artwork_file
 from models.job import (
     Job,
@@ -501,7 +501,10 @@ def _run_webhook_preupload_rename_pass(
         str(get_setting(db, "auto_run_border").value if get_setting(db, "auto_run_border") else "false").lower()
         == "true"
     )
-    summary["border"]["enabled"] = auto_run_border_enabled
+    # Posters the border pass placed are joined by one that went through it too.
+    run_border_pass = auto_run_border_enabled or placed_by_border_pass(db)
+    summary["border"]["enabled"] = run_border_pass
+    staged_now = {os.path.normpath(str(path)) for path in rename_result.get("renamed_files") or []}
 
     def _promote_tmp_staging_to_destination() -> None:
         summary["tmp_promotion"]["attempted"] = True
@@ -521,6 +524,7 @@ def _run_webhook_preupload_rename_pass(
         skipped_artwork = 0
         copied_files: List[str] = []
 
+        # A placed poster is replaced only by a copy this pass staged; a missing one is always placed.
         for item in os.listdir(tmp_source_dir):
             src_path = os.path.join(tmp_source_dir, item)
             dest_path = os.path.join(destination_dir, item)
@@ -545,7 +549,7 @@ def _run_webhook_preupload_rename_pass(
                             src_file = os.path.join(root, file_name)
                             dest_file = os.path.join(dest_root, file_name)
 
-                            if os.path.exists(dest_file) and filecmp.cmp(src_file, dest_file, shallow=False):
+                            if os.path.exists(dest_file) and (os.path.normpath(src_file) not in staged_now or filecmp.cmp(src_file, dest_file, shallow=False)):
                                 skipped_count += 1
                                 continue
 
@@ -555,7 +559,7 @@ def _run_webhook_preupload_rename_pass(
                 elif os.path.isfile(src_path):
                     if is_artwork_file(item):
                         skipped_artwork += 1
-                    elif os.path.exists(dest_path) and filecmp.cmp(src_path, dest_path, shallow=False):
+                    elif os.path.exists(dest_path) and (os.path.normpath(src_path) not in staged_now or filecmp.cmp(src_path, dest_path, shallow=False)):
                         skipped_count += 1
                     else:
                         shutil.copy2(src_path, dest_path)
@@ -591,7 +595,7 @@ def _run_webhook_preupload_rename_pass(
         forget_borders(db, copied_files)
 
     def _run_standard_border_pass_if_enabled() -> None:
-        if not auto_run_border_enabled:
+        if not run_border_pass:
             return
 
         tmp_source_dir = os.path.join(destination_dir, "tmp")
@@ -605,6 +609,12 @@ def _run_webhook_preupload_rename_pass(
             return
 
         summary["border"]["attempted"] = True
+        if not auto_run_border_enabled:
+            log_info(
+                LogTags.UPLOADER,
+                "Webhook pre-upload border pass: Auto-Run Border Replacer is off, but the Border Replacer placed the posters in the destination, so this one goes through it too",
+                title=parsed_payload.get("title"),
+            )
 
         mode_setting = get_setting(db, "border_replacer_mode")
         mode = mode_setting.value if mode_setting and mode_setting.value in {"full", "incremental"} else "incremental"
@@ -654,7 +664,7 @@ def _run_webhook_preupload_rename_pass(
         summary["rename"]["series"] = int(stats.get("series", 0))
         summary["rename"]["collections"] = int(stats.get("collections", 0))
 
-        if auto_run_border_enabled:
+        if run_border_pass:
             _run_standard_border_pass_if_enabled()
         else:
             if dry_run:

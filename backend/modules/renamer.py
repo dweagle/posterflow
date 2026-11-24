@@ -39,7 +39,7 @@ from services.poster_renamer import PosterRenameService
 from services.notifications import send_notification, send_major_error_notification
 from services.community_reconcile import reconcile_community_lists
 from core.hooks import run_post_job_hook, HOOK_KEY_RENAMER
-from util.poster_settings import ASSET_TYPES, get_asset_include, get_poster_destination
+from util.poster_settings import ASSET_TYPES, get_asset_include, get_poster_destination, note_placement
 from util.posters.scanner import is_artwork_file
 
 
@@ -486,6 +486,7 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
                         )
 
                     forget_borders(db, copied_files)
+                    note_placement(db, by_border_pass=False)
                     try:
                         dest_pattern = dest_dir.rstrip('/') + '/%'
                         reset_count = db.query(Poster).filter(

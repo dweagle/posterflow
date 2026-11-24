@@ -13,9 +13,10 @@ import json
 from sqlalchemy.orm import Session
 
 from core.config import settings
-from models.setting import get_setting_value
+from models.setting import get_setting_value, upsert_setting
 
 SETTING_POSTER_DESTINATION = "poster_destination"
+SETTING_PLACED_BY_BORDER_PASS = "posters_placed_by_border_pass"
 
 DEFAULT_POSTER_DESTINATION = str(settings.config_dir / "posters" / "assets")
 
@@ -32,6 +33,17 @@ def get_poster_destination(db: Session) -> str:
     """
     value = get_setting_value(db, SETTING_POSTER_DESTINATION)
     return (str(value).strip() if value else "") or DEFAULT_POSTER_DESTINATION
+
+
+def placed_by_border_pass(db: Session) -> bool:
+    """Did the Border Replacer place the destination's posters last (not a plain copy)?"""
+    return str(get_setting_value(db, SETTING_PLACED_BY_BORDER_PASS, "false")).strip().lower() == "true"
+
+
+def note_placement(db: Session, by_border_pass: bool) -> None:
+    if placed_by_border_pass(db) != by_border_pass:
+        upsert_setting(db, SETTING_PLACED_BY_BORDER_PASS, "true" if by_border_pass else "false")
+        db.commit()
 
 
 SETTING_MEDIA_SERVER_MEDIA_SOURCE = "media_server_media_source"
