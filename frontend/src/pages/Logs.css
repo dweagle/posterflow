@@ -92,6 +92,8 @@
   /* The log pane scrolls internally and needs a definite height to fill. */
   height: 70vh;
   overflow: hidden;
+  /* Rows lay out against the pane's own width (see the @container blocks below). */
+  container: log-pane / inline-size;
 }
 
 .btn-jump-latest-floating {
@@ -110,7 +112,8 @@
 .logs-search-row {
   display: flex;
   justify-content: center;
-  }
+  container: logs-search / inline-size;
+}
 
 .logs-search {
   display: flex;
@@ -355,6 +358,7 @@
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  container: log-viewer / inline-size;
 }
 
 .log-viewer-empty {
@@ -490,6 +494,7 @@
   flex: 1;
   overflow: hidden; /* the log pane scrolls internally */
   padding: var(--sp-24);
+  container: log-pane / inline-size;
 }
 
 .log-viewer-content .log-hang {
@@ -583,8 +588,122 @@
     max-height: 400px;
   }
 
+  /* A definite height: the log pane scrolls inside the panel, which paging and live follow need. */
   .log-viewer-panel {
-    min-height: 500px;
+    height: 80dvh;
+    min-height: 320px;
+  }
+}
+
+/* The search row has no room to hang the match counter off the right of the centered field:
+   the counter takes its own line under it. */
+@container logs-search (max-width: 940px) {
+  .logs-search {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .logs-search-meta {
+    position: static;
+    transform: none;
+    flex-basis: 100%;
+    justify-content: center;
+    margin-left: 0;
+  }
+
+  .logs-search-meta:empty {
+    display: none;
+  }
+}
+
+/* Narrower than the field itself (a phone): the field fills the row. */
+@container logs-search (max-width: 560px) {
+  .logs-search {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .logs-search .logs-search-box {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .logs-search input {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+  }
+}
+
+/* The viewer has no room for the title, the find bar and Download in one row: the find bar
+   takes its own row under them. */
+@container log-viewer (max-width: 840px) {
+  .log-viewer-header {
+    flex-wrap: wrap;
+    gap: var(--sp-12) var(--sp-16);
+  }
+
+  .log-viewer-find {
+    order: 1;
+    flex: 0 0 100%;
+    width: auto;
+    margin: 0;
+  }
+}
+
+/* Narrower than the find bar itself (a phone): the field fills the row and the match counter
+   wraps under it. */
+@container log-viewer (max-width: 500px) {
+  .log-viewer-find {
+    flex-wrap: wrap;
+  }
+
+  .log-viewer-find .logs-search-box {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .log-viewer-find input {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+  }
+
+  .log-viewer-find .logs-match-nav {
+    flex-basis: 100%;
+  }
+}
+
+/* A narrow log pane (a phone, a small window) has no room for the fixed columns or a hanging
+   indent, which would leave the message a column a few characters wide. */
+@container log-pane (max-width: 600px) {
+  /* Timestamp and level share the first row; the message gets the full width below. */
+  .log-entry {
+    grid-template-columns: auto auto 1fr;
+    grid-template-rows: auto auto;
+    row-gap: var(--sp-2);
+  }
+
+  .log-timestamp {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .log-level {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .log-message {
+    padding-left: 0;
+    text-indent: 0;
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .log-hang-line {
+    padding-left: 0;
+    text-indent: 0;
   }
 }
 
@@ -593,35 +712,29 @@
     gap: var(--sp-8);
   }
 
-      .logs-list {
+  .logs-list {
     font-size: var(--text-xs);
-  }
-
-  /* Stack log entries: shrink fixed columns, message gets full width on next row */
-  .log-entry {
-    grid-template-columns: auto auto 1fr;
-    grid-template-rows: auto auto;
-    row-gap: var(--sp-2);
   }
 
   .log-timestamp {
     font-size: var(--text-2xs);
-    grid-column: 1;
-    grid-row: 1;
   }
 
   .log-level {
     font-size: var(--text-xs);
-    grid-column: 2;
-    grid-row: 1;
   }
 
   .log-message {
-    padding-left: 0;
-    text-indent: 0;
     font-size: var(--text-xs);
     line-height: 1.4;
-    grid-column: 1 / -1;
-    grid-row: 2;
+  }
+
+  .log-viewer-header,
+  .log-viewer-content {
+    padding: var(--sp-12);
+  }
+
+  .log-viewer-content .log-hang {
+    font-size: var(--text-xs);
   }
 }
