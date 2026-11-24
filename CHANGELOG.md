@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.7] - 2026-11-24
+### Added
+- Overlays: link an overlay to holidays or border rules with the new Border Link row on the Overlays page.
+  - Posters that got that border use the linked overlay in place of the normal one.
+  - A linked overlay is previewed on its holiday or rule border on the Overlays page.
+  - Run the Border Replacer or a Workflow with Border Replacer, etc. once after updating so your posters are matched to their holiday or rule.
+
+### Fixed
+- Webhooks: a webhook for a new title no longer strips the borders from your other posters when Auto-Run Border Replacer is off.
+- UI: popup buttons stay on screen in mobile browsers.
+- Logs: the Logs page is easier to read on phones and small windows.
+
 ## [0.19.6] - 2026-11-22
 ### Fixed
 - Maker Tools: PSD exports keep Photoshop 2024+ smart objects intact.
