@@ -926,7 +926,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-16);
-  max-height: 70vh;
+  max-height: 70dvh;
   overflow-y: auto;
 }
 

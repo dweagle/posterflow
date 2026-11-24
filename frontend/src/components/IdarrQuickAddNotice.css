@@ -17,7 +17,7 @@
   max-width: 520px;
   display: flex;
   flex-direction: column;
-  max-height: 80vh;
+  max-height: 80dvh;
 }
 
 .idarr-notice-header {

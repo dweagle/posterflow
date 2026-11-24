@@ -12,7 +12,7 @@
 
 .tmdb-lightbox-img {
   max-width: min(90vw, 400px);
-  max-height: 90vh;
+  max-height: 90dvh;
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 40px var(--shadow-color-strong);
   display: block;
@@ -533,12 +533,12 @@
   align-items: center;
   gap: var(--sp-12);
   max-width: min(92vw, 900px);
-  max-height: 92vh;
+  max-height: 92dvh;
 }
 
 .tmdb-gallery-lightbox-img {
   max-width: 100%;
-  max-height: calc(92vh - 3.5rem);
+  max-height: calc(92dvh - 3.5rem);
   border-radius: var(--radius-lg);
   object-fit: contain;
   box-shadow: 0 8px 40px var(--shadow-color-strong);
@@ -571,7 +571,7 @@
 }
 
 .tmdb-gallery-lightbox--toolbar .tmdb-gallery-lightbox-img {
-  max-height: calc(92vh - 6.5rem);
+  max-height: calc(92dvh - 6.5rem);
 }
 
 /* Gemini modal pickers: compact. Scoped under .modal-body to outrank DriveEditModal.css's
@@ -692,7 +692,7 @@
 .art-lightbox-logo-pane {
   display: flex;
   max-width: 100%;
-  max-height: calc(92vh - 3.5rem);
+  max-height: calc(92dvh - 3.5rem);
   padding: var(--sp-24) var(--sp-32);
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 40px var(--shadow-color-strong);
@@ -710,7 +710,7 @@
 
 .gemini-figure--logo { flex: none; margin-bottom: var(--sp-12); }
 
-.gemini-img { display: block; max-width: 100%; max-height: max(200px, calc(80vh - 300px)); border-radius: var(--radius-md); cursor: zoom-in; }
+.gemini-img { display: block; max-width: 100%; max-height: max(200px, calc(80dvh - 300px)); border-radius: var(--radius-md); cursor: zoom-in; }
 
 .gemini-img--logo { max-height: 140px; margin: 0 auto; padding: var(--sp-12); }
 
@@ -732,7 +732,7 @@
 
 .gemini-prompt-swap { display: flex; gap: var(--sp-4); }
 
-.gemini-zoom-img { max-width: 92vw; max-height: 92vh; }
+.gemini-zoom-img { max-width: 92vw; max-height: 92dvh; }
 
 .gemini-zoom-img--logo { padding: var(--sp-24); }
 
@@ -746,7 +746,7 @@
 
 .square-crop-stage { position: relative; overflow: hidden; line-height: 0; user-select: none; touch-action: none; }
 
-.square-crop-img { display: block; max-width: 100%; max-height: min(62vh, calc(80vh - 230px)); }
+.square-crop-img { display: block; max-width: 100%; max-height: min(62dvh, calc(80dvh - 230px)); }
 
 .square-crop-box { position: absolute; border: 2px solid var(--color-accent); box-shadow: 0 0 0 9999px var(--scrim); cursor: move; }
 

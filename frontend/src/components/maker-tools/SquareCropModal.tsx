@@ -133,7 +133,7 @@ export default function SquareCropModal({ imageUrl, title, saving, onCancel, onS
        <div className="square-crop-layout">
         <div className="square-crop-main">
         <div className="square-crop-stage">
-          {/* Cap the height so the whole image fits inside the 80vh modal (header + footer + caption)
+          {/* Cap the height so the whole image fits inside the 80dvh modal (header + footer + caption)
               without the modal-body needing to scroll — otherwise the bottom is hidden below the fold. */}
           <img ref={imgRef} src={imageUrl} onLoad={measure} draggable={false} alt="" className="square-crop-img" />
           {sel && !tooSmall && (

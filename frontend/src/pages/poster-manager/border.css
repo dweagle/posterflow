@@ -243,7 +243,7 @@
   z-index: 30;
   width: 340px;
   max-width: min(340px, 88vw);
-  max-height: 65vh;
+  max-height: 65dvh;
   overflow-y: auto;
   padding: var(--sp-16) var(--sp-16);
   background: var(--color-surface);

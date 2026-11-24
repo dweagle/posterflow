@@ -122,7 +122,7 @@
    and sort controls stay pinned at the top. */
 
 .modal-content.list-items-modal {
-  height: 80vh;
+  height: 80dvh;
 }
 
 .list-items-modal .modal-body {
@@ -532,7 +532,7 @@
   box-shadow: none;
   width: auto;
   max-width: calc(100vw - 2rem);
-  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
   padding: 0;
 }
 
@@ -541,7 +541,7 @@
   width: auto;
   height: auto;
   max-width: calc(100vw - 2rem);
-  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-page-bg);
@@ -1585,7 +1585,7 @@
   max-width: 560px;
   width: 100%;
   /* Fixed height so the picker doesn't shrink when only a few items are listed. */
-  height: 80vh;
+  height: 80dvh;
 }
 
 .create-list-modal .modal-body {
@@ -1775,7 +1775,7 @@
 
 .authed-image-lightbox-img {
   max-width: min(90vw, 700px);
-  max-height: 90vh;
+  max-height: 90dvh;
   object-fit: contain;
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 40px var(--shadow-color);

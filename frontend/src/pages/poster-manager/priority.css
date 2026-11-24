@@ -463,7 +463,7 @@
 .modal-overlay.drive-usage-preview-overlay {
   flex-direction: column;
   justify-content: flex-start;
-  padding-top: 6vh;
+  padding-top: 6dvh;
 }
 
 /* Centered in the region above the pinned arrows (bottom padding mirrors them). */
@@ -471,16 +471,16 @@
 .modal-overlay.drive-usage-preview-overlay--art {
   justify-content: center;
   /* Top padding biases the centering downward. */
-  padding-top: 10vh;
-  padding-bottom: calc(85vh - min(440px, 60vh) - 4.4rem);
+  padding-top: 10dvh;
+  padding-bottom: calc(85dvh - min(440px, 60dvh) - 4.4rem);
 }
 
 /* Arrows pinned just under the tallest preview of each type (lightbox only).
-   Posters: 6vh top + (90vh - 8rem) image + ~4.15rem caption/actions. */
+   Posters: 6dvh top + (90dvh - 8rem) image + ~4.15rem caption/actions. */
 
 .drive-usage-preview-overlay .drive-usage-preview-nav-row {
   position: fixed;
-  top: calc(96vh - 3.6rem);
+  top: calc(96dvh - 3.6rem);
   left: 0;
   right: 0;
   margin-top: 0;
@@ -495,16 +495,16 @@
   justify-content: center;
 }
 
-/* Artwork: 15vh top + square cap (the tallest artwork shape) + caption/actions. */
+/* Artwork: 15dvh top + square cap (the tallest artwork shape) + caption/actions. */
 
 .drive-usage-preview-overlay--art .drive-usage-preview-nav-row {
-  top: calc(15vh + min(440px, 60vh) + 4.4rem);
+  top: calc(15dvh + min(440px, 60dvh) + 4.4rem);
 }
 
 /* Cap so a tall poster plus its caption clears the pinned arrows. */
 
 .drive-usage-preview .tmdb-poster-preview-image {
-  max-height: calc(90vh - 8rem);
+  max-height: calc(90dvh - 8rem);
   margin-inline: auto;
 }
 
@@ -518,12 +518,12 @@
 
 .drive-usage-preview .tmdb-poster-preview-image.drive-usage-preview-background {
   max-width: min(760px, calc(100vw - 8rem));
-  max-height: 55vh;
+  max-height: 55dvh;
 }
 
 .drive-usage-preview .tmdb-poster-preview-image.drive-usage-preview-square {
   max-width: min(440px, calc(100vw - 8rem));
-  max-height: min(440px, 60vh);
+  max-height: min(440px, 60dvh);
 }
 
 /* One line, zero intrinsic width: the image alone sizes the modal; a wider caption
@@ -627,7 +627,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding-top: 7vh;
+  padding-top: 7dvh;
 }
 
 /* Hugs its content; views are tuned to near-equal heights so chips don't jump. */
@@ -641,8 +641,8 @@
   min-width: min(30rem, calc(100vw - 2rem));
   max-width: calc(100vw - 2rem);
   height: fit-content;
-  /* 80vh, shrunk when needed so the nav row below still fits on screen. */
-  max-height: min(80vh, calc(93vh - 4.5rem));
+  /* 80dvh, shrunk when needed so the nav row below still fits on screen. */
+  max-height: min(80dvh, calc(93dvh - 4.5rem));
   display: flex;
   flex-direction: column;
   gap: var(--sp-12);
@@ -709,7 +709,7 @@
   gap: var(--sp-8);
   flex-shrink: 0;
   /* One height-aware width for BOTH views, so every chip keeps the same modal width. */
-  width: min(280px, calc(52vh - 190px), calc(100vw - 4rem));
+  width: min(280px, calc(52dvh - 190px), calc(100vw - 4rem));
 }
 
 /* Compare images open the big preview on click; placeholders (divs) stay inert. */
@@ -773,7 +773,7 @@ img.drive-usage-compare-piece-img {
   justify-content: center;
 }
 
-/* Whole-set compare: one column per drive; height-aware width fits 80vh unscrolled. */
+/* Whole-set compare: one column per drive; height-aware width fits 80dvh unscrolled. */
 
 .drive-usage-compare-setcol {
   align-items: stretch;

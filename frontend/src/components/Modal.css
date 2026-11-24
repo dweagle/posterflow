@@ -19,7 +19,7 @@
   flex-direction: column;
   width: 100%;
   max-width: var(--modal-width, 700px);
-  max-height: 90vh;
+  max-height: 90dvh;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
@@ -147,7 +147,7 @@
   }
 
   .modal-content {
-    max-height: calc(100vh - 1rem);
+    max-height: calc(100dvh - 1rem);
   }
 
   .modal-footer > .btn-primary,

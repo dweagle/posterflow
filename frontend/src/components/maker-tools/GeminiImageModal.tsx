@@ -56,7 +56,7 @@ function downloadBase64(b64: string, mime: string, filename: string) {
 
 // The modal is capped at MODAL_MAX_HEIGHT; header, footer, body padding, title and caption take
 // about 300px of it, and the images get the rest so the body never has to scroll.
-const MODAL_MAX_HEIGHT = '80vh'
+const MODAL_MAX_HEIGHT = '80dvh'
 
 /** Experimental: send a gallery poster/backdrop to Gemini for a textless redraw or a lifted-out logo,
  *  and show the result beside the original. Either image opens full size on click. */

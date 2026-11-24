@@ -79,8 +79,8 @@
 
 .modal-overlay > .community-req-modal {
   align-self: flex-start;
-  margin-top: 5vh;
-  max-height: calc(95vh - 2rem);
+  margin-top: 5dvh;
+  max-height: calc(95dvh - 2rem);
   scrollbar-gutter: stable;
 }
 
