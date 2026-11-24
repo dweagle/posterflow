@@ -34,6 +34,7 @@ from models.job import (
     update_job_state,
     finalize_job_cancelled,
 )
+from services.poster_borders import forget_borders
 from services.poster_renamer import PosterRenameService
 from services.notifications import send_notification, send_major_error_notification
 from services.community_reconcile import reconcile_community_lists
@@ -397,6 +398,7 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
                     skipped_count = 0
                     failed_count = 0
                     skipped_artwork = 0
+                    copied_files: list = []
 
                     # Copy a single staged file to its destination. Isolated so one
                     # bad file (e.g. a dangling symlink whose gdrive source is gone)
@@ -418,6 +420,7 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
                             else:
                                 shutil.copy2(src_file, dest_file)
                                 copied_count += 1
+                                copied_files.append(dest_file)
                         except Exception as copy_err:
                             log_warning(
                                 LogTags.RENAMER,
@@ -482,6 +485,7 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
                             skipped=skipped_count
                         )
 
+                    forget_borders(db, copied_files)
                     try:
                         dest_pattern = dest_dir.rstrip('/') + '/%'
                         reset_count = db.query(Poster).filter(

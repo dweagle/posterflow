@@ -3,7 +3,11 @@
 Each type holds named `overlays`: every one applies to all selected libraries or to the
 libraries ("instance:key") it names, with its own placement and options. An item takes the
 overlay naming its library, else one set to all libraries; none = no badge of that type. A
-`multi` type (custom badges) draws every one of its overlays that covers the item's library."""
+`multi` type (custom badges) draws every one of its overlays that covers the item's library.
+
+An overlay may be linked to holidays and border rules of the Border Replacer (`borders`, see
+services/poster_borders.py): it then applies only to posters whose border came from one of
+them, where it takes the place of the type's overlay that has no link."""
 
 from __future__ import annotations
 
@@ -15,6 +19,8 @@ from sqlalchemy.orm import Session
 
 from core.logging import LogTags, log_warning
 from models.setting import get_setting_value, upsert_setting
+
+from services.poster_borders import normalize_border_keys
 
 from .base import normalize_placement
 from .registry import all_types
@@ -74,9 +80,12 @@ def normalize_config(raw: Any) -> Dict[str, Any]:
         for n, raw_overlay in enumerate(raw_overlays, start=1):
             if not isinstance(raw_overlay, dict):
                 continue
-            libs = sorted({str(k).strip() for k in (raw_overlay.get("libraries") or []) if str(k).strip()} - claimed)
-            if not otype.multi:
-                claimed |= set(libs)  # a library is named by one overlay of a type
+            borders = normalize_border_keys(raw_overlay.get("borders"))
+            libs = {str(k).strip() for k in (raw_overlay.get("libraries") or []) if str(k).strip()}
+            if not otype.multi and not borders:
+                libs -= claimed
+                claimed |= libs  # a library is named by one overlay of a type, the linked ones aside
+            libs = sorted(libs)
             all_libraries = raw_overlay.get("all_libraries", not libs)
             o_enabled = raw_overlay.get("enabled", True)
             overlays.append({
@@ -84,6 +93,7 @@ def normalize_config(raw: Any) -> Dict[str, Any]:
                 "enabled": o_enabled if isinstance(o_enabled, bool) else str(o_enabled).lower() != "false",
                 "all_libraries": all_libraries if isinstance(all_libraries, bool) else str(all_libraries).lower() == "true",
                 "libraries": libs,
+                "borders": borders,
                 "placement": normalize_placement(raw_overlay.get("placement"), otype.default_placement()),
                 "options": otype.normalize_options(raw_overlay.get("options")),
             })

@@ -26,6 +26,7 @@ from services.overlays.registry import describe_types, get_type
 from services.overlays.server import ServerOverlayEngine
 from services.overlays.render import join_lines, render_badges
 from services.overlays.types.custom import KEY as CUSTOM_KEY, badge_file, prune_badges, store_badge
+from services.poster_borders import HOLIDAY, RULE, border_choices, match_key
 from services.text_logo import list_fonts
 
 router = APIRouter(prefix="/api/overlays", tags=["overlays"])
@@ -48,6 +49,7 @@ class OverlayPreviewRequest(BaseModel):
     placement: Dict[str, Any] = {}
     options: Dict[str, Any] = {}
     base: str = "plain"  # "plain" | "bordered" (sample poster through the saved border settings)
+    border: str = ""  # with "bordered": the holiday or border rule whose border the sample gets ("holiday:<name>" / "rule:<name>")
     others: List[OverlayPreviewLayer] = []
 
 
@@ -76,6 +78,8 @@ def get_overlays_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
             if cfg.get("instance_name") in {i["name"] for i in engine.instances()}
         ],
         "badged_count": engine.badged_count(),
+        # The holidays and border rules of the Border Replacer an overlay can be linked to.
+        "borders": border_choices(db),
     }
 
 
@@ -333,10 +337,11 @@ def delete_overlay_image(type_key: str, key: str, set: Optional[str] = None) -> 
     return {"success": True, "type": overlay_type.key, "key": key, "set": image_set, "custom": False}
 
 
-def _apply_saved_borders(db: Session, base):
+def _apply_saved_borders(db: Session, base, border: str = ""):
     """The sample poster after the user's saved main-poster border settings (holiday
     schedule included), following the same decisions as the border pass: remove, replace,
-    or leave untouched when nothing renderable is configured."""
+    or leave untouched when nothing renderable is configured. `border` names a holiday or a
+    border rule: the sample then gets that one's border, whatever the date."""
     from services.border_replacer import (
         BorderReplacerService,
         _hex_to_rgb,
@@ -345,12 +350,24 @@ def _apply_saved_borders(db: Session, base):
         build_border_run_settings,
         style_band_width,
     )
+    from services.plex_border_rules import load_plex_rules
 
     rs = build_border_run_settings(db, run_type="manual", plex_rules=False)  # the sample poster matches no rule
     width = int(rs["border_width"] or 26)
+    kind, _, name = (part.strip() for part in match_key(border).partition(":"))
+    rule = next((r for r in load_plex_rules(db) if match_key(r.name) == name), None) if kind == RULE else None
+    if rule is not None:
+        if rule.mode == "skip":
+            return base
+        return _render_bordered_image(base, style_band_width(rule.style_opts, width), _hex_to_rgb(rule.colors[0] if rule.colors else "#000000"), rule.style_opts)
     if rs["remove_borders"]:
         return _strip_existing_border(base, width, exclude=False).resize((1000, 1500)).convert("RGB")
-    is_holiday, _name, colors, holiday_style = BorderReplacerService(db)._resolve_effective_border_colors(rs["border_colors"] or [])
+    service = BorderReplacerService(db)
+    named = next((h for h in service._load_holiday_schedules() if match_key(h.get("name")) == name), None) if kind == HOLIDAY else None
+    if named is not None:
+        is_holiday, colors, holiday_style = True, named.get("colors") or rs["border_colors"] or [], named.get("style_opts")
+    else:
+        is_holiday, _name, colors, holiday_style = service._resolve_effective_border_colors(rs["border_colors"] or [])
     style_opts = dict(holiday_style) if is_holiday and holiday_style else dict(rs["style_opts"] or {})
     style = style_opts.get("style")
     renderable = (
@@ -383,7 +400,7 @@ def overlay_preview(payload: OverlayPreviewRequest, db: Session = Depends(get_db
     rect = (0, 0, 0, 0)
     try:
         if payload.base == "bordered":
-            base = _apply_saved_borders(db, base)
+            base = _apply_saved_borders(db, base, payload.border)
         # The other overlays under the edited one, then the edited one on top; the edge band once for all.
         layers = []
         layer_ids: Dict[int, str] = {}  # id(badge) → the id its layer was sent with

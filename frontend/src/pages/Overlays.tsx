@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Download, Maximize2, Minimize2, Play, Plus, Eraser, RefreshCw, RotateCcw, Trash2, Undo2, Upload, Weight } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Download, Link2, Maximize2, Minimize2, Play, Plus, Eraser, RefreshCw, RotateCcw, Trash2, Undo2, Upload, Weight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import Toolbar from '../components/Toolbar'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -24,6 +24,7 @@ import {
   type OverlayPlacement,
   type OverlayDefinition,
   type OverlayBadgeRow,
+  type OverlayBorderChoice,
   type OverlayTypeConfig,
   type OverlayTypeInfo,
   type OverlaysConfig,
@@ -49,18 +50,30 @@ const hiddenPlacement = (t: OverlayTypeInfo, options: Record<string, unknown>): 
   ...Object.entries(t.hidden_placement_when ?? {}).filter(([, when]) => optionsMatch(when, options)).map(([key]) => key),
 ]
 
+// A holiday's or border rule's key names it whatever the case.
+const sameBorder = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+const linkedTo = (o: OverlayDefinition, border?: string) => border !== undefined && o.borders.some((b) => sameBorder(b, border))
+
 // Which overlay of a type applies to a library: the one naming it, else one set to all libraries.
-const overlayFor = (t: OverlayTypeConfig | undefined, library?: string): OverlayDefinition | undefined =>
-  (library ? t?.overlays.find((o) => o.enabled && !o.all_libraries && o.libraries.includes(library)) : undefined) ?? t?.overlays.find((o) => o.enabled && o.all_libraries)
+// On a poster with a holiday's or a rule's border the overlays linked to it are asked first.
+const overlayFor = (t: OverlayTypeConfig | undefined, library?: string, border?: string): OverlayDefinition | undefined => {
+  const on = (t?.overlays ?? []).filter((o) => o.enabled)
+  for (const pool of [on.filter((o) => linkedTo(o, border)), on.filter((o) => o.borders.length === 0)]) {
+    const one = (library ? pool.find((o) => !o.all_libraries && o.libraries.includes(library)) : undefined) ?? pool.find((o) => o.all_libraries)
+    if (one) return one
+  }
+  return undefined
+}
 
 // The overlays of a type a library's posters draw: one (see overlayFor), or for a type that
 // draws all of its overlays (custom badges) every one covering the library.
-const overlaysFor = (info: OverlayTypeInfo, t: OverlayTypeConfig | undefined, library?: string): OverlayDefinition[] => {
+const overlaysFor = (info: OverlayTypeInfo, t: OverlayTypeConfig | undefined, library?: string, border?: string): OverlayDefinition[] => {
   if (!info.multi) {
-    const one = overlayFor(t, library)
+    const one = overlayFor(t, library, border)
     return one ? [one] : []
   }
-  return (t?.overlays ?? []).filter((o) => o.enabled && (o.all_libraries || (library !== undefined && o.libraries.includes(library))))
+  return (t?.overlays ?? []).filter((o) =>
+    o.enabled && (o.borders.length === 0 || linkedTo(o, border)) && (o.all_libraries || (library !== undefined && o.libraries.includes(library))))
 }
 
 // A custom overlay's own badges (the type's schema has a `badges` field), or none.
@@ -86,6 +99,7 @@ function Overlays() {
   const [hasTmdbKey, setHasTmdbKey] = useState(true)
   const [libraryConfigs, setLibraryConfigs] = useState<PlexLibraryConfig[]>([])
   const [badgedCount, setBadgedCount] = useState(0)
+  const [borderChoices, setBorderChoices] = useState<OverlayBorderChoice[]>([])  // the Border Replacer's holidays and rules
   const [showLibraries, setShowLibraries] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -122,6 +136,7 @@ function Overlays() {
       setHasTmdbKey(cfgResp.has_tmdb_key)
       setLibraryConfigs(cfgResp.library_configs ?? [])
       setBadgedCount(cfgResp.badged_count ?? 0)
+      setBorderChoices(cfgResp.borders ?? [])
       setFonts(fontsResp.fonts)
       setSelectedType((prev) => (typesResp.types.some((t) => t.key === prev) ? prev : typesResp.types[0]?.key ?? ''))
     } catch (err) {
@@ -375,6 +390,11 @@ function Overlays() {
       : kept
   }, [current, currentCfg])
   const variant = current ? (variantByType[current.key] && variants.some((v) => v.key === variantByType[current.key]) ? variantByType[current.key] : variants[0]?.key ?? '') : ''
+  // A linked overlay is previewed on the border of the first holiday or rule it is linked to.
+  const previewBorder = useMemo(
+    () => borderChoices.find((c) => currentCfg?.borders.some((b) => sameBorder(b, c.key))),
+    [borderChoices, currentCfg],
+  )
   // Every OTHER enabled type, in the overlay it would use for the libraries being edited here,
   // so the preview shows the whole composition.
   const otherLayers = useMemo(() => {
@@ -386,7 +406,7 @@ function Overlays() {
     const layers = types
       // The other types, and the other overlays of a type that draws all of its own.
       .filter((t) => (t.key !== current.key || t.multi) && config.types[t.key]?.enabled)
-      .flatMap((t) => overlaysFor(t, config.types[t.key], anchor).filter((cfg) => cfg !== edited).map((cfg) => {
+      .flatMap((t) => overlaysFor(t, config.types[t.key], anchor, previewBorder?.key).filter((cfg) => cfg !== edited).map((cfg) => {
         const index = config.types[t.key].overlays.indexOf(cfg)
         const id = t.multi ? `${t.key}:${index}` : t.key
         overlayAt[id] = { type: t.key, index }
@@ -396,7 +416,7 @@ function Overlays() {
         return { type: t.key, variant: v, placement: cfg.placement, options: cfg.options, ...(t.multi ? { id, label: cfg.name.trim() || t.label } : {}) }
       }))
     return { layers, overlayAt }
-  }, [config, current, types, variantByType, overlayByType])
+  }, [config, current, types, variantByType, overlayByType, previewBorder])
   const typeLabels = useMemo(() => Object.fromEntries(types.map((t) => [t.key, t.label])), [types])
 
   // ── the overlays of the selected type ──
@@ -418,8 +438,11 @@ function Overlays() {
     const group = keys ? String(o.options[keys.group] ?? '').trim() : ''
     return keys && group ? { group, weight: Number(o.options[keys.weight]) || 0 } : null
   }
-  // Which overlay of the selected type names a library (-1 = none; an all-libraries overlay never does).
-  const namedBy = (fullKey: string) => (typeCfg?.overlays ?? []).findIndex((o) => !o.all_libraries && o.libraries.includes(fullKey))
+  // Which overlay of the selected type names a library (-1 = none; an all-libraries overlay never does, nor one with a border link).
+  const namedBy = (fullKey: string) => (typeCfg?.overlays ?? []).findIndex((o) => o.borders.length === 0 && !o.all_libraries && o.libraries.includes(fullKey))
+  const borderName = (key: string) => borderChoices.find((c) => sameBorder(c.key, key))?.name ?? key.slice(key.indexOf(':') + 1)
+  // Links to a holiday or rule that is no longer in the Border Replacer: shown so they can be unticked.
+  const goneBorders = (currentCfg?.borders ?? []).filter((b) => !borderChoices.some((c) => sameBorder(c.key, b)))
   const addOverlay = (key: string) => {
     const info = types.find((t) => t.key === key)
     if (!info) return
@@ -429,6 +452,7 @@ function Overlays() {
       enabled: true,
       all_libraries: true,
       libraries: [],
+      borders: [],
       placement: { ...info.default_placement },
       options: JSON.parse(JSON.stringify(info.default_options)) as Record<string, unknown>,
     }
@@ -443,6 +467,13 @@ function Overlays() {
   const toggleOverlayLibrary = (key: string, fullKey: string) => {
     const libs = currentCfg?.libraries ?? []
     updateOverlay(key, { libraries: libs.includes(fullKey) ? libs.filter((k) => k !== fullKey) : [...libs, fullKey].sort() })
+  }
+  const toggleOverlayBorder = (key: string, border: string) => {
+    if (!currentCfg) return
+    const borders = currentCfg.borders.some((b) => sameBorder(b, border)) ? currentCfg.borders.filter((b) => !sameBorder(b, border)) : [...currentCfg.borders, border]
+    // Without a link it shares out the libraries again: the ones another overlay names go back to that one.
+    const libraries = borders.length === 0 && !current?.multi ? currentCfg.libraries.filter((k) => namedBy(k) < 0) : currentCfg.libraries
+    updateOverlay(key, { borders, libraries })
   }
 
   return (
@@ -651,6 +682,11 @@ function Overlays() {
                               <Weight size={12} /> {grouped.weight}
                             </span>
                           )}
+                          {o.borders.length > 0 && (
+                            <span className="overlays-tab-weight" title={`Only on posters with this border: ${o.borders.map(borderName).join(', ')}`} aria-label={`${overlayName(o, i)}: linked to ${o.borders.map(borderName).join(', ')}`}>
+                              <Link2 size={12} /> {o.borders.length}
+                            </span>
+                          )}
                           <Toggle
                             checked={o.enabled}
                             onChange={(v) => setConfig((prev) => (prev ? { ...prev, types: { ...prev.types, [current.key]: { ...prev.types[current.key], overlays: prev.types[current.key].overlays.map((x, j) => (j === i ? { ...x, enabled: v } : x)) } } } : prev))}
@@ -690,7 +726,7 @@ function Overlays() {
                       </label>
                       {coveredLibraries.map((lib) => {
                         const owner = namedBy(lib.fullKey)
-                        const taken = !current.multi && owner >= 0 && owner !== overlayIndex  // custom badges may share a library
+                        const taken = !current.multi && currentCfg.borders.length === 0 && owner >= 0 && owner !== overlayIndex  // custom badges and linked overlays may share a library
                         // With All libraries on, the boxes only show what this overlay covers; they are picked when it is off.
                         const covered = currentCfg.all_libraries ? !taken : currentCfg.libraries.includes(lib.fullKey)
                         const locked = taken || currentCfg.all_libraries
@@ -702,6 +738,30 @@ function Overlays() {
                           </label>
                         )
                       })}
+                    </div>
+                    <div className="overlays-def-label">Border Link</div>
+                    <div className="overlays-def-row overlays-def-libraries">
+                      {borderChoices.map((choice) => (
+                        <label key={choice.key} className="overlays-def-pick" title={`${choice.kind === 'holiday' ? 'Holiday' : 'Border rule'}: ${choice.detail}`}>
+                          <input type="checkbox" checked={currentCfg.borders.some((b) => sameBorder(b, choice.key))} onChange={() => toggleOverlayBorder(current.key, choice.key)} />
+                          {choice.name}
+                          <small>{choice.kind === 'holiday' ? 'Holiday' : 'Rule'}</small>
+                        </label>
+                      ))}
+                      {goneBorders.map((border) => (
+                        <label key={border} className="overlays-def-pick" title="This holiday or rule is no longer in the Border Replacer. Untick it to drop the link.">
+                          <input type="checkbox" checked onChange={() => toggleOverlayBorder(current.key, border)} />
+                          {borderName(border)}
+                          <small>Removed</small>
+                        </label>
+                      ))}
+                      <span className="overlays-def-hint">
+                        {borderChoices.length === 0 && goneBorders.length === 0
+                          ? 'No holidays or border rules yet. Add them in Asset Manager, Border Replacer.'
+                          : currentCfg.borders.length === 0 ? 'Tick a holiday or border rule to use this overlay only on posters that got that border.'
+                          : current.multi ? 'Drawn only on posters that got a ticked border.'
+                          : `Used only on posters that got a ticked border, in place of your normal ${current.label} overlay.`}
+                      </span>
                     </div>
                     </div>
                     <button type="button" className="btn-toolbar btn-toolbar-link overlays-def-remove" onClick={() => removeOverlay(current.key)}>
@@ -727,6 +787,7 @@ function Overlays() {
                   labels={typeLabels}
                   onLayerPlacementChange={(layer, patch) => { const at = otherLayers.overlayAt[layer]; if (at) updatePlacement(at.type, patch, at.index) }}
                   refreshKey={assetVersion}
+                  border={previewBorder ? { key: previewBorder.key, name: previewBorder.name } : undefined}
                 />
                 <div className="overlay-panels">
                   {/* One grid cell: the preview card stacked on the Position card (which fills the rest of the row's height). */}

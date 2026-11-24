@@ -16,6 +16,7 @@ from models.drive import Drive  # noqa: F401
 from models.artwork_drive import ArtworkDrive  # noqa: F401
 from models.artwork import Artwork  # noqa: F401
 from models.poster import Poster  # noqa: F401
+from models.poster_border import PosterBorder  # noqa: F401
 from models.job import Job  # noqa: F401
 from models.schedule import Schedule  # noqa: F401
 from models.idarr import IdarrRun, IdarrPendingMatch, IdarrAssetCache  # noqa: F401

@@ -89,6 +89,7 @@ class ItemContext:
     ratings: Dict[str, float] = field(default_factory=dict)  # the server's audience / critic / user ratings, 0-10
     content_rating: Optional[str] = None  # the age rating as the server shows it (R, TV-14, gb/15); seasons take the show's
     library_id: str = ""  # "<instance>:<library key>" the item was listed in; picks a per-library overlay configuration
+    border: str = ""  # the holiday or border rule its poster file's border came from ("holiday:<name>" / "rule:<name>"); picks a linked overlay
     # The media files behind the item (see media.py): a movie's versions, a show's or a season's
     # episodes. None = not looked up (no active overlay needs it).
     media: Optional[List[Dict[str, Any]]] = None

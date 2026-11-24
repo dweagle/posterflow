@@ -2,8 +2,9 @@
 
 An export holds overlays.json (each overlay's type, name, placement and options) and the
 images the overlays draw: a custom overlay's own pictures, and for the other types the files
-the user replaced. What belongs to the install stays out: the libraries an overlay names, its
-switch, and the server or Arr instance a condition's value was picked for.
+the user replaced. What belongs to the install stays out: the libraries an overlay names, the
+holidays and border rules it is linked to, its switch, and the server or Arr instance a
+condition's value was picked for.
 
 An export is read as a stranger's file. Entries are looked up by the names the overlay list
 implies, never taken from the zip's own listing; every image passes the upload checks; every
@@ -298,7 +299,7 @@ class OverlayImport:
                     row["image"] = self._stored_image(row["image"]) if row.get("image") else ""
             overlays.append({"type": otype.key, "overlay": {
                 "name": str(entry.get("name") or "").strip()[:60] or otype.label,
-                "enabled": False, "all_libraries": True, "libraries": [], "placement": placement, "options": kept,
+                "enabled": False, "all_libraries": True, "libraries": [], "borders": [], "placement": placement, "options": kept,
             }})
         stored: Dict[str, int] = {}
         for key in dict.fromkeys(str(k) for k in image_types):

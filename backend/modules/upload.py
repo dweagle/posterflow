@@ -43,6 +43,7 @@ from core.job_cancel import JobCancelled, check_cancelled
 from models.poster import Poster
 from services.border_replacer import BorderReplacerService
 from services.notifications import send_notification, send_major_error_notification
+from services.poster_borders import forget_borders
 from services.poster_renamer import PosterRenameService
 from services.plex_upload import (
     PlexUploadService,
@@ -518,6 +519,7 @@ def _run_webhook_preupload_rename_pass(
         skipped_count = 0
         error_count = 0
         skipped_artwork = 0
+        copied_files: List[str] = []
 
         for item in os.listdir(tmp_source_dir):
             src_path = os.path.join(tmp_source_dir, item)
@@ -549,6 +551,7 @@ def _run_webhook_preupload_rename_pass(
 
                             shutil.copy2(src_file, dest_file)
                             copied_count += 1
+                            copied_files.append(dest_file)
                 elif os.path.isfile(src_path):
                     if is_artwork_file(item):
                         skipped_artwork += 1
@@ -557,6 +560,7 @@ def _run_webhook_preupload_rename_pass(
                     else:
                         shutil.copy2(src_path, dest_path)
                         copied_count += 1
+                        copied_files.append(dest_path)
             except Exception as copy_error:
                 error_count += 1
                 log_warning(
@@ -584,6 +588,7 @@ def _run_webhook_preupload_rename_pass(
         summary["tmp_promotion"]["copied"] = copied_count
         summary["tmp_promotion"]["skipped"] = skipped_count
         summary["tmp_promotion"]["errors"] = error_count
+        forget_borders(db, copied_files)
 
     def _run_standard_border_pass_if_enabled() -> None:
         if not auto_run_border_enabled:

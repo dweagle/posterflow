@@ -34,6 +34,7 @@ from core.logging import LogTags, log_debug, log_info, log_warning
 from models.overlay import OverlayItem
 from models.plex_upload import PlexUploadRecord
 from models.setting import get_setting_value
+from services.poster_borders import border_of, match_key
 from services.plex_bundles import is_plex_metadata_root, load_plex_metadata_paths, prune_plex_uploads, upload_gone
 from services.server_posters import PLEX_NO_POSTER, poster_key, stable_poster_key, upload_sha
 from util.library_configs import media_libraries_only
@@ -101,6 +102,7 @@ class ServerOverlayEngine:
         needs = [otype.needs_for(cfg["options"]) for otype, tcfg in self.active for cfg in self._type_configs(tcfg)]
         self._needs_tmdb = any("tmdb" in n for n in needs)
         self._needs_media = any("media" in n for n in needs)  # resolution / audio badges read the items' media files
+        self._links_used = any(o.get("borders") for _otype, tcfg in self.active for o in self._type_configs(tcfg))  # an overlay is linked to a holiday or border rule
         self._media: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}  # (instance, item id) → its media files, once looked up
         self._media_unread: Set[Tuple[str, str]] = set()  # items whose media files the server did not give: what they would badge is unknown
         self._media_warned: Set[str] = set()  # servers already warned about for an item's media read
@@ -413,44 +415,53 @@ class ServerOverlayEngine:
         return [o for o in (tcfg.get("overlays") or []) if o.get("enabled", True)]
 
     @staticmethod
-    def _overlay_for(tcfg: Dict[str, Any], library_id: str) -> Optional[Dict[str, Any]]:
+    def _linked_to(overlay: Dict[str, Any], border: str) -> bool:
+        """Is the overlay linked to the holiday or border rule a poster's border came from?"""
+        wanted = match_key(border)
+        return bool(wanted) and any(match_key(b) == wanted for b in overlay.get("borders") or [])
+
+    @staticmethod
+    def _names_library(overlay: Dict[str, Any], instance: str, key: str) -> bool:
+        return bool(instance and key) and any(
+            str(lib).partition(":")[0] == instance and str(lib).partition(":")[2].rsplit("/", 1)[-1] == key for lib in overlay.get("libraries") or [])
+
+    @staticmethod
+    def _overlay_for(tcfg: Dict[str, Any], library_id: str, border: str = "") -> Optional[Dict[str, Any]]:
         """The type's overlay for an item: the one naming the item's library, else the first set
-        to all libraries; None when neither exists. Library keys compare by their last segment
-        (see _library_selected)."""
+        to all libraries; None when neither exists. The overlays linked to the border its poster
+        got are asked first, then the ones with no link. Library keys compare by their last
+        segment (see _library_selected)."""
         instance, _, key = (library_id or "").partition(":")
         key = key.rsplit("/", 1)[-1]
         overlays = ServerOverlayEngine._type_configs(tcfg)  # an overlay switched off is as good as absent
-        if instance and key:
-            for overlay in overlays:
-                if overlay.get("all_libraries"):
-                    continue
-                for lib in overlay.get("libraries") or []:
-                    o_instance, _, o_key = str(lib).partition(":")
-                    if o_instance == instance and o_key.rsplit("/", 1)[-1] == key:
-                        return overlay
-        return next((o for o in overlays if o.get("all_libraries")), None)
+        linked = [o for o in overlays if ServerOverlayEngine._linked_to(o, border)]
+        for pool in (linked, [o for o in overlays if not o.get("borders")]):
+            named = next((o for o in pool if not o.get("all_libraries") and ServerOverlayEngine._names_library(o, instance, key)), None)
+            one = named or next((o for o in pool if o.get("all_libraries")), None)
+            if one is not None:
+                return one
+        return None
 
     @staticmethod
-    def _overlays_for(otype: OverlayType, tcfg: Dict[str, Any], library_id: str) -> List[Dict[str, Any]]:
+    def _overlays_for(otype: OverlayType, tcfg: Dict[str, Any], library_id: str, border: str = "") -> List[Dict[str, Any]]:
         """The type's overlays an item draws: one (see _overlay_for), or for a `multi` type every
-        one set to all libraries or naming the item's library."""
+        one set to all libraries or naming the item's library, a linked one only on a poster
+        with a border it is linked to."""
         if not otype.multi:
-            one = ServerOverlayEngine._overlay_for(tcfg, library_id)
+            one = ServerOverlayEngine._overlay_for(tcfg, library_id, border)
             return [one] if one is not None else []
         instance, _, key = (library_id or "").partition(":")
         key = key.rsplit("/", 1)[-1]
-
-        def names(overlay: Dict[str, Any]) -> bool:
-            return any(str(lib).partition(":")[0] == instance and str(lib).partition(":")[2].rsplit("/", 1)[-1] == key for lib in overlay.get("libraries") or [])
-
-        return [o for o in ServerOverlayEngine._type_configs(tcfg) if o.get("all_libraries") or (instance and key and names(o))]
+        return [o for o in ServerOverlayEngine._type_configs(tcfg)
+                if (not o.get("borders") or ServerOverlayEngine._linked_to(o, border))
+                and (o.get("all_libraries") or ServerOverlayEngine._names_library(o, instance, key))]
 
     def _resolve(self, ctx: ItemContext) -> Tuple[List[Tuple[OverlayType, OverlayBadge, Dict[str, Any]]], bool, bool, Dict[str, Any]]:
         """(badges, had_data, applicable, meta). `meta["unanswered"]` names a source a custom
         overlay's conditions asked that did not answer: its badge is then unknown."""
         out: List[Tuple[OverlayType, OverlayBadge, Dict[str, Any]]] = []
         relevant = [(otype, cfg) for otype, tcfg in self.active if ctx.target in otype.targets
-                    for cfg in self._overlays_for(otype, tcfg, ctx.library_id)]
+                    for cfg in self._overlays_for(otype, tcfg, ctx.library_id, ctx.border)]
         if not relevant:
             return out, True, False, {}
         meta: Dict[str, Any] = {}
@@ -504,7 +515,7 @@ class ServerOverlayEngine:
             # The overlay that drew the badge is the one whose placement it carries.
             overlay = next((o for o in self._type_configs(tcfg) if o.get("placement") is placement), None) if tcfg else None
             if overlay is None and tcfg:
-                overlay = self._overlay_for(tcfg, ctx.library_id)
+                overlay = self._overlay_for(tcfg, ctx.library_id, ctx.border)
             if overlay is not None:
                 lines.append(f"cfg:{otype.key}:{self._overlay_hashes.setdefault(id(overlay), overlay_signature(overlay))}")
         return "\n".join(lines)
@@ -688,8 +699,11 @@ class ServerOverlayEngine:
             if cut_short:
                 self._media_unread.add(key)
 
-    def _context(self, instance_name: str, item: Any, parent: Any = None, client: Any = None) -> ItemContext:
+    def _context(self, instance_name: str, item: Any, parent: Any = None, client: Any = None, source: Optional[str] = None) -> ItemContext:
+        """`source` is the poster file being badged: the border pass noted where its border came from."""
         ctx = ItemContext.from_server_item(item, instance_name, parent)
+        if self._links_used and source:
+            ctx.border = border_of(self.db, source)
         if self._needs_media:
             key = (instance_name, str(item.item_id))
             if key not in self._media:  # outside a run (an upload): asked for this one item
@@ -716,7 +730,7 @@ class ServerOverlayEngine:
     # ── the per-item decision ──────────────────────────────────────────────
     def _process(self, instance_name: str, client: Any, item: Any, *, library: str, source: Optional[str],
                  parent: Any = None, mode: str = "incremental", dry_run: bool = False) -> None:
-        ctx = self._context(instance_name, item, parent, client)
+        ctx = self._context(instance_name, item, parent, client, source)
         label = self._label(ctx)
         key = ctx.rel_path
         resolved, had_data, applicable, meta = self._resolve(ctx)
@@ -733,6 +747,8 @@ class ServerOverlayEngine:
         ids = ", ".join(f"{k} {v}" for k, v in (("tmdb", ctx.tmdb_id), ("tvdb", ctx.tvdb_id), ("imdb", ctx.imdb_id)) if v) or "no ids"
         # One debug line per item: "Title (Year) → BADGE | outcome | TMDB how: record".
         tmdb_part = f" | TMDB {meta['lookup']}: {describe_record(ctx.media_type, meta.get('tmdb'))}" if meta.get("lookup") else ""
+        if ctx.border:
+            tmdb_part = f" | poster border from {ctx.border.replace(':', ' ', 1)}{tmdb_part}"
         text = self._texts(sig)
 
         if not sig:
@@ -899,7 +915,7 @@ class ServerOverlayEngine:
         """The composite to upload instead of `upload_file`, or None to push the file as it is.
         `source_path` is the poster file in the destination folder (what `upload_file` was made
         from, when the uploader had to convert it). Call `record_upload()` afterwards."""
-        ctx = self._context(instance_name, item, parent)
+        ctx = self._context(instance_name, item, parent, source=source_path or upload_file)
         key = ctx.rel_path
         label = self._label(ctx)
         self._discard_pending(key)
@@ -941,7 +957,7 @@ class ServerOverlayEngine:
         if not self._library_selected(instance_name, item, parent):
             return False
         entry = self._state["items"].get(f"{instance_name}|{item.item_id}")
-        ctx = self._context(instance_name, item, parent)
+        ctx = self._context(instance_name, item, parent, source=source_path)
         resolved, _had_data, applicable, meta = self._resolve(ctx)
         if meta.get("unanswered"):
             return False  # a badge of its is unknown: the next run decides

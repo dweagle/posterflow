@@ -34,6 +34,7 @@ from core.logging import (
     log_section_end,
 )
 from models.setting import get_setting, upsert_setting
+from services.poster_borders import HOLIDAY, RULE, BorderNotes, border_key
 from util.posters.scanner import artwork_type_of
 from util.fs_scan import iter_file_entries
 
@@ -1408,6 +1409,19 @@ class BorderReplacerService:
             if effective_season_mode == "custom" and not rgb_season_colors and season_has_renderable:
                 rgb_season_colors = [(0, 0, 0)]
 
+            # Which posters got a holiday's or a rule's border, kept for the overlays linked to one.
+            border_notes = BorderNotes(self.db)
+            placed_paths: Optional[set] = None
+
+            def _applied_border(match: Optional[Any], season_file: bool) -> Optional[str]:
+                if match is not None:
+                    return border_key(RULE, match.name)
+                if season_file and effective_season_mode != "inherit":
+                    return None
+                if is_holiday_active and not remove_borders and rgb_border_colors:
+                    return border_key(HOLIDAY, active_holiday_name)
+                return None
+
             action = "Removing borders" if remove_borders else "Replacing borders"
             mode_str = "(incremental)" if mode == "incremental" else "(full)"
             log_info(LogTags.BORDER_REPLACER, f"{action} {mode_str}")
@@ -1658,7 +1672,19 @@ class BorderReplacerService:
                                     )
                             except OSError:
                                 pass
-                
+
+                    # Posters left as they are: a rule's border stays as noted when the rules were not asked this run.
+                    for dest_file, (_input_file, _mtime, _size, folder) in source_files_with_mtime.items():
+                        if dry_run or dest_file in files_needing_processing:
+                            continue
+                        season_file = self._is_season_file(os.path.basename(dest_file))
+                        if plex_matcher is not None:
+                            border_notes.note(dest_file, _applied_border(plex_matcher.resolve(folder), season_file))
+                        elif tracked_metadata[dest_file][3] is None:
+                            border_notes.note(dest_file, _applied_border(None, season_file))
+
+                placed_paths = set(source_files_with_mtime)
+
                 # Clean up stale tracking records before (potentially) short-circuiting
                 if tracking_updates_enabled and source_files_with_mtime:
                     current_dest_paths = set(source_files_with_mtime.keys())
@@ -1689,6 +1715,8 @@ class BorderReplacerService:
                 
                 # Short-circuit if no files need processing in incremental mode
                 if len(files_needing_processing) == 0:
+                    if not dry_run:
+                        border_notes.save(placed_paths)
                     log_info(
                         LogTags.BORDER_REPLACER,
                         "No files need processing - all up to date",
@@ -1733,6 +1761,7 @@ class BorderReplacerService:
                             continue
                         dest_file = os.path.join(destination_dir, folder, file) if folder else os.path.join(destination_dir, file)
                         full_mode_dest_paths.add(dest_file)
+                placed_paths = full_mode_dest_paths
 
                 # Load existing tracking records (filter in Python to avoid SQLite 999-var limit)
                 if full_mode_dest_paths:
@@ -1863,6 +1892,7 @@ class BorderReplacerService:
                         # own border to matching items, skips items marked skip, and leaves
                         # everything else to the normal season/main handling below.
                         plex_match = plex_matcher.resolve(folder) if plex_matcher else None
+                        border_notes.note(dest_file, _applied_border(plex_match, is_season))
 
                         # Determine the action for this specific file based on whether it's a season poster
                         if plex_match is not None and plex_match.skip:
@@ -2032,6 +2062,8 @@ class BorderReplacerService:
                         changed_count += 1
 
             _flush_tracking_updates(force=True)
+            if not dry_run:
+                border_notes.save(placed_paths)
 
             log_success(
                 LogTags.BORDER_REPLACER,

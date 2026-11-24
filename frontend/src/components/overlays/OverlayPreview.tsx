@@ -39,6 +39,8 @@ type Props = {
   onLayerPlacementChange?: (layer: string, patch: Partial<OverlayPlacement>) => void
   // Bumped when a file the badge draws changed on the server (a logo upload): fetch again.
   refreshKey?: number
+  // The holiday or border rule the overlay is linked to: with the border settings on, the sample gets its border.
+  border?: { key: string; name: string }
 }
 
 // Where a badge of size (w, h) at reference position (x, y) lands as align+offset.
@@ -86,7 +88,7 @@ const placementAfterDrop = (p: OverlayPlacement, rect: Rect, x: number, y: numbe
 // The sample poster with the overlay rendered by the backend, plus a drag handle over the
 // badge so the user can position it directly (arrow keys nudge by 1px, shift = 10px). The
 // other overlays' badges get handles too: dragging one moves that overlay.
-function OverlayPreview({ type, variant, placement, options, onPlacementChange, enabled = true, large = false, others = [], labels = {}, onLayerPlacementChange, refreshKey = 0 }: Props) {
+function OverlayPreview({ type, variant, placement, options, onPlacementChange, enabled = true, large = false, others = [], labels = {}, onLayerPlacementChange, refreshKey = 0, border }: Props) {
   const [url, setUrl] = useState<string | null>(null)
   const [rect, setRect] = useState<Rect | null>(null)
   const [layerRects, setLayerRects] = useState<LayerRect[]>([])
@@ -107,7 +109,8 @@ function OverlayPreview({ type, variant, placement, options, onPlacementChange, 
     try { localStorage.setItem(PREVIEW_BASE_KEY, next) } catch { /* ignore */ }
   }
 
-  const deps = JSON.stringify({ type, variant, placement, options, base, others, enabled, refreshKey })
+  const borderKey = base === 'bordered' ? border?.key : undefined
+  const deps = JSON.stringify({ type, variant, placement, options, base, border: borderKey, others, enabled, refreshKey })
   useEffect(() => {
     let cancelled = false
     let objectUrl: string | null = null
@@ -131,7 +134,7 @@ function OverlayPreview({ type, variant, placement, options, onPlacementChange, 
     }
     setLoading(true)
     const timer = setTimeout(() => {
-      fetchOverlayPreview({ type, variant, placement, options, base, others, enabled })
+      fetchOverlayPreview({ type, variant, placement, options, base, border: borderKey, others, enabled })
         .then((result) => {
           const render = { blob: result.blob, rect: result.rect, text: result.text, layers: (result.layers ?? []).map((l) => ({ ...l, id: l.id || l.type })) }
           cache.current.set(deps, render)  // kept even if this render was overtaken: its inputs may come back
@@ -251,7 +254,7 @@ function OverlayPreview({ type, variant, placement, options, onPlacementChange, 
     <div className={`overlay-preview ${large ? 'large' : ''}`}>
       <label className="checkbox-label overlay-preview-base" title="Render the sample poster through your saved border settings first, so the preview matches the real output">
         <input type="checkbox" checked={base === 'bordered'} onChange={(e) => chooseBase(e.target.checked ? 'bordered' : 'plain')} />
-        Use my border settings
+        {border ? `Use my border settings: ${border.name}` : 'Use my border settings'}
       </label>
       <div className="overlay-preview-stage">
         {error && <div className="overlay-preview-error">No preview</div>}

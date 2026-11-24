@@ -152,8 +152,8 @@ const baseConfig = () => ({
   badge_server_posters: false,
   prune_plex_uploads: true,
   types: {
-    status: { enabled: false, overlays: [{ name: 'Airing Status', enabled: true, all_libraries: true, libraries: [], placement: { ...placement }, options: JSON.parse(JSON.stringify(statusType.default_options)) }] },
-    rating: { enabled: false, overlays: [{ name: 'Rating', enabled: true, all_libraries: true, libraries: [], placement: { ...ratingType.default_placement }, options: JSON.parse(JSON.stringify(ratingType.default_options)) }] },
+    status: { enabled: false, overlays: [{ name: 'Airing Status', enabled: true, all_libraries: true, libraries: [], borders: [], placement: { ...placement }, options: JSON.parse(JSON.stringify(statusType.default_options)) }] },
+    rating: { enabled: false, overlays: [{ name: 'Rating', enabled: true, all_libraries: true, libraries: [], borders: [], placement: { ...ratingType.default_placement }, options: JSON.parse(JSON.stringify(ratingType.default_options)) }] },
   },
 })
 
@@ -647,7 +647,7 @@ describe('Overlays', () => {
     const config = baseConfig()
     mockGetOverlayTypes.mockResolvedValue({ types: [statusType, audioType] })
     mockGetOverlaysConfig.mockResolvedValue({
-      config: { ...config, types: { ...config.types, audio: { enabled: true, overlays: [{ name: 'Audio', enabled: true, all_libraries: true, libraries: [], placement: { ...placement }, options: { badge_style: 'lettering', same_line: false } }] } } },
+      config: { ...config, types: { ...config.types, audio: { enabled: true, overlays: [{ name: 'Audio', enabled: true, all_libraries: true, libraries: [], borders: [], placement: { ...placement }, options: { badge_style: 'lettering', same_line: false } }] } } },
       has_tmdb_key: true, library_configs: [], badged_count: 0,
     })
     renderPage()
@@ -685,7 +685,7 @@ describe('Overlays', () => {
     const config = baseConfig()
     mockGetOverlayTypes.mockResolvedValue({ types: [statusType, scenesType] })
     mockGetOverlaysConfig.mockResolvedValue({
-      config: { ...config, types: { ...config.types, mediastinger: { enabled: true, overlays: [{ name: 'Credits Scenes', enabled: true, all_libraries: true, libraries: [], placement: { ...placement }, options: { badge_style: 'icon', badge_scale: 100 } }] } } },
+      config: { ...config, types: { ...config.types, mediastinger: { enabled: true, overlays: [{ name: 'Credits Scenes', enabled: true, all_libraries: true, libraries: [], borders: [], placement: { ...placement }, options: { badge_style: 'icon', badge_scale: 100 } }] } } },
       has_tmdb_key: true, library_configs: [], badged_count: 0,
     })
     renderPage()
@@ -810,6 +810,63 @@ describe('Overlays', () => {
     expect(saved.types.status.overlays[0].options.new_days).toBe(30)
   })
 
+  it('links an overlay to holidays and border rules of the Border Replacer', async () => {
+    const user = userEvent.setup()
+    localStorage.removeItem('posterflow.overlays.previewBase')
+    const libraryConfigs = [{ instance_name: 'srv', libraries: [{ key: '2', title: 'TV Shows', type: 'show', enabled: true }] }]
+    const borders = [
+      { key: 'holiday:Winter', kind: 'holiday', name: 'Winter', detail: '12/01 to 12/31' },
+      { key: 'rule:Classics', kind: 'rule', name: 'Classics', detail: 'label Old' },
+    ]
+    const cfg = baseConfig()
+    const normal = { ...cfg.types.status.overlays[0], all_libraries: false, libraries: ['srv:2'] }
+    cfg.types.status = { enabled: true, overlays: [normal, { ...normal, name: 'Old link', all_libraries: true, libraries: [], borders: ['holiday:Summer'] }] }
+    mockGetOverlaysConfig.mockResolvedValue({ config: { ...cfg, enabled: true }, has_tmdb_key: true, library_configs: libraryConfigs, badged_count: 0, borders })
+    renderPage()
+    await screen.findByRole('heading', { level: 2, name: 'Airing Status' })
+    const panel = () => screen.getByRole('group', { name: 'Overlay name and libraries' })
+    const overlayTabs = () => within(screen.getByRole('tablist', { name: 'Airing Status overlays' }))
+    const box = (name: RegExp | string) => within(panel()).getByLabelText(name) as HTMLInputElement
+    // The normal overlay has no link: it is previewed on the saved border settings as they are.
+    expect(box(/Winter/).checked).toBe(false)
+    expect(within(panel()).getByText(/Tick a holiday or border rule/)).toBeTruthy()
+    await waitFor(() => expect(mockFetchOverlayPreview).toHaveBeenCalled())
+    expect(mockFetchOverlayPreview.mock.calls.at(-1)?.[0].border).toBeUndefined()
+
+    await user.click(screen.getByRole('button', { name: /Add Overlay/ }))
+    await user.click(box(/Winter/))
+    await user.click(box(/Classics/))
+    expect(within(panel()).getByText(/in place of your normal Airing Status overlay/)).toBeTruthy()
+    expect(overlayTabs().getByLabelText('Airing Status 3: linked to Winter, Classics')).toBeTruthy()
+    // The preview puts the sample poster in the first linked border.
+    await waitFor(() => expect(mockFetchOverlayPreview.mock.calls.at(-1)?.[0].border).toBe('holiday:Winter'))
+    expect(screen.getByLabelText('Use my border settings: Winter')).toBeTruthy()
+    // A linked overlay may name a library the normal overlay names.
+    await user.click(box('All libraries'))
+    expect(box(/TV Shows/).disabled).toBe(false)
+    await user.click(box(/TV Shows/))
+    expect(box(/TV Shows/).checked).toBe(true)
+    // Without its links it is a normal overlay again: the library stays with the one that named it first.
+    await user.click(box(/Winter/))
+    await user.click(box(/Classics/))
+    expect(box(/TV Shows/).checked).toBe(false)
+    expect(box(/TV Shows/).disabled).toBe(true)
+    await user.click(box(/Classics/))
+    await user.click(box(/TV Shows/))
+
+    // A link to a holiday that is gone from the Border Replacer is shown, and can be dropped.
+    await user.click(overlayTabs().getByRole('tab', { name: 'Old link' }))
+    expect(within(panel()).getByText('Removed')).toBeTruthy()
+    await user.click(box(/Summer/))
+    expect(within(panel()).queryByLabelText(/Summer/)).toBeNull()
+
+    await user.click(screen.getAllByRole('button', { name: /^Save$/ })[0])
+    await waitFor(() => expect(mockSaveOverlaysConfig).toHaveBeenCalledTimes(1))
+    const saved = mockSaveOverlaysConfig.mock.calls[0][0].types.status.overlays
+    expect(saved.map((o: { borders: string[] }) => o.borders)).toEqual([[], [], ['rule:Classics']])
+    expect(saved[2]).toMatchObject({ all_libraries: false, libraries: ['srv:2'] })
+  })
+
   it('shows an empty state for a type without overlays', async () => {
     const user = userEvent.setup()
     const cfg = baseConfig()
@@ -871,7 +928,7 @@ describe('Overlays', () => {
       ({ id, name, enabled: true, text: name.toUpperCase(), image: '', weight: 0, match: 'all', rules: [] as unknown[], ...extra })
     // An overlay with one badge that says the overlay's name, unless it is given badges of its own.
     const customOverlay = (name: string, extra: Record<string, unknown> = {}, badges = [badge('00000001', 'Badge 1', { text: name.toUpperCase() })]) => ({
-      name, enabled: true, all_libraries: true, libraries: [] as string[], placement: { ...customType.default_placement },
+      name, enabled: true, all_libraries: true, libraries: [] as string[], borders: [] as string[], placement: { ...customType.default_placement },
       options: { ...JSON.parse(JSON.stringify(customType.default_options)), badges }, ...extra,
     })
     const libraryConfigs = [{ instance_name: 'srv', libraries: [
@@ -1020,7 +1077,7 @@ describe('Overlays', () => {
     const exportButton = () => screen.getByRole('button', { name: 'Export' }) as HTMLButtonElement
     const importFile = (file: File) => fireEvent.change(screen.getByLabelText('Overlay file to import'), { target: { files: [file] } })
     const zip = new File(['zip'], 'shared.zip', { type: 'application/zip' })
-    const imported = (name: string) => ({ name, enabled: false, all_libraries: true, libraries: [], placement: { ...placement }, options: JSON.parse(JSON.stringify(statusType.default_options)) })
+    const imported = (name: string) => ({ name, enabled: false, all_libraries: true, libraries: [], borders: [], placement: { ...placement }, options: JSON.parse(JSON.stringify(statusType.default_options)) })
 
     it('exports the saved settings: the buttons sit before Reset to Defaults and Export waits for a save', async () => {
       const user = userEvent.setup()

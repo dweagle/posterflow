@@ -17,7 +17,7 @@ vi.mock('../../src/api/overlays', async () => ({
 }))
 
 const type = (key: string, label: string, schema: unknown[] = []) => ({ key, label, schema } as unknown as OverlayTypeInfo)
-const overlay = (name: string, options: Record<string, unknown> = {}) => ({ name, enabled: true, all_libraries: true, libraries: [], placement: {}, options })
+const overlay = (name: string, options: Record<string, unknown> = {}) => ({ name, enabled: true, all_libraries: true, libraries: [], borders: [], placement: {}, options })
 const types = [type('status', 'Airing Status'), type('streaming', 'Streaming'), type('rating', 'Rating'), type('custom', 'Custom', [{ kind: 'badges', key: 'badges' }])]
 const config = {
   types: {

@@ -196,6 +196,8 @@ export interface OverlayDefinition {
   enabled: boolean // off = as if it did not exist, its libraries fall back to an all-libraries overlay
   all_libraries: boolean
   libraries: string[]
+  // Linked to these holidays and border rules ("holiday:<name>" / "rule:<name>"), it is used only on posters with their border.
+  borders: string[]
   placement: OverlayPlacement
   options: Record<string, unknown>
 }
@@ -221,6 +223,14 @@ export interface OverlaysConfig {
   types: Record<string, OverlayTypeConfig>
 }
 
+// A holiday or a border rule of the Border Replacer that an overlay can be linked to.
+export interface OverlayBorderChoice {
+  key: string
+  kind: 'holiday' | 'rule'
+  name: string
+  detail: string // the holiday's dates, or what the rule matches
+}
+
 export interface OverlaysConfigResponse {
   config: OverlaysConfig
   has_tmdb_key: boolean
@@ -228,6 +238,7 @@ export interface OverlaysConfigResponse {
   library_configs: PlexLibraryConfig[]
   // Items currently carrying a badge on a server (per the overlay state).
   badged_count: number
+  borders: OverlayBorderChoice[]
 }
 
 export interface OverlayFont {
@@ -281,6 +292,8 @@ export const fetchOverlayPreview = async (params: {
   enabled?: boolean
   // 'bordered' renders the sample poster through the saved border settings first.
   base?: OverlayPreviewBase
+  // With 'bordered': the key of the holiday or border rule whose border the sample gets.
+  border?: string
   others?: OverlayPreviewLayer[]
 }): Promise<OverlayPreviewResult> => {
   const resp = await client.post('/api/overlays/preview', params, { responseType: 'blob' })
