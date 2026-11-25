@@ -14,6 +14,8 @@ export interface CommunityRequest {
   claimed_by: string | null
   claimed_by_discord_id: string | null
   fulfilled_by: string | null
+  // Why a maker rejected it. Cleared when it is unrejected.
+  reject_reason?: string | null
   requested_by: string | null
   requested_by_discord_id: string | null
   discord_thread_url: string | null
@@ -188,6 +190,8 @@ export interface CommunityListItem {
   claimed_by_discord_id: string | null
   fulfilled_by: string | null
   fulfilled_at: string | null
+  // Why a maker rejected it. Cleared when it is unrejected.
+  reject_reason?: string | null
   created_at: string
   updated_at: string
   // Embedded by the backend read — who wants this poster ("wanted by N").

@@ -15,6 +15,8 @@
  *   - "claim" is only allowed when status = 'pending' (atomic update prevents races)
  *   - "complete" is only allowed when status = 'in_progress'
  *   - "reject" is allowed on 'pending' or 'in_progress'
+ *   - "unreject" (any maker) puts a 'rejected' request back to 'pending' and
+ *     reopens its thread; refused while another active request covers it
  *   - "match" (server owner or a DISCORD_MOD_ROLE_IDS holder) fills in the ids
  *     of a custom request; conditional on tmdb_id still being NULL so it can't
  *     run twice
@@ -33,7 +35,9 @@
  * Request body (JSON):
  *   token      - Signed maker token from discord-oauth
  *   request_id - UUID of the poster_request row
- *   action     - "claim" | "complete" | "reject" | "close" | "remove" | "release" | "match" | "upgrade"
+ *   action     - "claim" | "complete" | "reject" | "unreject" | "close" | "remove" | "release" | "match" | "upgrade"
+ *   message    - for "close": an optional note for the thread; for "reject": the reason,
+ *                saved on the request and posted to the thread
  *   match      - for "match": { tmdb_id, tvdb_id, imdb_id, title, year, poster_path, media_type }
  */
 
@@ -47,7 +51,7 @@ const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-const VALID_ACTIONS = new Set(['claim', 'complete', 'reject', 'close', 'remove', 'release', 'match', 'upgrade'])
+const VALID_ACTIONS = new Set(['claim', 'complete', 'reject', 'unreject', 'close', 'remove', 'release', 'match', 'upgrade'])
 
 // ── Token verification (same as post-poster) ───────────────────────────────
 
@@ -327,12 +331,12 @@ async function updateStarterMessage(
   const statusLabel =
     action === 'claim'   ? `🎨 Claimed by ${makerName}` :
     action === 'reject'  ? `❌ Rejected by ${makerName}` :
-    action === 'release' ? `🟢 Open for claims` :
+    action === 'release' || action === 'unreject' ? `🟢 Open for claims` :
     `✅ Completed by ${makerName}`
   const newColor =
     action === 'claim'   ? 0xffb74d :
     action === 'reject'  ? 0x9e9e9e :
-    action === 'release' ? 0x64b5f6 :
+    action === 'release' || action === 'unreject' ? 0x64b5f6 :
     0x4caf50
 
   const updatedEmbed = {
@@ -357,6 +361,28 @@ async function updateStarterMessage(
   if (!patchResp.ok) {
     console.error('[update-request-status] Discord embed PATCH failed:', await patchResp.text())
   }
+}
+
+// The starter message's buttons for a request that is open for claims.
+function openButtons(requestId: string): unknown[] {
+  return [{
+    type: 1,
+    components: [
+      { type: 2, style: 2, label: 'Claim Poster', custom_id: `claim:${requestId}`, emoji: { name: '🎨' } },
+      { type: 2, style: 3, label: 'Mark Complete', custom_id: `complete:${requestId}:`, emoji: { name: '✅' } },
+      { type: 2, style: 4, label: '✕ Reject', custom_id: `reject:${requestId}` },
+    ],
+  }]
+}
+
+// Unarchive and unlock a thread. Nothing can be posted or edited in an archived one.
+async function reopenThread(threadId: string): Promise<void> {
+  const resp = await fetch(`https://discord.com/api/v10/channels/${threadId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bot ${BOT_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ archived: false, locked: false }),
+  })
+  if (!resp.ok) console.error('[update-request-status] thread reopen failed:', await resp.text())
 }
 
 async function memberRoles(discordUserId: string): Promise<string[]> {
@@ -683,7 +709,7 @@ Deno.serve(async (req) => {
     return json({ error: 'Missing required fields: token, request_id, action' }, 400)
   }
   if (!VALID_ACTIONS.has(action)) {
-    return json({ error: 'Invalid action — must be claim, complete, reject, close, remove, release, match, or upgrade' }, 400)
+    return json({ error: 'Invalid action — must be claim, complete, reject, unreject, close, remove, release, match, or upgrade' }, 400)
   }
   // request_id is interpolated into PostgREST query strings, so require a strict
   // UUID — this blocks query-parameter injection via crafted ids.
@@ -826,17 +852,9 @@ Deno.serve(async (req) => {
     // Revert the Discord post to open: restore the buttons and post a note.
     if (row.discord_message_id) {
       const channelId = row.discord_message_id
-      const freshComponents = [{
-        type: 1,
-        components: [
-          { type: 2, style: 2, label: 'Claim Poster', custom_id: `claim:${request_id}`, emoji: { name: '🎨' } },
-          { type: 2, style: 3, label: 'Mark Complete', custom_id: `complete:${request_id}:`, emoji: { name: '✅' } },
-          { type: 2, style: 4, label: '✕ Reject', custom_id: `reject:${request_id}` },
-        ],
-      }]
       const bgTask = Promise.all([
         postThreadMessage(channelId, `🟢 **Released by ${maker.discord_username}** — open for claims again.`),
-        updateStarterMessage(channelId, 'release', maker.discord_username, freshComponents),
+        updateStarterMessage(channelId, 'release', maker.discord_username, openButtons(request_id)),
       ]).catch(console.error)
       try {
         // @ts-ignore - EdgeRuntime is a Supabase-specific global
@@ -847,6 +865,78 @@ Deno.serve(async (req) => {
     }
 
     return json({ ok: true, status: 'pending', claimed_by: null, claimed_by_discord_id: null })
+  }
+
+  // ── Unreject action: a maker puts a rejected request back to open ─────────
+  if (action === 'unreject') {
+    if (!(await checkMakerRole(maker.discord_user_id))) {
+      return json({ error: 'You no longer have the Poster Maker role' }, 403)
+    }
+    const row = await fetchRequest(request_id)
+    if (!row) return json({ error: 'Request not found' }, 404)
+    if (row.status !== 'rejected') {
+      return json({ error: 'Only a rejected request can be unrejected' }, 409)
+    }
+
+    // Refused when an active request already covers it: the same item, or the show for a season.
+    const style = styleOf(row.style_tags)
+    const dup =
+      (await findActiveDuplicate({ tmdb_id: row.tmdb_id, media_type: row.media_type, season_number: row.season_number }, row)) ??
+      (row.media_type === 'season'
+        ? await findActiveDuplicate({ tmdb_id: row.tmdb_id, media_type: 'show', season_number: null }, row)
+        : null)
+    if (dup) {
+      return json({ error: `An active ${style ? `${style} ` : ''}request for "${dup.title}" already exists` }, 409)
+    }
+
+    // Only while still rejected. Clearing close_at cancels the scheduled thread close.
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${request_id}&status=eq.rejected`, {
+      method: 'PATCH',
+      headers: SB_HEADERS,
+      body: JSON.stringify({
+        status: 'pending',
+        claimed_by: null,
+        claimed_by_discord_id: null,
+        fulfilled_at: null,
+        close_at: null,
+        reject_reason: null,
+        updated_at: new Date().toISOString(),
+      }),
+    })
+    if (!resp.ok) {
+      console.error('[update-request-status] unreject PATCH failed:', await resp.text())
+      // PostgREST maps a unique violation (23505, the active-request indexes) to 409.
+      if (resp.status === 409) return json({ error: 'An active request for this item already exists' }, 409)
+      return json({ error: 'Failed to update the request' }, 500)
+    }
+    if (((await resp.json()) as unknown[]).length === 0) {
+      return json({ error: 'This request was just updated — please refresh' }, 409)
+    }
+
+    if (row.discord_message_id) {
+      const channelId = row.discord_message_id
+      const requesterId = row.requested_by_discord_id
+      const bgTask = (async () => {
+        // The thread may already be locked and archived by the scheduled close.
+        await reopenThread(channelId)
+        await Promise.all([
+          postThreadMessage(
+            channelId,
+            `🔄 **Reopened by ${maker.discord_username}** via PosterFlow. This request is open for claims again.${requesterId ? ` <@${requesterId}>` : ''}`,
+            requesterId ? { parse: [], users: [requesterId] } : undefined,
+          ),
+          updateStarterMessage(channelId, 'unreject', maker.discord_username, openButtons(request_id)),
+        ])
+      })().catch(console.error)
+      try {
+        // @ts-ignore - EdgeRuntime is a Supabase-specific global
+        EdgeRuntime.waitUntil(bgTask)
+      } catch {
+        await bgTask
+      }
+    }
+
+    return json({ ok: true, status: 'pending', claimed_by: null, claimed_by_discord_id: null, fulfilled_by: null })
   }
 
   // ── Match action: a moderator links an id-less (custom) request ───────────
@@ -1033,11 +1123,13 @@ Deno.serve(async (req) => {
     discordMessage = `✅ **Fulfilled by ${maker.discord_username}** via PosterFlow. This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.${requesterPing}`
   } else {
     // reject
+    const reason = typeof message === 'string' ? message.replace(/\s+/g, ' ').trim().slice(0, 200) : ''
     patch.status = 'rejected'
     patch.fulfilled_at = now
     patch.close_at = closeAt
+    patch.reject_reason = reason || null
     const rejectPing = requested_by_discord_id ? ` <@${requested_by_discord_id}>` : ''
-    discordMessage = `❌ **Rejected by ${maker.discord_username}** via PosterFlow. This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.${rejectPing}`
+    discordMessage = `❌ **Rejected by ${maker.discord_username}** via PosterFlow. This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.${rejectPing}${reason ? `\n**Reason:** ${reason}` : ''}`
   }
 
   // ── Step 6: Conditional update (prevents claim race conditions) ────────────
@@ -1056,10 +1148,10 @@ Deno.serve(async (req) => {
   if (discord_message_id) {
     const discordTasks: Promise<void>[] = []
 
-    // Post a status message in the thread (includes requester ping on complete/reject)
+    // Complete and reject ping the requester only, so a typed reject reason cannot mention anyone.
     if (discordMessage) {
-      const allowedMentions = ((action === 'complete' || action === 'reject') && requested_by_discord_id)
-        ? { parse: [], users: [requested_by_discord_id] }
+      const allowedMentions = action === 'complete' || action === 'reject'
+        ? { parse: [], users: requested_by_discord_id ? [requested_by_discord_id] : [] }
         : undefined
       discordTasks.push(postThreadMessage(discord_message_id, discordMessage, allowedMentions))
     }

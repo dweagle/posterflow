@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useHiddenPosterStyles } from '../../hooks/useHiddenPosterStyles'
-import { RefreshCw, Globe, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
+import { RefreshCw, Globe, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload, CalendarArrowDown, CalendarArrowUp, Undo2 } from 'lucide-react'
 import { getCommunityListItems, getCommunityListOwners, submitCommunityRequest, type CommunityListItem, type CommunityListOwner, type SubmitRequestPayload } from '../../api/community'
 import { getSettings } from '../../api/client'
 import { checkTmdbPosterAvailability, posterCheckKey, type PosterAvailability } from '../../api/makerTools'
@@ -13,6 +13,7 @@ import HideFilterMenu from './HideFilterMenu'
 import { anyHideFilter, isHiddenByMeta, isHiddenByStyle, loadHideFilters, needsTmdbMeta, saveHideFilters, tmdbMetaType, NO_HIDE_FILTERS, type HideFilters } from './hideFilters'
 import { tmdbMetaKey, useTmdbMetaMap } from '../../hooks/useCardOverview'
 import MoveToRequestModal, { type MoveToRequestValues } from './MoveToRequestModal'
+import RejectReasonModal from './RejectReasonModal'
 import { useIdarrQuickAdd } from './useIdarrQuickAdd'
 import { notifyIdarrTargetedRun } from '../../utils/idarrTargetedRun'
 import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
@@ -21,6 +22,7 @@ import Toolbar from '../../components/Toolbar'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
 type SortOrder = 'newest' | 'oldest'
+type StatusFilter = 'active' | 'in_progress' | 'fulfilled' | 'rejected' | 'all'
 
 const PAGE_SIZE = 50
 
@@ -89,7 +91,7 @@ export default function ListsView() {
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')   // 'all' | a wanter's discord_id
   const [ownerLabel, setOwnerLabel] = useState('')                // remembered name of the selected wanter
-  const [statusFilter, setStatusFilter] = useState<'active' | 'in_progress' | 'fulfilled' | 'all'>('active')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active')
   const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: my claims + open items
   const [hideFilters, setHideFilters] = useState<HideFilters>(() => loadHideFilters(HIDE_FILTERS_STORAGE_KEY, LEGACY_NO_MM2K_STORAGE_KEY))  // hide menu; sticks across navigation
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
@@ -109,6 +111,8 @@ export default function ListsView() {
   // Item pending "Move to Request" confirmation, and the in-flight flag.
   const [moveTarget, setMoveTarget] = useState<CommunityListItem | null>(null)
   const [moving, setMoving] = useState(false)
+  // Item whose reject reason is being asked for.
+  const [rejectTarget, setRejectTarget] = useState<CommunityListItem | null>(null)
   // Per-card IDarr upload-button state: itemId → 'uploading' | 'done'.
   const [uploadStates, setUploadStates] = useState<Map<string, 'uploading' | 'done'>>(new Map())
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -305,15 +309,21 @@ export default function ListsView() {
       })
   }, [items])
 
-  const handleAction = useCallback(async (item: CommunityListItem, action: 'claim' | 'complete' | 'release' | 'reject' | 'remove') => {
+  const handleAction = useCallback(async (item: CommunityListItem, action: 'claim' | 'complete' | 'release' | 'reject' | 'unreject' | 'remove', message?: string) => {
     setActionStates((prev) => new Map(prev).set(item.id, 'loading'))
     try {
-      const result = await updateListItem(item.id, action)
+      const result = message ? await updateListItem(item.id, action, message) : await updateListItem(item.id, action)
       setActionStates((prev) => { const next = new Map(prev); next.delete(item.id); return next })
-      if (action === 'claim' || action === 'release') {
-        // Keep the card, update its claim state in place.
+      if (action === 'claim' || action === 'release' || action === 'unreject') {
+        // Keep the card, update its claim state in place. An unrejected item also loses its "Rejected by" and reason.
         setItems((prev) => prev.map((i) => i.id === item.id
-          ? { ...i, status: (result.status as CommunityListItem['status']) ?? i.status, claimed_by: result.claimed_by ?? null, claimed_by_discord_id: result.claimed_by_discord_id ?? null }
+          ? {
+              ...i,
+              status: (result.status as CommunityListItem['status']) ?? i.status,
+              claimed_by: result.claimed_by ?? null,
+              claimed_by_discord_id: result.claimed_by_discord_id ?? null,
+              ...(action === 'unreject' ? { fulfilled_by: null, fulfilled_at: null, reject_reason: null } : {}),
+            }
           : i))
       } else if (action === 'remove') {
         // Detach this user — the poster stays if others still want it, so re-read.
@@ -515,10 +525,11 @@ export default function ListsView() {
       <div className="community-filters">
         <div className="community-filter-group">
           <label>Status</label>
-          <select className="community-status-select" value={statusFilter} disabled={claimedByMe} onChange={(e) => setStatusFilter(e.target.value as 'active' | 'in_progress' | 'fulfilled' | 'all')}>
+          <select className="community-status-select" value={statusFilter} disabled={claimedByMe} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
             <option value="active">Active</option>
             <option value="in_progress">In Progress</option>
             <option value="fulfilled">Fulfilled</option>
+            {isMaker && <option value="rejected">Rejected</option>}
             <option value="all">All</option>
           </select>
         </div>
@@ -702,6 +713,16 @@ export default function ListsView() {
                     ✅ Completed by <strong>{item.fulfilled_by}</strong>
                   </div>
                 )}
+                {item.status === 'rejected' && (item.fulfilled_by || item.reject_reason) && (
+                  <div className="request-maker-info">
+                    ❌ Rejected{item.fulfilled_by ? <> by <strong>{item.fulfilled_by}</strong></> : null}{item.reject_reason ? `: ${item.reject_reason}` : ''}
+                  </div>
+                )}
+                {item.status === 'rejected' && wanters.length === 0 && (
+                  <div className="request-maker-info request-maker-requested">
+                    No one wants this item any more, so it cannot be unrejected.
+                  </div>
+                )}
               </>
             )
 
@@ -774,9 +795,24 @@ export default function ListsView() {
                       className="request-action-btn action-reject"
                       disabled={actionLoading}
                       data-tooltip="Reject this item"
-                      onClick={() => handleAction(item, 'reject')}
+                      onClick={() => setRejectTarget(item)}
                     >
                       <span>Reject</span>
+                    </button>
+                  </div>
+                )}
+                {/* An item nobody wants any more cannot go back on the list. */}
+                {isMaker && item.status === 'rejected' && wanters.length > 0 && (
+                  <div className="request-status-actions">
+                    <button
+                      type="button"
+                      className="request-action-btn"
+                      disabled={actionLoading}
+                      data-tooltip="Undo the rejection. The item goes back on the list."
+                      onClick={() => handleAction(item, 'unreject')}
+                    >
+                      {actionLoading ? <Loader2 size={11} className="spinning" /> : <Undo2 size={11} />}
+                      <span>Unreject</span>
                     </button>
                   </div>
                 )}
@@ -875,6 +911,15 @@ export default function ListsView() {
             </button>
           </Modal.Footer>
         </Modal>
+      )}
+
+      {rejectTarget && (
+        <RejectReasonModal
+          title={rejectTarget.year ? `${rejectTarget.title} (${rejectTarget.year})` : rejectTarget.title}
+          what="item"
+          onCancel={() => setRejectTarget(null)}
+          onConfirm={(reason) => { setRejectTarget(null); void handleAction(rejectTarget, 'reject', reason) }}
+        />
       )}
 
       {moveTarget && (

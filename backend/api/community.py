@@ -563,11 +563,13 @@ async def submit_community_request(payload: PosterRequestPayload):
 # edge functions (submit-list-items / update-list-item).
 
 def _list_status_filter(status: Optional[str]) -> str:
-    """PostgREST status filter for the lists views (rejected always hidden)."""
+    """PostgREST status filter for the lists views (rejected only when asked for)."""
     if status == "in_progress":
         return "eq.in_progress"
     if status == "fulfilled":
         return "eq.fulfilled"
+    if status == "rejected":
+        return "eq.rejected"
     if status == "all":
         return "in.(open,in_progress,fulfilled)"
     return "in.(open,in_progress)"  # active
@@ -579,6 +581,8 @@ def _list_status_values(status: Optional[str]) -> list[str]:
         return ["in_progress"]
     if status == "fulfilled":
         return ["fulfilled"]
+    if status == "rejected":
+        return ["rejected"]
     if status == "all":
         return ["open", "in_progress", "fulfilled"]
     return ["open", "in_progress"]  # active
@@ -651,7 +655,8 @@ async def get_community_lists(
 ):
     """Fetch a page of community list items from Supabase.
 
-    status filter: active (default) = open+in_progress, fulfilled, or all.
+    status filter: active (default) = open+in_progress, in_progress, fulfilled,
+    rejected, or all (which leaves rejected out).
     claimed_by_discord_id: the maker's "Claimed" view — their own claims plus
     every open item (i.e. hide only other makers' claims).
     Returns {items, total} — total is the full match count, so the UI knows when

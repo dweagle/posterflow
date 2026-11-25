@@ -16,8 +16,8 @@ webhook), not Supabase's built‑in JWT gate.
 | `discord-oauth` | OAuth popup: exchange Discord code, confirm guild membership + Maker role (+ moderator role → `is_mod`), **mint the signed app token** | Browser (popup) | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET`, `DISCORD_MOD_ROLE_IDS` (optional) |
 | `submit-request` | Insert a poster request (RPC) + per‑user/IP rate limits | FastAPI proxy (`/api/community/requests`) | `DISCORD_JWT_SECRET` |
 | `submit-list-items` | Bulk‑publish items to the Lists tab | FastAPI proxy (`/api/community/lists`) | `DISCORD_JWT_SECRET` |
-| `update-request-status` | claim / complete / reject / close / **remove** (requester or moderator) / **release** / **match** (moderator fills in an id‑less request's TMDB/TVDB ids) / **upgrade** (moderator turns a season request into a show request) + Discord thread updates | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET`, `DISCORD_MOD_ROLE_IDS` (optional) |
-| `update-list-item` | claim / complete / release / reject / remove / **remove_mine** for list items | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET` |
+| `update-request-status` | claim / complete / reject (with a reason, saved in `reject_reason` and posted to the thread) / **unreject** (maker puts a rejected request back to open and reopens its thread) / close / **remove** (requester or moderator) / **release** / **match** (moderator fills in an id‑less request's TMDB/TVDB ids) / **upgrade** (moderator turns a season request into a show request) + Discord thread updates | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET`, `DISCORD_MOD_ROLE_IDS` (optional) |
+| `update-list-item` | claim / complete / release / reject (with a reason, saved in `reject_reason`) / **unreject** (maker puts a rejected item back on the list) / remove / **remove_mine** for list items | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET` |
 | `post-poster` | Maker uploads finished poster file(s) to a request's thread | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET` |
 | `notify-discord` | Create the forum thread when a request is inserted | **DB webhook** on `poster_requests` INSERT | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_CHANNEL_ID` |
 | `discord-interactions` | Handle Discord button clicks (claim/complete/reject from Discord) | Discord (interaction webhook) | `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, `DISCORD_MAKER_ROLE_ID` |
@@ -55,9 +55,9 @@ supabase secrets list
 ### Bot requirements
 The bot must be **in the guild** and have permissions to: View Channels, Send
 Messages / Create Posts (forum), Manage Messages (edit the starter embed +
-buttons), and **Manage Threads** (lock/archive on close/remove). Role checks use
-the REST guild‑member lookup, so the bot needs guild membership (no gateway intent
-needed for the REST calls).
+buttons), and **Manage Threads** (lock/archive on close/remove, unlock/unarchive
+on unreject). Role checks use the REST guild‑member lookup, so the bot needs guild
+membership (no gateway intent needed for the REST calls).
 
 ### notify-discord webhook secret (separate)
 `notify-discord` is fired by a **Database Webhook** (Database → Webhooks, the

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
-import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp, Link2, ChevronsUp } from 'lucide-react'
+import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp, Link2, ChevronsUp, Undo2 } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest, type ExportRef, type RequestMatch } from '../api/community'
 import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, posterCheckKey, type PosterAvailability } from '../api/makerTools'
@@ -20,6 +20,7 @@ import { notifyIdarrTargetedRun } from '../utils/idarrTargetedRun'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
 import RequestUploadPickerModal from '../components/community/RequestUploadPickerModal'
 import MatchRequestModal from '../components/community/MatchRequestModal'
+import RejectReasonModal from '../components/community/RejectReasonModal'
 import { useToast } from '../components/Toast'
 import './CommunityRequests.css'
 import Modal from '../components/Modal'
@@ -92,7 +93,7 @@ export default function CommunityRequests() {
   const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all')
   // Per-card upload state: requestId → 'uploading' | 'done' | Error
   const [uploadStates, setUploadStates] = useState<Map<string, 'uploading' | 'done' | string>>(new Map())
-  // Per-card action state (claim/complete/reject): requestId → 'loading' | error string
+  // Per-card action state (claim/complete/reject/unreject): requestId → 'loading' | error string
   const [actionStates, setActionStates] = useState<Map<string, 'loading' | string>>(new Map())
   // Per-card counter bumped on complete so the card's TMDB image gallery auto-collapses.
   const [collapseSignals, setCollapseSignals] = useState<Map<string, number>>(new Map())
@@ -102,6 +103,7 @@ export default function CommunityRequests() {
   const [archiveStates, setArchiveStates] = useState<Map<string, 'loading' | 'done' | string>>(new Map())
   const [archiveConfirm, setArchiveConfirm] = useState<{ requestId: string; message: string } | null>(null)
   const [claimConflict, setClaimConflict] = useState<string | null>(null)   // message shown when a claim fails (already claimed)
+  const [rejectRequestId, setRejectRequestId] = useState<string | null>(null)   // request whose reject reason is being asked for
   // Upload picker over the server's export folders; only offered when one is configured.
   const [exportPickerAvailable, setExportPickerAvailable] = useState(false)
   const [pickerRequestId, setPickerRequestId] = useState<string | null>(null)
@@ -222,7 +224,7 @@ export default function CommunityRequests() {
     doUpload(requestId, allFiles)
   }, [doUpload])
 
-  const handleStatusAction = useCallback(async (requestId: string, action: 'claim' | 'complete' | 'reject' | 'release' | 'remove', message?: string) => {
+  const handleStatusAction = useCallback(async (requestId: string, action: 'claim' | 'complete' | 'reject' | 'unreject' | 'release' | 'remove', message?: string) => {
     setActionStates((prev) => new Map(prev).set(requestId, 'loading'))
     try {
       const result = await updateRequestStatus(requestId, action, message)
@@ -238,9 +240,10 @@ export default function CommunityRequests() {
                   status: result.status as CommunityRequest['status'],
                   claimed_by: result.claimed_by,
                   // The API omits claimed_by_discord_id; on claim the claimer is the
-                  // current user, on release it's cleared, otherwise leave it.
-                  claimed_by_discord_id: action === 'claim' ? discordUserId : action === 'release' ? null : r.claimed_by_discord_id,
+                  // current user, on release or unreject it's cleared, otherwise leave it.
+                  claimed_by_discord_id: action === 'claim' ? discordUserId : action === 'release' || action === 'unreject' ? null : r.claimed_by_discord_id,
                   fulfilled_by: result.fulfilled_by,
+                  reject_reason: action === 'reject' ? message ?? null : action === 'unreject' ? null : r.reject_reason,
                 }
               : r
           )
@@ -322,6 +325,7 @@ export default function CommunityRequests() {
 
   const pickerRequest = pickerRequestId ? requests.find((r) => r.id === pickerRequestId) ?? null : null
   const matchTarget = matchRequestId ? requests.find((r) => r.id === matchRequestId) ?? null : null
+  const rejectTarget = rejectRequestId ? requests.find((r) => r.id === rejectRequestId) ?? null : null
 
   const fetchRequests = useCallback(async () => {
     setLoading(true)
@@ -678,6 +682,11 @@ export default function CommunityRequests() {
                     ✅ Completed by <strong>{req.fulfilled_by}</strong>
                   </div>
                 )}
+                {req.status === 'rejected' && req.reject_reason && (
+                  <div className="request-maker-info">
+                    ❌ Rejected: {req.reject_reason}
+                  </div>
+                )}
               </>
             )
             const actions = (
@@ -763,9 +772,28 @@ export default function CommunityRequests() {
                               className="request-action-btn action-reject"
                               disabled={actionLoading}
                               data-tooltip="Reject this request"
-                              onClick={() => handleStatusAction(req.id, 'reject')}
+                              onClick={() => setRejectRequestId(req.id)}
                             >
                               <span>Reject</span>
+                            </button>
+                            {actionError && (
+                              <span className="request-action-error" data-tooltip={actionError}>
+                                {actionError}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {req.status === 'rejected' && (
+                          <div className="request-status-actions">
+                            <button
+                              type="button"
+                              className="request-action-btn"
+                              disabled={actionLoading}
+                              data-tooltip="Undo the rejection. The request goes back to open."
+                              onClick={() => handleStatusAction(req.id, 'unreject')}
+                            >
+                              {actionLoading ? <Loader2 size={11} className="spinning" /> : <Undo2 size={11} />}
+                              <span>Unreject</span>
                             </button>
                             {actionError && (
                               <span className="request-action-error" data-tooltip={actionError}>
@@ -932,6 +960,14 @@ export default function CommunityRequests() {
         submitting={matchSubmitting}
         onCancel={() => { if (!matchSubmitting) setMatchRequestId(null) }}
         onConfirm={(match) => handleMatch(matchTarget.id, match)}
+      />
+    )}
+    {rejectTarget && (
+      <RejectReasonModal
+        title={rejectTarget.year ? `${rejectTarget.title} (${rejectTarget.year})` : rejectTarget.title}
+        what="request"
+        onCancel={() => setRejectRequestId(null)}
+        onConfirm={(reason) => { setRejectRequestId(null); void handleStatusAction(rejectTarget.id, 'reject', reason) }}
       />
     )}
     {archiveConfirm && (() => {

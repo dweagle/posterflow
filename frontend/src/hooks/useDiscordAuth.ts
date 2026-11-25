@@ -228,11 +228,12 @@ export function useDiscordAuth() {
   )
 
   // Request status actions go to the community service, except Complete: Posterflow's server does
-  // that one, the same action the editor panels' Complete runs.
+  // that one, the same action the editor panels' Complete runs. `message` is the note for close
+  // and the reason for reject.
   const updateRequestStatus = useCallback(
     async (
       requestId: string,
-      action: 'claim' | 'complete' | 'reject' | 'close' | 'remove' | 'release',
+      action: 'claim' | 'complete' | 'reject' | 'unreject' | 'close' | 'remove' | 'release',
       message?: string,
     ): Promise<{ status: string; claimed_by: string | null; fulfilled_by: string | null }> => {
       if (!auth?.token) throw new Error('Not connected to Discord')
@@ -291,11 +292,12 @@ export function useDiscordAuth() {
   // Community list-item actions — mirrors updateRequestStatus, different endpoint (Complete goes
   // through Posterflow's server here too).
   // 'remove' is publisher-or-owner; 'remove_mine' (no itemId) clears all the
-  // caller's own items; the maker actions require the Maker role.
+  // caller's own items; the maker actions require the Maker role. `message` is the reason for reject.
   const updateListItem = useCallback(
     async (
       itemId: string | null,
-      action: 'claim' | 'complete' | 'release' | 'reject' | 'remove' | 'remove_mine',
+      action: 'claim' | 'complete' | 'release' | 'reject' | 'unreject' | 'remove' | 'remove_mine',
+      message?: string,
     ): Promise<{ status?: string; claimed_by?: string | null; claimed_by_discord_id?: string | null; removed?: boolean | number }> => {
       if (!auth?.token) throw new Error('Not connected to Discord')
       if (action === 'complete' && itemId) return inServerWords(completeClaim('list-items', itemId, auth.token), 'Action "complete" failed')
@@ -303,7 +305,7 @@ export function useDiscordAuth() {
       const resp = await fetch(UPDATE_LIST_ITEM_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: auth.token, item_id: itemId ?? undefined, action }),
+        body: JSON.stringify({ token: auth.token, item_id: itemId ?? undefined, action, ...(message ? { message } : {}) }),
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok) {

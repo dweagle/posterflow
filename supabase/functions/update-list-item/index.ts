@@ -8,7 +8,9 @@
  *   claim    maker only; open -> in_progress (atomic guard prevents collisions)
  *   complete maker who claimed it (server owner exempt); in_progress -> fulfilled
  *   release  the claiming maker (or owner); in_progress -> open
- *   reject   maker only; open|in_progress -> rejected
+ *   reject   maker only; open|in_progress -> rejected; `message` is the reason
+ *   unreject maker only; rejected -> open (refused when nobody wants it any
+ *            more, or the poster is already back on the list)
  *   remove   detach the caller as a wanter; guild owner can force-delete the
  *            row only when they aren't a wanter themselves
  *
@@ -32,7 +34,7 @@ const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-const MAKER_ACTIONS = new Set(['claim', 'complete', 'release', 'reject'])
+const MAKER_ACTIONS = new Set(['claim', 'complete', 'release', 'reject', 'unreject'])
 // remove: publisher or guild owner (per item). remove_mine: caller clears all
 // their own. remove_ids: caller clears a specific set of their own. available_ids:
 // like remove_ids but also flags the surviving rows "available in a drive" (the
@@ -149,6 +151,40 @@ async function patchItem(filter: string, patch: Record<string, unknown>): Promis
   return rows.length > 0
 }
 
+// Status of another live row for the same poster; mirrors the dedup indexes, which skip rejected rows.
+async function findLiveTwin(row: ListItemRow): Promise<string | null> {
+  const params = new URLSearchParams()
+  params.set('select', 'status,title')
+  params.set('id', `neq.${row.id}`)
+  params.set('status', 'in.(open,in_progress,fulfilled)')
+  params.set('media_type', `eq.${row.media_type}`)
+  params.set('season_number', row.season_number == null ? 'is.null' : `eq.${row.season_number}`)
+  if (row.tmdb_id != null) {
+    params.set('tmdb_id', `eq.${row.tmdb_id}`)
+  } else {
+    params.set('tmdb_id', 'is.null')
+    params.set('title', `ilike.${row.title}`)
+  }
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?${params}`, { headers: SB_HEADERS })
+  if (!resp.ok) return null
+  const rows = await resp.json() as { status: string; title: string | null }[]
+  // ilike reads % and _ in a title as wildcards, so compare the titles exactly.
+  const twin = row.tmdb_id != null
+    ? rows[0]
+    : rows.find((r) => (r.title ?? '').toLowerCase() === row.title.toLowerCase())
+  return twin?.status ?? null
+}
+
+// Whether anyone still wants the item; null when the lookup failed.
+async function hasWanters(itemId: string): Promise<boolean | null> {
+  const resp = await fetch(
+    `${SUPABASE_URL}/rest/v1/poster_list_wanters?item_id=eq.${itemId}&select=id&limit=1`,
+    { headers: SB_HEADERS },
+  )
+  if (!resp.ok) return null
+  return (await resp.json() as unknown[]).length > 0
+}
+
 // Detach wanters matching the filter; returns rows removed (or -1 on error). The
 // orphan-cleanup trigger drops any now-wanterless open poster automatically, so
 // removing your interest never deletes a row others still want.
@@ -256,7 +292,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
-  let body: { token?: string; item_id?: string; action?: string; item_ids?: unknown }
+  let body: { token?: string; item_id?: string; action?: string; item_ids?: unknown; message?: unknown }
   try {
     body = await req.json()
   } catch {
@@ -439,12 +475,46 @@ Deno.serve(async (req) => {
     return json({ ok: true, status: 'open', claimed_by: null, claimed_by_discord_id: null })
   }
 
+  if (action === 'unreject') {
+    if (row.status !== 'rejected') {
+      return json({ error: 'Only a rejected item can be unrejected' }, 409)
+    }
+    // An open item with no wanters would never be cleaned up.
+    const wanted = await hasWanters(item_id)
+    if (wanted === null) return json({ error: 'Could not check this item. Please try again.' }, 500)
+    if (!wanted) {
+      return json({ error: 'No one wants this item any more, so it cannot be unrejected' }, 409)
+    }
+    const twin = await findLiveTwin(row)
+    if (twin) {
+      return json({
+        error: twin === 'fulfilled'
+          ? 'This poster has since been completed from the list'
+          : 'This item is already back on the list',
+      }, 409)
+    }
+    const ok = await patchItem(`id=eq.${item_id}&status=eq.rejected`, {
+      status: 'open',
+      claimed_by: null,
+      claimed_by_discord_id: null,
+      fulfilled_by: null,
+      fulfilled_by_discord_id: null,
+      fulfilled_at: null,
+      reject_reason: null,
+      updated_at: now,
+    })
+    if (!ok) return json({ error: 'This item was just updated — please refresh' }, 409)
+    return json({ ok: true, status: 'open', claimed_by: null, claimed_by_discord_id: null })
+  }
+
   // reject — open or in_progress -> rejected
   if (!['open', 'in_progress'].includes(row.status)) {
     return json({ error: 'This item cannot be rejected in its current state' }, 409)
   }
+  const reason = typeof body.message === 'string' ? body.message.replace(/\s+/g, ' ').trim().slice(0, 200) : ''
   const ok = await patchItem(`id=eq.${item_id}&status=in.(open,in_progress)`, {
     status: 'rejected',
+    reject_reason: reason || null,
     fulfilled_by: user.discord_username,
     fulfilled_by_discord_id: user.discord_user_id,
     fulfilled_at: now,
