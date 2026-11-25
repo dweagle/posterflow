@@ -8,6 +8,7 @@ import {
 import AddCustomDriveModal from './AddCustomDriveModal'
 import ArtworkSubscribeModal from './ArtworkSubscribeModal'
 import DriveEditModal from './DriveEditModal'
+import DriveSyncOffIcon from './DriveSyncOffIcon'
 import ConfirmDialog from './ConfirmDialog'
 import GdriveStorageModal from './GdriveStorageModal'
 import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink } from 'lucide-react'
@@ -438,7 +439,7 @@ function ArtworkDrivesPanel() {
         </button>
       )}
       <div className="drive-header">
-        <div className="drive-icon"><HardDriveDownload size={18} color="var(--color-warning-strong)" /></div>
+        {drive.sync_enabled ? <div className="drive-icon"><HardDriveDownload size={18} color="var(--color-warning-strong)" /></div> : <DriveSyncOffIcon />}
         <div className="drive-badge drive-badge-artwork">Artwork</div>
         <div
           className="drive-id-wrapper"

@@ -104,6 +104,7 @@ const buildDrive = (overrides?: Partial<{
   is_deprecated: boolean
   poster_count: number
   sync_file_count: number
+  sync_enabled: boolean
 }> ) => ({
   id: 1,
   name: 'Test Drive',
@@ -117,6 +118,7 @@ const buildDrive = (overrides?: Partial<{
   last_synced: null,
   poster_count: 0,
   sync_file_count: 0,
+  sync_enabled: true,
   ...overrides,
 })
 
@@ -189,6 +191,20 @@ describe('GDrives', () => {
 
     await screen.findByText('CL2K Movies')
     expect(mockGetDrives).toHaveBeenCalled()
+  })
+
+  it('marks only the cards whose drive has Google Drive sync off', async () => {
+    mockGetDrives.mockResolvedValue([
+      buildDrive({ id: 1, name: 'Synced Drive', drive_id: 'drive-on' }),
+      buildDrive({ id: 2, name: 'Local Drive', drive_id: 'drive-off', sync_enabled: false }),
+    ])
+
+    renderWithRouter(<GDrives />)
+
+    await screen.findByText('Local Drive')
+    const tags = screen.getAllByTitle(/Google Drive sync is off/)
+    expect(tags).toHaveLength(1)
+    expect(tags[0].closest('.drive-card')?.id).toBe('drive-card-poster-drive-off')
   })
 
   // Drive the two outcomes via the remembered preference (which skips the popup) — this

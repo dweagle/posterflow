@@ -244,6 +244,9 @@
 }
 
 .drive-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: var(--text-base);
   line-height: 1;
 }
@@ -297,12 +300,12 @@
   font-family: monospace;
 }
 
-/* Drive ID info button + tooltip */
+/* Drive ID info button + tooltip. Negative margins absorb the button's empty padding. */
 .drive-id-wrapper {
   position: relative;
   display: flex;
   align-items: center;
-  margin-left: var(--sp-2);
+  margin: 0 calc(-1 * var(--sp-4));
 }
 
 .drive-id-tooltip {

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { getDrives, subscribeDrive, unsubscribeDrive, startSync, startSyncAll, updateDrive, createCustomDrive, deleteDrive, reloadDrives, markNewDrivesSeen, dismissNewDrives, Drive, NewDriveEntry, getApiErrorMessage } from '../api/client'
 import DriveEditModal from '../components/DriveEditModal'
 import AddCustomDriveModal from '../components/AddCustomDriveModal'
+import DriveSyncOffIcon from '../components/DriveSyncOffIcon'
 import ConfirmDialog from '../components/ConfirmDialog'
 import GdriveStorageModal from '../components/GdriveStorageModal'
 import ArtworkDrivesPanel from '../components/ArtworkDrivesPanel'
@@ -750,7 +751,7 @@ function GDrives() {
                         </button>
                       )}
                       <div className="drive-header">
-                        <div className="drive-icon"><HardDriveDownload size={18} color="#4285F4" /></div>
+                        {drive.sync_enabled ? <div className="drive-icon"><HardDriveDownload size={18} color="#4285F4" /></div> : <DriveSyncOffIcon />}
                         <div className={`drive-badge drive-badge-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`}>
                           {drive.is_custom ? 'Custom' : drive.style_type}
                         </div>
@@ -899,7 +900,7 @@ function GDrives() {
                 </button>
               )}
               <div className="drive-header">
-                <div className="drive-icon">🗄️</div>
+                {drive.sync_enabled ? <div className="drive-icon">🗄️</div> : <DriveSyncOffIcon />}
                 <div className={`drive-badge drive-badge-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`}>
                   {drive.is_custom ? 'Custom' : drive.style_type}
                 </div>
