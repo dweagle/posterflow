@@ -43,6 +43,13 @@
       "description": "Artwork drive containing logos, backgrounds, and squareart."
     },
     {
+      "name": "Solen",
+      "display_name": "Solen",
+      "drive_id": "1T96a33lJlDV1FKawU5fPPljXh_LJqEgc",
+      "artwork_types": ["logo", "background", "squareart"],
+      "description": "Artwork drive containing logos, backgrounds, and squareart."
+    },
+    {
       "name": "Tarantula212",
       "display_name": "Tarantula212",
       "drive_id": "1umW2aPKgZhvH3yzJs2Of-jlLAr1Ax-aV",
