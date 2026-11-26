@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.8] - 2026-11-26
+### Added
+- Community Requests: makers can un-reject a request or list item, and rejecting now asks for a reason.
+  - An unrejected request is open for claims again and its Discord thread reopens.
+  - The requester sees the reason on the request and in its Discord thread. Makers see it on a rejected list item.
+- GDrives: drive cards show a cloud-off icon when Sync from Google Drive is off.
+- Artwork Drives: added the Solen drive (logos, backgrounds and squareart).
+
 ## [0.19.7] - 2026-11-24
 ### Added
 - Overlays: link an overlay to holidays or border rules with the new Border Link row on the Overlays page.
